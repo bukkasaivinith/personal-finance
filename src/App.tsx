@@ -187,9 +187,7 @@ export default function App() {
             filter={filter}
             onSearch={setSearchQuery}
             onFilter={setFilter}
-            onExport={exportCsv}
             onAddTransaction={() => setModal('transaction')}
-            onOpenSetup={() => navigate('setup')}
           />
         );
       case 'accounts':

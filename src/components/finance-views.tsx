@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   Banknote,
   CreditCard,
-  Download,
   FileText,
   PiggyBank,
   Plus,
@@ -367,9 +366,7 @@ export function TransactionsView({
   filter,
   onSearch,
   onFilter,
-  onExport,
   onAddTransaction,
-  onOpenSetup,
 }: {
   transactions: Transaction[];
   totalCount: number;
@@ -377,9 +374,7 @@ export function TransactionsView({
   filter: 'all' | TransactionKind;
   onSearch: (value: string) => void;
   onFilter: (value: 'all' | TransactionKind) => void;
-  onExport: () => void;
   onAddTransaction: () => void;
-  onOpenSetup: () => void;
 }) {
   return (
     <>
@@ -387,17 +382,9 @@ export function TransactionsView({
         title="Transactions"
         description="Every income, expense and transfer you have recorded."
         action={
-          <>
-            <button className="secondary-button" type="button" onClick={onOpenSetup}>
-              Types &amp; categories
-            </button>
-            <button className="secondary-button" type="button" onClick={onExport} disabled={totalCount === 0}>
-              <Download size={16} /> Export CSV
-            </button>
-            <button className="primary-button" type="button" onClick={onAddTransaction}>
-              <Plus size={16} /> Add transaction
-            </button>
-          </>
+          <button className="primary-button" type="button" onClick={onAddTransaction}>
+            <Plus size={16} /> Add transaction
+          </button>
         }
       />
       {totalCount === 0 ? (
