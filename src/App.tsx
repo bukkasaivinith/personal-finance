@@ -80,7 +80,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | TransactionKind>('all');
-  const [selectedMonth, setSelectedMonth] = useState(monthOptions[0]);
+  const selectedMonth = monthOptions[0];
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
   const usableTypes = useMemo(() => transactionTypes.filter(isUsable), [transactionTypes]);
@@ -268,24 +268,14 @@ export default function App() {
             <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
             <h1>{pageCopy[activeView].title}</h1>
           </div>
-          <div className="top-actions">
-            <select
-              className="period-select"
-              aria-label="Select month"
-              value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-            >
-              {monthOptions.map((month) => (
-                <option value={month} key={month}>
-                  {formatMonth(month)}
-                </option>
-              ))}
-            </select>
-            <button className="primary-button" type="button" onClick={() => setModal('transaction')}>
-              <Plus size={16} />
-              <span>Add transaction</span>
-            </button>
-          </div>
+          {activeView !== 'transactions' ? (
+            <div className="top-actions">
+              <button className="primary-button" type="button" onClick={() => setModal('transaction')}>
+                <Plus size={16} />
+                <span>Add transaction</span>
+              </button>
+            </div>
+          ) : null}
         </header>
 
         {finance.data ? (
