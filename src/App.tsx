@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CircleDollarSign, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
+import { IndianRupee, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
 import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
@@ -230,7 +230,7 @@ export default function App() {
         <div className="sidebar-top">
           <div className="sidebar-brand">
             <span className="brand-mark" aria-hidden="true">
-              <CircleDollarSign size={19} strokeWidth={1.75} />
+              <IndianRupee size={19} strokeWidth={2} />
             </span>
             <div className="brand-text">
               <strong>Personal Financing</strong>
@@ -285,7 +285,7 @@ export default function App() {
         ) : (
           <div className="surface-card">
             <EmptyPanel
-              icon={<CircleDollarSign size={20} />}
+              icon={<IndianRupee size={20} />}
               title={finance.loadError ? 'We could not load your records' : 'Loading your records'}
               description={finance.loadError || 'This only takes a moment.'}
               action={
