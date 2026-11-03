@@ -47,12 +47,7 @@ function failWith(error: PostgrestError): never {
   if (error.code === '23503') {
     throw new Error('This item is used by existing transactions, so it can only be deactivated or deleted.');
   }
-  throw new Error('We could not save that change. Please try again.');
-}
-
-export async function claimUnownedFinanceData(): Promise<void> {
-  const { error } = await supabase.rpc('claim_unowned_finance_data');
-  if (error) throw new Error('This finance workspace is not available for this account.');
+  throw new Error(error.message);
 }
 
 function statusOf(row: StatusRow) {
@@ -83,7 +78,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
   ]);
 
   for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult]) {
-    if (result.error) throw new Error('We could not load your financial records. Please try again.');
+    if (result.error) throw new Error(result.error.message);
   }
 
   const typeRows = (typeResult.data ?? []) as TransactionTypeRow[];
