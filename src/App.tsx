@@ -229,10 +229,10 @@ export default function App() {
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-visible' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
-            <span className="brand-mark">
-              <CircleDollarSign size={18} />
+            <span className="brand-mark" aria-hidden="true">
+              <CircleDollarSign size={19} strokeWidth={1.75} />
             </span>
-            <div>
+            <div className="brand-text">
               <strong>Personal Financing</strong>
               <small>Personal finance</small>
             </div>
