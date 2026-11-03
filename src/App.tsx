@@ -271,7 +271,9 @@ export default function App() {
           {activeView !== 'transactions' ? (
             <div className="top-actions">
               <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
-                <Plus size={16} strokeWidth={2} aria-hidden="true" />
+                <span className="header-action-icon" aria-hidden="true">
+                  <Plus size={15} strokeWidth={2} />
+                </span>
                 <span>Add transaction</span>
               </button>
             </div>

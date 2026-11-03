@@ -40,11 +40,13 @@ button { cursor: pointer; }
 .ghost-button.danger, .ghost-button.danger:hover { color: var(--red); }
 .primary-button.danger { background: var(--red); border-color: var(--red); }
 .primary-button.danger:hover { background: #9c4c42; }
-.primary-button.header-action { border-radius: 10px; box-shadow: none; font-size: 13px; font-weight: 500; height: 42px; letter-spacing: .01em; padding: 0 18px; transition: background-color .18s ease, transform .18s ease; }
-.primary-button.header-action:hover { transform: translateY(-1px); }
-.primary-button.header-action:active { transform: translateY(0); }
+.primary-button.header-action { align-items: center; border-radius: 10px; box-shadow: none; font-size: 13px; font-weight: 500; gap: 9px; height: 40px; letter-spacing: .01em; padding: 0 16px 0 8px; transition: background-color .18s ease, border-color .18s ease; }
+.header-action-icon { align-items: center; background: rgba(255, 255, 255, .13); border-radius: 7px; display: inline-flex; height: 26px; justify-content: center; transition: background-color .18s ease; width: 26px; }
+.primary-button.header-action:hover { background: #1c4133; }
+.primary-button.header-action:hover .header-action-icon { background: rgba(255, 255, 255, .19); }
+.primary-button.header-action:focus-visible { outline-offset: 2px; }
 .primary-button:focus-visible, .secondary-button:focus-visible, .ghost-button:focus-visible, .icon-button:focus-visible, .text-button:focus-visible { outline: 2px solid #7c9a83; outline-offset: 3px; }
-@media (max-width: 760px) { .primary-button.header-action { height: 40px; padding: 0 12px; } }
+@media (max-width: 760px) { .primary-button.header-action { height: 38px; padding: 0 12px 0 7px; } .header-action-icon { height: 24px; width: 24px; } }
 .item-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .account-actions { margin-left: 4px; }
 .account-row { flex-wrap: wrap; }
