@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { IndianRupee, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
+import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
+import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
 import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
@@ -250,6 +251,9 @@ export default function App() {
             onClick={() => navigate('settings')}
           >
             <Settings size={17} /> Settings
+          </button>
+          <button className="side-link" type="button" onClick={() => void signOut()}>
+            <LogOut size={17} /> Sign out
           </button>
         </div>
       </aside>
