@@ -28,6 +28,7 @@ const todayLabel = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
   month: 'long',
   year: 'numeric',
+  timeZone: 'UTC',
 }).format(new Date());
 
 export const workspaceNavigation: NavItem[] = [

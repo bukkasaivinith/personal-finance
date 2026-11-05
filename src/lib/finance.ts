@@ -81,7 +81,7 @@ export function toDateKey(date: Date): string {
 }
 
 export function todayKey(): string {
-  return toDateKey(new Date());
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function currentMonthKey(): string {
@@ -91,7 +91,7 @@ export function currentMonthKey(): string {
 export function recentMonthKeys(count: number): string[] {
   const now = new Date();
   return Array.from({ length: count }, (_, index) =>
-    toDateKey(new Date(now.getFullYear(), now.getMonth() - index, 1)).slice(0, 7),
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 1)).toISOString().slice(0, 7),
   );
 }
 
@@ -172,7 +172,7 @@ export function netPosition(accounts: Account[], transactions: Transaction[]) {
 }
 
 function daysElapsed(month: string): number {
-  if (month === currentMonthKey()) return new Date().getDate();
+  if (month === currentMonthKey()) return new Date().getUTCDate();
   const [year, monthIndex] = month.split('-').map(Number);
   return new Date(year, monthIndex, 0).getDate();
 }

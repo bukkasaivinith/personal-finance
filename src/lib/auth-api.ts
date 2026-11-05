@@ -7,6 +7,14 @@ export function isValidEmail(value: string): boolean {
   return value.length <= 254 && EMAIL_PATTERN.test(value);
 }
 
+export async function createAccount(email: string, password: string): Promise<boolean> {
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (!error) return Boolean(data.session);
+  if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
+  if (error.message.toLowerCase().includes('password')) throw new Error('Choose a stronger password with at least 12 characters.');
+  throw new Error('We could not create that account. Please check your details and try again.');
+}
+
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (!error) return;
