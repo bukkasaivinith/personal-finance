@@ -55,11 +55,36 @@ export type TransactionDraft = {
   toAccountId: string | null;
 };
 
+export type Budget = {
+  id: string;
+  categoryId: string;
+  amount: number;
+};
+
+export type RecurringFrequency = 'weekly' | 'monthly';
+
+export type RecurringEntry = {
+  id: string;
+  name: string;
+  typeId: string;
+  categoryId: string | null;
+  amount: number;
+  accountId: string;
+  toAccountId: string | null;
+  frequency: RecurringFrequency;
+  nextDate: string;
+  isActive: boolean;
+};
+
+export type RecurringEntryDraft = Omit<RecurringEntry, 'id' | 'isActive'>;
+
 export type FinanceData = {
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
   accounts: Account[];
   transactions: Transaction[];
+  budgets: Budget[];
+  recurringEntries: RecurringEntry[];
 };
 
 export type CategoryTotal = { name: string; total: number; share: number };

@@ -31,6 +31,8 @@ const emptyFinance: FinanceData = {
   categories: [],
   accounts: [],
   transactions: [],
+  budgets: [],
+  recurringEntries: [],
 };
 
 function csvCell(value: string): string {
@@ -73,7 +75,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<View>('overview');
   const finance = useFinanceData();
   const data = finance.data ?? emptyFinance;
-  const { accounts, transactions, categories, transactionTypes } = data;
+  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries } = data;
   const actions = createFinanceActions(finance.refresh);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -215,11 +217,28 @@ export default function App() {
       case 'analytics':
         return <AnalyticsView summary={summary} monthLabel={monthLabel} />;
       case 'budgets':
-        return <BudgetsView onNotify={showToast} />;
+        return (
+          <BudgetsView
+            budgets={budgets}
+            categories={categories}
+            transactions={transactions}
+            actions={actions}
+            onNotify={showToast}
+          />
+        );
       case 'goals':
         return <GoalsView onNotify={showToast} />;
       case 'recurring':
-        return <RecurringView onNotify={showToast} />;
+        return (
+          <RecurringView
+            entries={recurringEntries}
+            categories={categories}
+            accounts={accounts}
+            transactionTypes={transactionTypes}
+            actions={actions}
+            onNotify={showToast}
+          />
+        );
       case 'settings':
         return <SettingsView onExport={exportCsv} hasData={hasTransactions} />;
     }

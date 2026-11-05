@@ -1,13 +1,18 @@
 import {
   type Account,
+  type Budget,
   type CategoryOption,
   type FinanceData,
   type ItemState,
+  type RecurringEntry,
+  type RecurringEntryDraft,
+  type RecurringFrequency,
   type Transaction,
   type TransactionDraft,
   type TransactionKind,
   type TransactionTypeOption,
   isUsable,
+  toDateKey,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
 
@@ -39,6 +44,19 @@ type TransactionRow = {
   to_account_id: string | null;
   to_account_name: string | null;
 };
+type BudgetRow = { id: string; category_id: string; amount: number | string };
+type RecurringEntryRow = {
+  id: string;
+  name: string;
+  transaction_type_id: string;
+  category_id: string | null;
+  amount: number | string;
+  account_id: string;
+  to_account_id: string | null;
+  frequency: RecurringFrequency;
+  next_date: string;
+  is_active: boolean;
+};
 
 type PostgrestError = { code?: string; message: string };
 
@@ -55,7 +73,7 @@ function statusOf(row: StatusRow) {
 }
 
 export async function loadFinanceData(): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionResult] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
@@ -75,9 +93,14 @@ export async function loadFinanceData(): Promise<FinanceData> {
         'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, account_id, account_name, to_account_id, to_account_name',
       )
       .order('transaction_date', { ascending: false }),
+    supabase.from('budgets').select('id, category_id, amount').order('created_at', { ascending: true }),
+    supabase
+      .from('recurring_entries')
+      .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, next_date, is_active')
+      .order('next_date', { ascending: true }),
   ]);
 
-  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult]) {
+  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -86,6 +109,8 @@ export async function loadFinanceData(): Promise<FinanceData> {
   const linkRows = (linkResult.data ?? []) as CategoryLinkRow[];
   const accountRows = (accountResult.data ?? []) as AccountRow[];
   const transactionRows = (transactionResult.data ?? []) as TransactionRow[];
+  const budgetRows = (budgetResult.data ?? []) as BudgetRow[];
+  const recurringRows = (recurringResult.data ?? []) as RecurringEntryRow[];
 
   const transactionTypes: TransactionTypeOption[] = typeRows.map((row) => ({
     id: row.id,
@@ -142,7 +167,26 @@ export async function loadFinanceData(): Promise<FinanceData> {
     toAccountArchived: row.to_account_id !== null && archived(accountById.get(row.to_account_id)),
   }));
 
-  return { transactionTypes, categories, accounts, transactions };
+  const budgets: Budget[] = budgetRows.map((row) => ({
+    id: row.id,
+    categoryId: row.category_id,
+    amount: Number(row.amount),
+  }));
+
+  const recurringEntries: RecurringEntry[] = recurringRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    typeId: row.transaction_type_id,
+    categoryId: row.category_id,
+    amount: Number(row.amount),
+    accountId: row.account_id,
+    toAccountId: row.to_account_id,
+    frequency: row.frequency,
+    nextDate: row.next_date,
+    isActive: row.is_active,
+  }));
+
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }): Promise<string> {
@@ -262,5 +306,87 @@ export async function insertTransaction(draft: TransactionDraft): Promise<void> 
     account_id: draft.accountId,
     to_account_id: draft.toAccountId,
   });
+  if (error) failWith(error);
+}
+
+export async function upsertBudget(input: { categoryId: string; amount: number }): Promise<void> {
+  const { error } = await supabase.from('budgets').upsert(
+    {
+      category_id: input.categoryId,
+      amount: input.amount,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'category_id' },
+  );
+  if (error) failWith(error);
+}
+
+export async function deleteBudget(id: string): Promise<void> {
+  const { error } = await supabase.from('budgets').delete().eq('id', id);
+  if (error) failWith(error);
+}
+
+export async function insertRecurringEntry(input: RecurringEntryDraft): Promise<string> {
+  const { data, error } = await supabase
+    .from('recurring_entries')
+    .insert({
+      name: input.name,
+      transaction_type_id: input.typeId,
+      category_id: input.categoryId,
+      amount: input.amount,
+      account_id: input.accountId,
+      to_account_id: input.toAccountId,
+      frequency: input.frequency,
+      next_date: input.nextDate,
+    })
+    .select('id')
+    .single();
+  if (error) failWith(error);
+  return (data as { id: string }).id;
+}
+
+export async function setRecurringEntryActive(id: string, isActive: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('recurring_entries')
+    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) failWith(error);
+}
+
+export async function deleteRecurringEntry(id: string): Promise<void> {
+  const { error } = await supabase.from('recurring_entries').delete().eq('id', id);
+  if (error) failWith(error);
+}
+
+function nextRecurringDate(dateKey: string, frequency: RecurringFrequency): string {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const current = new Date(year, month - 1, day, 12);
+  if (frequency === 'weekly') {
+    current.setDate(current.getDate() + 7);
+    return toDateKey(current);
+  }
+
+  const nextMonthIndex = current.getMonth() + 1;
+  const nextYear = current.getFullYear() + Math.floor(nextMonthIndex / 12);
+  const nextMonth = nextMonthIndex % 12;
+  const lastDay = new Date(nextYear, nextMonth + 1, 0).getDate();
+  return toDateKey(new Date(nextYear, nextMonth, Math.min(current.getDate(), lastDay), 12));
+}
+
+export async function recordRecurringEntry(entry: RecurringEntry): Promise<void> {
+  await insertTransaction({
+    name: entry.name,
+    typeId: entry.typeId,
+    categoryId: entry.categoryId,
+    amount: entry.amount,
+    date: entry.nextDate,
+    accountId: entry.accountId,
+    toAccountId: entry.toAccountId,
+  });
+
+  const { error } = await supabase
+    .from('recurring_entries')
+    .update({ next_date: nextRecurringDate(entry.nextDate, entry.frequency), updated_at: new Date().toISOString() })
+    .eq('id', entry.id);
   if (error) failWith(error);
 }

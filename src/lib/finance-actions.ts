@@ -1,13 +1,19 @@
 import {
+  deleteBudget,
   deleteItemPermanently,
+  deleteRecurringEntry,
   insertAccount,
   insertCategory,
+  insertRecurringEntry,
   insertTransaction,
   insertTransactionType,
   renameTransactionType,
+  recordRecurringEntry,
+  setRecurringEntryActive,
   setItemState,
   updateAccount,
   updateCategory,
+  upsertBudget,
   type ItemTable,
 } from '@/lib/finance-api';
 import type { ItemState } from '@/lib/finance';
@@ -29,6 +35,12 @@ export function createFinanceActions(refresh: () => Promise<void>) {
     setItemState: (table: ItemTable, id: string, state: ItemState) => run(setItemState(table, id, state)),
     deleteItemPermanently: (table: ItemTable, id: string) => run(deleteItemPermanently(table, id)),
     addTransaction: (draft: Parameters<typeof insertTransaction>[0]) => run(insertTransaction(draft)),
+    saveBudget: (input: Parameters<typeof upsertBudget>[0]) => run(upsertBudget(input)),
+    removeBudget: (id: string) => run(deleteBudget(id)),
+    createRecurringEntry: (input: Parameters<typeof insertRecurringEntry>[0]) => run(insertRecurringEntry(input)),
+    setRecurringEntryActive: (id: string, isActive: boolean) => run(setRecurringEntryActive(id, isActive)),
+    removeRecurringEntry: (id: string) => run(deleteRecurringEntry(id)),
+    recordRecurringEntry: (entry: Parameters<typeof recordRecurringEntry>[0]) => run(recordRecurringEntry(entry)),
   };
 }
 
