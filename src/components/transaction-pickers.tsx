@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
+import { DatePicker } from '@/components/date-picker';
 import { parseAmount, todayKey, type Account, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
 
 const NEW_OPTION = '__new__';
@@ -476,10 +477,7 @@ export function AccountCreateForm({
           placeholder="0"
         />
       </label>
-      <label>
-        Opening balance date
-        <input type="date" value={openingDate} onChange={(event) => setOpeningDate(event.target.value)} />
-      </label>
+      <DatePicker label="Opening balance date" value={openingDate} onChange={setOpeningDate} />
       <label className="full-field">
         Description (optional)
         <input

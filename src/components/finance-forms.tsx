@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { AccountCreateForm, AccountPicker, CategoryPicker, TypePicker, type AccountDraft } from '@/components/transaction-pickers';
+import { DatePicker } from '@/components/date-picker';
 import { ModalShell } from '@/components/ui';
 import {
   categoriesFor,
@@ -256,10 +257,7 @@ export function AddTransactionModal({
                 : 'Choose a transaction type to see its categories and accounts.'}
             </p>
           )}
-          <label>
-            Date
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          </label>
+          <DatePicker label="Date" value={date} onChange={setDate} />
         </div>
         {error ? <p className="form-error">{error}</p> : null}
         <div className="modal-actions">
