@@ -330,8 +330,11 @@ export default function App() {
           onClose={closeModal}
           onSubmit={addTransaction}
           onCreateTransactionType={actions.createTransactionType}
+          onRenameTransactionType={actions.renameTransactionType}
           onCreateCategory={actions.createCategory}
+          onUpdateCategory={actions.updateCategory}
           onCreateAccount={actions.createAccount}
+          onUpdateAccount={actions.updateAccount}
         />
       ) : null}
       {modal === 'account' ? (

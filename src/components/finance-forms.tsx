@@ -99,8 +99,11 @@ export function AddTransactionModal({
   onClose,
   onSubmit,
   onCreateTransactionType,
+  onRenameTransactionType,
   onCreateCategory,
+  onUpdateCategory,
   onCreateAccount,
+  onUpdateAccount,
 }: {
   accounts: Account[];
   transactionTypes: TransactionTypeOption[];
@@ -108,8 +111,11 @@ export function AddTransactionModal({
   onClose: () => void;
   onSubmit: (draft: TransactionDraft) => Promise<void>;
   onCreateTransactionType: (input: { name: string; kind: TransactionKind }) => Promise<string>;
+  onRenameTransactionType: (id: string, name: string) => Promise<void>;
   onCreateCategory: (input: { name: string; emoji: string | null; parentId: null; transactionTypeIds: string[] }) => Promise<string>;
+  onUpdateCategory: (id: string, input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] }) => Promise<void>;
   onCreateAccount: (draft: AccountDraft) => Promise<string>;
+  onUpdateAccount: (id: string, input: { name: string; description: string }) => Promise<void>;
 }) {
   const [typeId, setTypeId] = useState('');
   const [name, setName] = useState('');
@@ -182,7 +188,13 @@ export function AddTransactionModal({
     <ModalShell eyebrow="Transactions" title="Add transaction" labelId="transaction-modal-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <div className="form-grid">
-          <TypePicker value={typeId} options={transactionTypes} onChange={setTypeId} onCreate={onCreateTransactionType} />
+          <TypePicker
+            value={typeId}
+            options={transactionTypes}
+            onChange={setTypeId}
+            onCreate={onCreateTransactionType}
+            onRename={onRenameTransactionType}
+          />
           <label>
             Amount (₹)
             <input
@@ -215,6 +227,7 @@ export function AddTransactionModal({
                   onCreate={(category) =>
                     onCreateCategory({ ...category, parentId: null, transactionTypeIds: [selectedType.id] })
                   }
+                  onUpdate={onUpdateCategory}
                 />
               ) : null}
               <AccountPicker
@@ -223,6 +236,7 @@ export function AddTransactionModal({
                 accounts={accounts}
                 onChange={setAccountId}
                 onCreate={onCreateAccount}
+                onUpdate={onUpdateAccount}
               />
               {isTransfer ? (
                 <AccountPicker
@@ -231,6 +245,7 @@ export function AddTransactionModal({
                   accounts={destinationAccounts}
                   onChange={setToAccountId}
                   onCreate={onCreateAccount}
+                  onUpdate={onUpdateAccount}
                 />
               ) : null}
             </>

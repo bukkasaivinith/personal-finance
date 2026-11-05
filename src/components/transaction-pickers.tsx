@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
-import { parseAmount, todayKey, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
+import { parseAmount, todayKey, type Account, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
 
 const NEW_OPTION = '__new__';
+const EDIT_OPTION = '__edit__';
 
 export const kindChoices: { value: TransactionKind; label: string }[] = [
   { value: 'expense', label: 'Expense (money out)' },
@@ -32,6 +33,7 @@ function InlineCreate({
   saving,
   onCancel,
   onConfirm,
+  confirmLabel = 'Add',
   children,
 }: {
   intro: string;
@@ -39,6 +41,7 @@ function InlineCreate({
   saving: boolean;
   onCancel?: () => void;
   onConfirm: () => void;
+  confirmLabel?: string;
   children: ReactNode;
 }) {
   return (
@@ -61,7 +64,7 @@ function InlineCreate({
           </button>
         ) : null}
         <button className="primary-button" type="button" onClick={onConfirm} disabled={saving}>
-          {saving ? 'Saving...' : 'Add'}
+          {saving ? 'Saving...' : confirmLabel}
         </button>
       </div>
     </div>
@@ -73,27 +76,42 @@ export function TypePicker({
   options,
   onChange,
   onCreate,
+  onRename,
 }: {
   value: string;
   options: TransactionTypeOption[];
   onChange: (id: string) => void;
   onCreate: (input: { name: string; kind: TransactionKind }) => Promise<string>;
+  onRename: (id: string, name: string) => Promise<void>;
 }) {
   const [creating, setCreating] = useState(options.length === 0);
+  const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
+  const [editName, setEditName] = useState('');
   const [kind, setKind] = useState<TransactionKind>('expense');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const selected = options.find((option) => option.id === value);
 
   const reset = () => {
     setCreating(false);
+    setEditing(false);
     setName('');
+    setEditName('');
     setError('');
   };
 
   const select = (next: string) => {
     if (next === NEW_OPTION) {
+      setEditing(false);
       setCreating(true);
+      return;
+    }
+    if (next === EDIT_OPTION && selected) {
+      setCreating(false);
+      setEditing(true);
+      setEditName(selected.name);
+      setError('');
       return;
     }
     reset();
@@ -123,11 +141,34 @@ export function TypePicker({
     }
   };
 
+  const confirmEdit = async () => {
+    if (!selected) return;
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setError('Give the transaction type a name.');
+      return;
+    }
+    if (options.some((option) => option.id !== selected.id && option.name.toLowerCase() === trimmed.toLowerCase())) {
+      setError(`"${trimmed}" already exists.`);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onRename(selected.id, trimmed);
+      reset();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <label>
         Transaction type
-        <select value={creating ? NEW_OPTION : value} onChange={(event) => select(event.target.value)}>
+        <select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
           {value === '' && !creating ? (
             <option value="" disabled>
               {options.length === 0 ? 'No transaction types yet' : 'Choose a type'}
@@ -138,6 +179,7 @@ export function TypePicker({
               {option.name}
             </option>
           ))}
+          {selected ? <option value={EDIT_OPTION}>✎ Edit selected transaction type</option> : null}
           <option value={NEW_OPTION}>+ Create transaction type</option>
         </select>
       </label>
@@ -171,6 +213,21 @@ export function TypePicker({
           </label>
         </InlineCreate>
       ) : null}
+      {editing && selected ? (
+        <InlineCreate
+          intro="Correct the name of this transaction type. Its income, expense, or transfer setting stays unchanged."
+          error={error}
+          saving={saving}
+          onCancel={reset}
+          onConfirm={() => void confirmEdit()}
+          confirmLabel="Save changes"
+        >
+          <label className="full-field">
+            Transaction type name
+            <input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={32} autoFocus />
+          </label>
+        </InlineCreate>
+      ) : null}
     </>
   );
 }
@@ -180,28 +237,46 @@ export function CategoryPicker({
   options,
   onChange,
   onCreate,
+  onUpdate,
 }: {
   value: string;
   options: CategoryOption[];
   onChange: (id: string) => void;
   onCreate: (input: { name: string; emoji: string | null }) => Promise<string>;
+  onUpdate: (id: string, input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] }) => Promise<void>;
 }) {
   const [creating, setCreating] = useState(options.length === 0);
+  const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [emoji, setEmoji] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editEmoji, setEditEmoji] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const selected = options.find((option) => option.id === value);
 
   const reset = () => {
     setCreating(false);
+    setEditing(false);
     setName('');
     setEmoji('');
+    setEditName('');
+    setEditEmoji('');
     setError('');
   };
 
   const select = (next: string) => {
     if (next === NEW_OPTION) {
+      setEditing(false);
       setCreating(true);
+      return;
+    }
+    if (next === EDIT_OPTION && selected) {
+      setCreating(false);
+      setEditing(true);
+      setEditName(selected.name);
+      setEditEmoji(selected.emoji ?? '');
+      setError('');
       return;
     }
     reset();
@@ -231,11 +306,39 @@ export function CategoryPicker({
     }
   };
 
+  const confirmEdit = async () => {
+    if (!selected) return;
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setError('Give the category a name.');
+      return;
+    }
+    if (options.some((option) => option.id !== selected.id && option.name.toLowerCase() === trimmed.toLowerCase())) {
+      setError(`"${trimmed}" already exists.`);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onUpdate(selected.id, {
+        name: trimmed,
+        emoji: editEmoji.trim() || null,
+        parentId: selected.parentId,
+        transactionTypeIds: selected.transactionTypeIds,
+      });
+      reset();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <label>
         Category
-        <select value={creating ? NEW_OPTION : value} onChange={(event) => select(event.target.value)}>
+        <select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
           {value === '' && !creating ? (
             <option value="" disabled>
               {options.length === 0 ? 'No categories for this type yet' : 'Choose a category'}
@@ -246,6 +349,7 @@ export function CategoryPicker({
               {option.emoji ? `${option.emoji} ${option.name}` : option.name}
             </option>
           ))}
+          {selected ? <option value={EDIT_OPTION}>✎ Edit selected category</option> : null}
           <option value={NEW_OPTION}>+ Create category</option>
         </select>
       </label>
@@ -272,6 +376,22 @@ export function CategoryPicker({
             />
           </label>
           <CategoryEmojiPicker value={emoji} onChange={setEmoji} />
+        </InlineCreate>
+      ) : null}
+      {editing && selected ? (
+        <InlineCreate
+          intro="Correct this category's name or emoji. Its transaction type stays unchanged."
+          error={error}
+          saving={saving}
+          onCancel={reset}
+          onConfirm={() => void confirmEdit()}
+          confirmLabel="Save changes"
+        >
+          <label className="full-field">
+            Category name
+            <input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={32} autoFocus />
+          </label>
+          <CategoryEmojiPicker value={editEmoji} onChange={setEditEmoji} />
         </InlineCreate>
       ) : null}
     </>
@@ -394,27 +514,75 @@ export function AccountPicker({
   accounts,
   onChange,
   onCreate,
+  onUpdate,
 }: {
   label: string;
   value: string;
-  accounts: { id: string; name: string }[];
+  accounts: Account[];
   onChange: (id: string) => void;
   onCreate: (draft: AccountDraft) => Promise<string>;
+  onUpdate: (id: string, input: { name: string; description: string }) => Promise<void>;
 }) {
   const [creating, setCreating] = useState(accounts.length === 0);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const selected = accounts.find((account) => account.id === value);
+
+  const reset = () => {
+    setCreating(false);
+    setEditing(false);
+    setEditName('');
+    setEditDescription('');
+    setError('');
+  };
+
+  const confirmEdit = async () => {
+    if (!selected) return;
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setError('Give this account a name.');
+      return;
+    }
+    if (accounts.some((account) => account.id !== selected.id && account.name.toLowerCase() === trimmed.toLowerCase())) {
+      setError(`"${trimmed}" already exists.`);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onUpdate(selected.id, { name: trimmed, description: editDescription.trim() });
+      reset();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <>
       <label>
         {label}
         <select
-          value={creating ? NEW_OPTION : value}
+          value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value}
           onChange={(event) => {
             if (event.target.value === NEW_OPTION) {
+              setEditing(false);
               setCreating(true);
               return;
             }
-            setCreating(false);
+            if (event.target.value === EDIT_OPTION && selected) {
+              setCreating(false);
+              setEditing(true);
+              setEditName(selected.name);
+              setEditDescription(selected.description);
+              setError('');
+              return;
+            }
+            reset();
             onChange(event.target.value);
           }}
         >
@@ -428,6 +596,7 @@ export function AccountPicker({
               {account.name}
             </option>
           ))}
+          {selected ? <option value={EDIT_OPTION}>✎ Edit selected account</option> : null}
           <option value={NEW_OPTION}>+ Create account</option>
         </select>
       </label>
@@ -438,12 +607,31 @@ export function AccountPicker({
             onCreate={async (draft) => {
               const id = await onCreate(draft);
               onChange(id);
-              setCreating(false);
+              reset();
               return id;
             }}
-            onCancel={accounts.length === 0 ? undefined : () => setCreating(false)}
+            onCancel={accounts.length === 0 ? undefined : reset}
           />
         </div>
+      ) : null}
+      {editing && selected ? (
+        <InlineCreate
+          intro="Correct this account's name or description. Its opening balance stays unchanged."
+          error={error}
+          saving={saving}
+          onCancel={reset}
+          onConfirm={() => void confirmEdit()}
+          confirmLabel="Save changes"
+        >
+          <label className="full-field">
+            Account name
+            <input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={40} autoFocus />
+          </label>
+          <label className="full-field">
+            Description (optional)
+            <input value={editDescription} onChange={(event) => setEditDescription(event.target.value)} maxLength={200} />
+          </label>
+        </InlineCreate>
       ) : null}
     </>
   );
