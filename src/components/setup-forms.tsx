@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { kindChoices } from '@/components/transaction-pickers';
 import { ModalShell } from '@/components/ui';
 import { isUsable, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
@@ -196,15 +197,7 @@ export function CategoryFormModal({
             Category name
             <input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} placeholder="e.g. Groceries" autoFocus />
           </label>
-          <label>
-            Emoji (optional)
-            <input
-              value={emoji}
-              onChange={(event) => setEmoji(event.target.value)}
-              maxLength={16}
-              placeholder="e.g. 🛒"
-            />
-          </label>
+          <CategoryEmojiPicker value={emoji} onChange={setEmoji} />
           <fieldset className="full-field role-fieldset">
             <legend>Used with these transaction types</legend>
             {typeOptions.length === 0 ? (

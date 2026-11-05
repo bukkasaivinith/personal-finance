@@ -58,6 +58,16 @@ button { cursor: pointer; }
 .setup-info small { color: var(--muted); font-size: 11px; }
 .category-emoji { display: inline-block; font-size: 16px; line-height: 1; margin-right: 6px; vertical-align: -1px; }
 .transaction-category-emoji { font-size: 17px; line-height: 1; }
+.category-emoji-picker { border: 0; margin: 0; padding: 0; }
+.category-emoji-picker legend { color: #667169; font-size: 11px; font-weight: 600; padding: 0; }
+.category-emoji-picker legend span { color: var(--muted); font-weight: 400; }
+.emoji-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.emoji-option { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 8px; display: inline-flex; font-size: 17px; height: 34px; justify-content: center; padding: 0; transition: .16s; width: 34px; }
+.emoji-option:hover { background: var(--green-soft); border-color: #a9c2ae; transform: translateY(-1px); }
+.emoji-option.selected { background: var(--green-soft); border-color: var(--green); box-shadow: 0 0 0 2px rgba(36, 76, 59, .12); }
+.emoji-custom-input { color: #667169; display: grid; font-size: 11px; font-weight: 600; gap: 6px; margin-top: 12px; max-width: 190px; }
+.emoji-custom-input input { background: #fff; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); outline: 0; padding: 9px 11px; width: 100%; }
+.emoji-custom-input input:focus { border-color: #7c9a83; box-shadow: 0 0 0 3px var(--green-soft); }
 @media (max-width: 760px) { .item-actions, .account-actions { justify-content: flex-start; } }
 .auth-page { align-items: center; background: #103d30; display: flex; justify-content: center; min-height: 100vh; padding: 32px 18px; }
 .auth-panel { background: #f1f1e7; border-radius: 22px; box-shadow: 0 30px 80px rgba(0,0,0,.28); padding: 42px 40px 26px; width: min(420px,100%); }

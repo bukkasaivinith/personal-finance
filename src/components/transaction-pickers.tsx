@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { parseAmount, todayKey, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
 
 const NEW_OPTION = '__new__';
@@ -270,16 +271,7 @@ export function CategoryPicker({
               autoFocus
             />
           </label>
-          <label>
-            Emoji (optional)
-            <input
-              value={emoji}
-              onChange={(event) => setEmoji(event.target.value)}
-              maxLength={16}
-              placeholder="e.g. 🍽️"
-              aria-label="Category emoji"
-            />
-          </label>
+          <CategoryEmojiPicker value={emoji} onChange={setEmoji} />
         </InlineCreate>
       ) : null}
     </>
