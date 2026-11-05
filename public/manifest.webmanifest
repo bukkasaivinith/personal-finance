@@ -1,0 +1,14 @@
+{
+  "name": "Personal Financing",
+  "short_name": "Personal Finance",
+  "description": "Private personal finance tracking",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#202020",
+  "background_color": "#202020",
+  "icons": [
+    { "src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
