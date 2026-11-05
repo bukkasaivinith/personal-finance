@@ -68,7 +68,7 @@ export function EditAccountModal({
   return (
     <ModalShell eyebrow="Accounts" title="Edit account" labelId="edit-account-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p className="modal-description">Past transactions keep the name they were recorded with. Opening balance cannot be changed here.</p>
+        <p className="modal-description">Existing transactions will use the corrected account name. Opening balance cannot be changed here.</p>
         <div className="form-grid">
           <label className="full-field">
             Account name
@@ -100,7 +100,7 @@ export function AddTransactionModal({
   onClose,
   onSubmit,
   onCreateTransactionType,
-  onRenameTransactionType,
+  onUpdateTransactionType,
   onCreateCategory,
   onUpdateCategory,
   onCreateAccount,
@@ -112,7 +112,7 @@ export function AddTransactionModal({
   onClose: () => void;
   onSubmit: (draft: TransactionDraft) => Promise<void>;
   onCreateTransactionType: (input: { name: string; kind: TransactionKind }) => Promise<string>;
-  onRenameTransactionType: (id: string, name: string) => Promise<void>;
+  onUpdateTransactionType: (id: string, input: { name: string; kind: TransactionKind }) => Promise<void>;
   onCreateCategory: (input: { name: string; emoji: string | null; parentId: null; transactionTypeIds: string[] }) => Promise<string>;
   onUpdateCategory: (id: string, input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] }) => Promise<void>;
   onCreateAccount: (draft: AccountDraft) => Promise<string>;
@@ -194,7 +194,7 @@ export function AddTransactionModal({
             options={transactionTypes}
             onChange={setTypeId}
             onCreate={onCreateTransactionType}
-            onRename={onRenameTransactionType}
+          onUpdate={onUpdateTransactionType}
           />
           <label>
             Amount (₹)

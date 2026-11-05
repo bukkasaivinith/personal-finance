@@ -40,7 +40,7 @@ export function TransactionTypeModal({
     <ModalShell eyebrow="Types & categories" title="Create transaction type" labelId="type-modal-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <p className="modal-description">
-          Name the type however you like. "Counts as" controls how it affects your totals. It cannot be changed later, so past totals stay correct.
+          Name the type however you like. "Counts as" controls how it affects your totals and account balances. You can correct income versus expense later if needed.
         </p>
         <div className="form-grid">
           <label className="full-field">
@@ -85,9 +85,10 @@ export function RenameTypeModal({
 }: {
   type: TransactionTypeOption;
   onClose: () => void;
-  onSubmit: (name: string) => Promise<void>;
+  onSubmit: (input: { name: string; kind: TransactionKind }) => Promise<void>;
 }) {
   const [name, setName] = useState(type.name);
+  const [kind, setKind] = useState<TransactionKind>(type.kind);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -100,7 +101,7 @@ export function RenameTypeModal({
     setSaving(true);
     setError('');
     try {
-      await onSubmit(name.trim());
+      await onSubmit({ name: name.trim(), kind });
     } catch (err) {
       setError(errorMessage(err));
       setSaving(false);
@@ -110,11 +111,22 @@ export function RenameTypeModal({
   return (
     <ModalShell eyebrow="Types & categories" title="Edit transaction type" labelId="edit-type-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p className="modal-description">Correct the name when needed. Its income, expense, or transfer setting stays fixed so past totals remain correct.</p>
-        <label>
-          Type name
-          <input value={name} onChange={(event) => setName(event.target.value)} maxLength={32} autoFocus />
-        </label>
+        <p className="modal-description">Correct the name or how this type counts. Existing entries and balances update when you switch between income and expense.</p>
+        <div className="form-grid">
+          <label className="full-field">
+            Type name
+            <input value={name} onChange={(event) => setName(event.target.value)} maxLength={32} autoFocus />
+          </label>
+          <label className="full-field">
+            Counts as
+            <select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)} disabled={type.kind === 'transfer'}>
+              {kindChoices
+                .filter((choice) => (type.kind === 'transfer' ? choice.value === 'transfer' : choice.value !== 'transfer'))
+                .map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
+            </select>
+          </label>
+          {type.kind === 'transfer' ? <p className="form-hint full-field">Transfer types remain transfers because their entries use two accounts.</p> : null}
+        </div>
         {error ? <p className="form-error">{error}</p> : null}
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>

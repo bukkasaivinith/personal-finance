@@ -77,19 +77,20 @@ export function TypePicker({
   options,
   onChange,
   onCreate,
-  onRename,
+  onUpdate,
 }: {
   value: string;
   options: TransactionTypeOption[];
   onChange: (id: string) => void;
   onCreate: (input: { name: string; kind: TransactionKind }) => Promise<string>;
-  onRename: (id: string, name: string) => Promise<void>;
+  onUpdate: (id: string, input: { name: string; kind: TransactionKind }) => Promise<void>;
 }) {
   const [creating, setCreating] = useState(options.length === 0);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [editName, setEditName] = useState('');
   const [kind, setKind] = useState<TransactionKind>('expense');
+  const [editKind, setEditKind] = useState<TransactionKind>('expense');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const selected = options.find((option) => option.id === value);
@@ -99,6 +100,7 @@ export function TypePicker({
     setEditing(false);
     setName('');
     setEditName('');
+    setEditKind('expense');
     setError('');
   };
 
@@ -112,6 +114,7 @@ export function TypePicker({
       setCreating(false);
       setEditing(true);
       setEditName(selected.name);
+      setEditKind(selected.kind);
       setError('');
       return;
     }
@@ -156,7 +159,7 @@ export function TypePicker({
     setSaving(true);
     setError('');
     try {
-      await onRename(selected.id, trimmed);
+      await onUpdate(selected.id, { name: trimmed, kind: editKind });
       reset();
     } catch (err) {
       setError(errorMessage(err));
@@ -216,7 +219,7 @@ export function TypePicker({
       ) : null}
       {editing && selected ? (
         <InlineCreate
-          intro="Correct the name of this transaction type. Its income, expense, or transfer setting stays unchanged."
+          intro="Correct the name or whether this type counts as income or an expense. Existing transactions will update too."
           error={error}
           saving={saving}
           onCancel={reset}
@@ -227,6 +230,15 @@ export function TypePicker({
             Transaction type name
             <input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={32} autoFocus />
           </label>
+          <label className="full-field">
+            Counts as
+            <select value={editKind} onChange={(event) => setEditKind(event.target.value as TransactionKind)} disabled={selected.kind === 'transfer'}>
+              {kindChoices
+                .filter((choice) => (selected.kind === 'transfer' ? choice.value === 'transfer' : choice.value !== 'transfer'))
+                .map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
+            </select>
+          </label>
+          {selected.kind === 'transfer' ? <p className="form-hint full-field">Transfer types stay as transfers because their existing entries have two accounts.</p> : null}
         </InlineCreate>
       ) : null}
     </>

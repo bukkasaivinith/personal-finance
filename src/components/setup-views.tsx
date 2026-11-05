@@ -48,7 +48,7 @@ export function SetupView({
     <>
       <SectionHeading
         title="Types & categories"
-        description="Define how you record money. Only active items appear in new entries, while past transactions keep their history."
+        description="Define how you record money. Changes to names and income/expense settings update matching existing entries too."
       />
 
       <div className="surface-card">
@@ -177,10 +177,10 @@ export function SetupView({
         <RenameTypeModal
           type={renamingType}
           onClose={() => setRenamingType(null)}
-          onSubmit={async (name) => {
-            await actions.renameTransactionType(renamingType.id, name);
+          onSubmit={async (input) => {
+            await actions.updateTransactionType(renamingType.id, input);
             setRenamingType(null);
-            onNotify(`Transaction type updated to "${name}".`);
+            onNotify(`Transaction type updated to "${input.name}".`);
           }}
         />
       ) : null}

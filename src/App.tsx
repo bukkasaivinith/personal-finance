@@ -349,7 +349,7 @@ export default function App() {
           onClose={closeModal}
           onSubmit={addTransaction}
           onCreateTransactionType={actions.createTransactionType}
-          onRenameTransactionType={actions.renameTransactionType}
+          onUpdateTransactionType={actions.updateTransactionType}
           onCreateCategory={actions.createCategory}
           onUpdateCategory={actions.updateCategory}
           onCreateAccount={actions.createAccount}

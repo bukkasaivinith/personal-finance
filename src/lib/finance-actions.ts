@@ -7,12 +7,12 @@ import {
   insertRecurringEntry,
   insertTransaction,
   insertTransactionType,
-  renameTransactionType,
   recordRecurringEntry,
   setRecurringEntryActive,
   setItemState,
   updateAccount,
   updateCategory,
+  updateTransactionType,
   upsertBudget,
   type ItemTable,
 } from '@/lib/finance-api';
@@ -27,7 +27,7 @@ export function createFinanceActions(refresh: () => Promise<void>) {
 
   return {
     createTransactionType: (input: Parameters<typeof insertTransactionType>[0]) => run(insertTransactionType(input)),
-    renameTransactionType: (id: string, name: string) => run(renameTransactionType(id, name)),
+    updateTransactionType: (id: string, input: Parameters<typeof updateTransactionType>[1]) => run(updateTransactionType(id, input)),
     createCategory: (input: Parameters<typeof insertCategory>[0]) => run(insertCategory(input)),
     updateCategory: (id: string, input: Parameters<typeof updateCategory>[1]) => run(updateCategory(id, input)),
     createAccount: (input: Parameters<typeof insertAccount>[0]) => run(insertAccount(input)),

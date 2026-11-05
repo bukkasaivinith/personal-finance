@@ -146,26 +146,32 @@ export async function loadFinanceData(): Promise<FinanceData> {
   const archived = (item: { isActive: boolean; deletedAt: string | null } | undefined) =>
     !item || !isUsable(item);
 
-  const transactions: Transaction[] = transactionRows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    typeId: row.transaction_type_id,
-    typeName: row.transaction_type_name,
-    typeArchived: archived(typeById.get(row.transaction_type_id)),
-    kind: row.transaction_kind,
-    categoryId: row.category_id,
-    categoryName: row.category_name,
-    categoryEmoji: row.category_id === null ? null : categoryById.get(row.category_id)?.emoji ?? null,
-    categoryArchived: row.category_id !== null && archived(categoryById.get(row.category_id)),
-    amount: Number(row.amount),
-    date: row.transaction_date,
-    accountId: row.account_id,
-    accountName: row.account_name,
-    accountArchived: archived(accountById.get(row.account_id)),
-    toAccountId: row.to_account_id,
-    toAccountName: row.to_account_name,
-    toAccountArchived: row.to_account_id !== null && archived(accountById.get(row.to_account_id)),
-  }));
+  const transactions: Transaction[] = transactionRows.map((row) => {
+    const transactionType = typeById.get(row.transaction_type_id);
+    const category = row.category_id === null ? undefined : categoryById.get(row.category_id);
+    const account = accountById.get(row.account_id);
+    const destinationAccount = row.to_account_id === null ? undefined : accountById.get(row.to_account_id);
+    return {
+      id: row.id,
+      name: row.name,
+      typeId: row.transaction_type_id,
+      typeName: transactionType?.name ?? row.transaction_type_name,
+      typeArchived: archived(transactionType),
+      kind: transactionType?.kind ?? row.transaction_kind,
+      categoryId: row.category_id,
+      categoryName: row.category_id === null ? null : category?.name ?? row.category_name,
+      categoryEmoji: category?.emoji ?? null,
+      categoryArchived: row.category_id !== null && archived(category),
+      amount: Number(row.amount),
+      date: row.transaction_date,
+      accountId: row.account_id,
+      accountName: account?.name ?? row.account_name,
+      accountArchived: archived(account),
+      toAccountId: row.to_account_id,
+      toAccountName: row.to_account_id === null ? null : destinationAccount?.name ?? row.to_account_name,
+      toAccountArchived: row.to_account_id !== null && archived(destinationAccount),
+    };
+  });
 
   const budgets: Budget[] = budgetRows.map((row) => ({
     id: row.id,
@@ -241,10 +247,10 @@ export async function updateCategory(
   await replaceCategoryLinks(id, input.transactionTypeIds);
 }
 
-export async function renameTransactionType(id: string, name: string): Promise<void> {
+export async function updateTransactionType(id: string, input: { name: string; kind: TransactionKind }): Promise<void> {
   const { error } = await supabase
     .from('transaction_types')
-    .update({ name, updated_at: new Date().toISOString() })
+    .update({ name: input.name, kind: input.kind, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) failWith(error);
 }
