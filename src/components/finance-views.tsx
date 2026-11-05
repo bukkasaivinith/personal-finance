@@ -114,12 +114,12 @@ function TransactionTable({
                   <td>
                     <div className="transaction-name">
                       <span className={`transaction-icon ${transaction.kind}`}>
-                        <Icon size={15} />
+                        {transaction.categoryEmoji ? <span className="transaction-category-emoji" aria-hidden="true">{transaction.categoryEmoji}</span> : <Icon size={15} />}
                       </span>
                       <span>
                         <b>{transaction.name}</b>
                         <small>
-                          {transaction.categoryName ?? transaction.typeName}
+                          {transaction.categoryEmoji ? `${transaction.categoryEmoji} ` : ''}{transaction.categoryName ?? transaction.typeName}
                           {transaction.categoryArchived ? <ArchivedTag /> : null}
                         </small>
                       </span>

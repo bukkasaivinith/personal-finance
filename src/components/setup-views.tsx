@@ -139,6 +139,7 @@ export function SetupView({
                 <div className="setup-row" key={category.id}>
                   <div className="setup-info">
                     <b>
+                      {category.emoji ? <span className="category-emoji" aria-hidden="true">{category.emoji}</span> : null}
                       {category.name}
                       <StatusTag state={state} />
                     </b>
@@ -179,7 +180,7 @@ export function SetupView({
           onSubmit={async (name) => {
             await actions.renameTransactionType(renamingType.id, name);
             setRenamingType(null);
-            onNotify(`Renamed to "${name}".`);
+            onNotify(`Transaction type updated to "${name}".`);
           }}
         />
       ) : null}

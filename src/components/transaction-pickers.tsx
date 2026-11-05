@@ -183,16 +183,18 @@ export function CategoryPicker({
   value: string;
   options: CategoryOption[];
   onChange: (id: string) => void;
-  onCreate: (name: string) => Promise<string>;
+  onCreate: (input: { name: string; emoji: string | null }) => Promise<string>;
 }) {
   const [creating, setCreating] = useState(options.length === 0);
   const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
     setCreating(false);
     setName('');
+    setEmoji('');
     setError('');
   };
 
@@ -218,7 +220,7 @@ export function CategoryPicker({
     setSaving(true);
     setError('');
     try {
-      const id = await onCreate(trimmed);
+      const id = await onCreate({ name: trimmed, emoji: emoji.trim() || null });
       onChange(id);
       reset();
     } catch (err) {
@@ -240,7 +242,7 @@ export function CategoryPicker({
           ) : null}
           {options.map((option) => (
             <option value={option.id} key={option.id}>
-              {option.name}
+              {option.emoji ? `${option.emoji} ${option.name}` : option.name}
             </option>
           ))}
           <option value={NEW_OPTION}>+ Create category</option>
@@ -266,6 +268,16 @@ export function CategoryPicker({
               maxLength={32}
               placeholder="e.g. Pets"
               autoFocus
+            />
+          </label>
+          <label>
+            Emoji (optional)
+            <input
+              value={emoji}
+              onChange={(event) => setEmoji(event.target.value)}
+              maxLength={16}
+              placeholder="e.g. 🍽️"
+              aria-label="Category emoji"
             />
           </label>
         </InlineCreate>

@@ -15,7 +15,7 @@ export type ItemTable = 'transaction_types' | 'categories' | 'accounts';
 
 type StatusRow = { id: string; is_active: boolean; deleted_at: string | null };
 type TransactionTypeRow = StatusRow & { name: string; kind: TransactionKind };
-type CategoryRow = StatusRow & { name: string; parent_id: string | null };
+type CategoryRow = StatusRow & { name: string; emoji: string | null; parent_id: string | null };
 type CategoryLinkRow = { category_id: string; transaction_type_id: string };
 type AccountRow = StatusRow & {
   name: string;
@@ -62,7 +62,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
       .order('created_at', { ascending: true }),
     supabase
       .from('categories')
-      .select('id, name, parent_id, is_active, deleted_at')
+      .select('id, name, emoji, parent_id, is_active, deleted_at')
       .order('created_at', { ascending: true }),
     supabase.from('category_transaction_types').select('category_id, transaction_type_id'),
     supabase
@@ -97,6 +97,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
   const categories: CategoryOption[] = categoryRows.map((row) => ({
     id: row.id,
     name: row.name,
+    emoji: row.emoji,
     parentId: row.parent_id,
     transactionTypeIds: linkRows
       .filter((link) => link.category_id === row.id)
@@ -129,6 +130,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     kind: row.transaction_kind,
     categoryId: row.category_id,
     categoryName: row.category_name,
+    categoryEmoji: row.category_id === null ? null : categoryById.get(row.category_id)?.emoji ?? null,
     categoryArchived: row.category_id !== null && archived(categoryById.get(row.category_id)),
     amount: Number(row.amount),
     date: row.transaction_date,
@@ -168,12 +170,13 @@ async function replaceCategoryLinks(categoryId: string, transactionTypeIds: stri
 
 export async function insertCategory(input: {
   name: string;
+  emoji: string | null;
   parentId: string | null;
   transactionTypeIds: string[];
 }): Promise<string> {
   const { data, error } = await supabase
     .from('categories')
-    .insert({ name: input.name, parent_id: input.parentId })
+    .insert({ name: input.name, emoji: input.emoji, parent_id: input.parentId })
     .select('id')
     .single();
   if (error) failWith(error);
@@ -184,11 +187,11 @@ export async function insertCategory(input: {
 
 export async function updateCategory(
   id: string,
-  input: { name: string; parentId: string | null; transactionTypeIds: string[] },
+  input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] },
 ): Promise<void> {
   const { error } = await supabase
     .from('categories')
-    .update({ name: input.name, parent_id: input.parentId, updated_at: new Date().toISOString() })
+    .update({ name: input.name, emoji: input.emoji, parent_id: input.parentId, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) failWith(error);
   await replaceCategoryLinks(id, input.transactionTypeIds);

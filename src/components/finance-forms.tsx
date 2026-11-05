@@ -108,7 +108,7 @@ export function AddTransactionModal({
   onClose: () => void;
   onSubmit: (draft: TransactionDraft) => Promise<void>;
   onCreateTransactionType: (input: { name: string; kind: TransactionKind }) => Promise<string>;
-  onCreateCategory: (input: { name: string; parentId: null; transactionTypeIds: string[] }) => Promise<string>;
+  onCreateCategory: (input: { name: string; emoji: string | null; parentId: null; transactionTypeIds: string[] }) => Promise<string>;
   onCreateAccount: (draft: AccountDraft) => Promise<string>;
 }) {
   const [typeId, setTypeId] = useState('');
@@ -212,8 +212,8 @@ export function AddTransactionModal({
                   value={activeCategoryId}
                   options={compatibleCategories}
                   onChange={setCategoryId}
-                  onCreate={(categoryName) =>
-                    onCreateCategory({ name: categoryName, parentId: null, transactionTypeIds: [selectedType.id] })
+                  onCreate={(category) =>
+                    onCreateCategory({ ...category, parentId: null, transactionTypeIds: [selectedType.id] })
                   }
                 />
               ) : null}

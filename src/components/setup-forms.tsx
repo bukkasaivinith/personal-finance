@@ -107,9 +107,9 @@ export function RenameTypeModal({
   };
 
   return (
-    <ModalShell eyebrow="Types & categories" title="Rename transaction type" labelId="rename-type-title" onClose={onClose}>
+    <ModalShell eyebrow="Types & categories" title="Edit transaction type" labelId="edit-type-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p className="modal-description">Past transactions keep the name they were recorded with.</p>
+        <p className="modal-description">Correct the name when needed. Its income, expense, or transfer setting stays fixed so past totals remain correct.</p>
         <label>
           Type name
           <input value={name} onChange={(event) => setName(event.target.value)} maxLength={32} autoFocus />
@@ -120,7 +120,7 @@ export function RenameTypeModal({
             Cancel
           </button>
           <button className="primary-button" type="submit" disabled={saving}>
-            {saving ? 'Saving...' : 'Save name'}
+            {saving ? 'Saving...' : 'Save type'}
           </button>
         </div>
       </form>
@@ -128,7 +128,7 @@ export function RenameTypeModal({
   );
 }
 
-export type CategoryFormValues = { name: string; parentId: string | null; transactionTypeIds: string[] };
+export type CategoryFormValues = { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] };
 
 export function CategoryFormModal({
   category,
@@ -144,6 +144,7 @@ export function CategoryFormModal({
   onSubmit: (values: CategoryFormValues) => Promise<void>;
 }) {
   const [name, setName] = useState(category?.name ?? '');
+  const [emoji, setEmoji] = useState(category?.emoji ?? '');
   const [parentId, setParentId] = useState(category?.parentId ?? '');
   const [typeIds, setTypeIds] = useState<string[]>(category?.transactionTypeIds ?? []);
   const [error, setError] = useState('');
@@ -172,6 +173,7 @@ export function CategoryFormModal({
     try {
       await onSubmit({
         name: name.trim(),
+        emoji: emoji.trim() || null,
         parentId: parentId || null,
         transactionTypeIds: typeIds,
       });
@@ -193,6 +195,15 @@ export function CategoryFormModal({
           <label className="full-field">
             Category name
             <input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} placeholder="e.g. Groceries" autoFocus />
+          </label>
+          <label>
+            Emoji (optional)
+            <input
+              value={emoji}
+              onChange={(event) => setEmoji(event.target.value)}
+              maxLength={16}
+              placeholder="e.g. 🛒"
+            />
           </label>
           <fieldset className="full-field role-fieldset">
             <legend>Used with these transaction types</legend>

@@ -10,6 +10,7 @@ export type TransactionTypeOption = ItemStatus & { id: string; name: string; kin
 export type CategoryOption = ItemStatus & {
   id: string;
   name: string;
+  emoji: string | null;
   parentId: string | null;
   transactionTypeIds: string[];
 };
@@ -32,6 +33,7 @@ export type Transaction = {
   kind: TransactionKind;
   categoryId: string | null;
   categoryName: string | null;
+  categoryEmoji: string | null;
   categoryArchived: boolean;
   amount: number;
   date: string;
