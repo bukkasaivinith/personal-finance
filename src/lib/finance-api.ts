@@ -39,6 +39,7 @@ type TransactionRow = {
   category_name: string | null;
   amount: number | string;
   transaction_date: string;
+  transaction_time: string | null;
   account_id: string;
   account_name: string;
   to_account_id: string | null;
@@ -90,7 +91,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     supabase
       .from('transactions')
       .select(
-        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, account_id, account_name, to_account_id, to_account_name',
+        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name',
       )
       .order('transaction_date', { ascending: false }),
     supabase.from('budgets').select('id, category_id, amount').order('created_at', { ascending: true }),
@@ -164,6 +165,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
       categoryArchived: row.category_id !== null && archived(category),
       amount: Number(row.amount),
       date: row.transaction_date,
+      time: row.transaction_time,
       accountId: row.account_id,
       accountName: account?.name ?? row.account_name,
       accountArchived: archived(account),
@@ -309,6 +311,7 @@ export async function insertTransaction(draft: TransactionDraft): Promise<void> 
     category_id: draft.categoryId,
     amount: draft.amount,
     transaction_date: draft.date,
+    transaction_time: draft.time,
     account_id: draft.accountId,
     to_account_id: draft.toAccountId,
   });
@@ -386,6 +389,7 @@ export async function recordRecurringEntry(entry: RecurringEntry): Promise<void>
     categoryId: entry.categoryId,
     amount: entry.amount,
     date: entry.nextDate,
+    time: null,
     accountId: entry.accountId,
     toAccountId: entry.toAccountId,
   });

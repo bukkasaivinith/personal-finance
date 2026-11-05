@@ -143,9 +143,10 @@ export default function App() {
 
   const exportCsv = () => {
     const rows = [
-      ['Date', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'],
+      ['Date', 'Time', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'],
       ...sorted.map((transaction) => [
         transaction.date,
+        transaction.time ?? '',
         transaction.name,
         transaction.typeName,
         transaction.kind,

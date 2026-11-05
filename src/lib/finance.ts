@@ -37,6 +37,7 @@ export type Transaction = {
   categoryArchived: boolean;
   amount: number;
   date: string;
+  time: string | null;
   accountId: string;
   accountName: string;
   accountArchived: boolean;
@@ -51,6 +52,7 @@ export type TransactionDraft = {
   categoryId: string | null;
   amount: number;
   date: string;
+  time: string | null;
   accountId: string;
   toAccountId: string | null;
 };
@@ -108,7 +110,12 @@ export function toDateKey(date: Date): string {
 }
 
 export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return toDateKey(new Date());
+}
+
+export function currentTimeKey(): string {
+  const now = new Date();
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 export function currentMonthKey(): string {
@@ -142,13 +149,18 @@ export function formatDate(date: string): string {
   );
 }
 
+export function formatTime(time: string): string {
+  const [hour, minute] = time.split(':').map(Number);
+  return new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(2000, 0, 1, hour, minute));
+}
+
 export function formatMoney(amount: number): string {
   const sign = amount < 0 ? '−' : '';
   return `${sign}₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(amount))}`;
 }
 
 export function sortByDate(transactions: Transaction[]): Transaction[] {
-  return [...transactions].sort((a, b) => b.date.localeCompare(a.date));
+  return [...transactions].sort((a, b) => `${b.date}T${b.time ?? '00:00'}`.localeCompare(`${a.date}T${a.time ?? '00:00'}`));
 }
 
 export function categoriesFor(categories: CategoryOption[], typeId: string): CategoryOption[] {

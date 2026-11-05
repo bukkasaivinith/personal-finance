@@ -18,6 +18,7 @@ import {
   formatDate,
   formatMoney,
   formatShortMonth,
+  formatTime,
   signedBalance,
   stateOf,
   type Account,
@@ -93,7 +94,7 @@ function TransactionTable({
             <th>Transaction</th>
             {compact ? null : <th>Type</th>}
             <th>Account</th>
-            <th>Date</th>
+            <th>Date & time</th>
             <th className="amount-column">Amount</th>
           </tr>
         </thead>
@@ -142,7 +143,12 @@ function TransactionTable({
                       </>
                     ) : null}
                   </td>
-                  <td>{formatDate(transaction.date)}</td>
+                  <td>
+                    <span className="transaction-datetime">
+                      {formatDate(transaction.date)}
+                      {transaction.time ? <small>{formatTime(transaction.time)}</small> : null}
+                    </span>
+                  </td>
                   <td className={`amount-column ${tone}`}>
                     {sign}
                     {formatMoney(transaction.amount)}

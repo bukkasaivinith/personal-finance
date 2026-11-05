@@ -3,6 +3,9 @@ import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { todayKey } from '@/lib/finance';
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const monthNames = Array.from({ length: 12 }, (_, month) =>
+  new Intl.DateTimeFormat('en-IN', { month: 'long' }).format(new Date(2000, month, 1)),
+);
 
 function dateFromKey(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
@@ -18,10 +21,6 @@ function sameDay(first: Date, second: Date): boolean {
   return first.getFullYear() === second.getFullYear() && first.getMonth() === second.getMonth() && first.getDate() === second.getDate();
 }
 
-function monthLabel(date: Date): string {
-  return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(date);
-}
-
 function valueLabel(value: string): string {
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(dateFromKey(value));
 }
@@ -32,6 +31,10 @@ export function DatePicker({ label, value, onChange }: { label: string; value: s
   const [visibleMonth, setVisibleMonth] = useState(new Date(selected.getFullYear(), selected.getMonth(), 1, 12));
   const root = useRef<HTMLDivElement>(null);
   const today = dateFromKey(todayKey());
+  const currentYear = today.getFullYear();
+  const earliestYear = Math.min(2000, selected.getFullYear(), visibleMonth.getFullYear());
+  const latestYear = Math.max(currentYear + 10, selected.getFullYear(), visibleMonth.getFullYear());
+  const years = Array.from({ length: latestYear - earliestYear + 1 }, (_, index) => earliestYear + index);
 
   useEffect(() => {
     const date = dateFromKey(value || todayKey());
@@ -84,7 +87,22 @@ export function DatePicker({ label, value, onChange }: { label: string; value: s
             <button type="button" className="calendar-nav" aria-label="Previous month" onClick={() => moveMonth(-1)}>
               <ChevronLeft size={17} />
             </button>
-            <strong>{monthLabel(visibleMonth)}</strong>
+            <div className="calendar-period-controls">
+              <select
+                aria-label="Calendar month"
+                value={visibleMonth.getMonth()}
+                onChange={(event) => setVisibleMonth((current) => new Date(current.getFullYear(), Number(event.target.value), 1, 12))}
+              >
+                {monthNames.map((month, index) => <option key={month} value={index}>{month}</option>)}
+              </select>
+              <select
+                aria-label="Calendar year"
+                value={visibleMonth.getFullYear()}
+                onChange={(event) => setVisibleMonth((current) => new Date(Number(event.target.value), current.getMonth(), 1, 12))}
+              >
+                {years.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </div>
             <button type="button" className="calendar-nav" aria-label="Next month" onClick={() => moveMonth(1)}>
               <ChevronRight size={17} />
             </button>

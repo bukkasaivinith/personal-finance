@@ -4,6 +4,7 @@ import { DatePicker } from '@/components/date-picker';
 import { ModalShell } from '@/components/ui';
 import {
   categoriesFor,
+  currentTimeKey,
   parseAmount,
   todayKey,
   type Account,
@@ -125,6 +126,7 @@ export function AddTransactionModal({
   const [accountId, setAccountId] = useState('');
   const [toAccountId, setToAccountId] = useState('');
   const [date, setDate] = useState(todayKey());
+  const [time, setTime] = useState(currentTimeKey());
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -176,6 +178,7 @@ export function AddTransactionModal({
         categoryId: isTransfer ? null : activeCategoryId,
         amount: value,
         date,
+        time: time || null,
         accountId: activeAccountId,
         toAccountId: isTransfer ? activeToAccountId : null,
       });
@@ -258,6 +261,10 @@ export function AddTransactionModal({
             </p>
           )}
           <DatePicker label="Date" value={date} onChange={setDate} />
+          <label>
+            Time
+            <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+          </label>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
         <div className="modal-actions">
