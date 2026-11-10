@@ -7,10 +7,25 @@ export function isValidEmail(value: string): boolean {
   return value.length <= 254 && EMAIL_PATTERN.test(value);
 }
 
+async function recordAuthenticatedActivity(action: 'signed_in' | 'signed_out'): Promise<void> {
+  try {
+    // Wait until Supabase has made the access token available to the client.
+    // A background request immediately after sign-in can otherwise reach the
+    // RPC without a JWT, which is why a sign-out could be logged while the
+    // matching sign-in was missing.
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return;
+    await supabase.rpc('record_auth_activity', { p_action: action });
+  } catch {
+    // Authentication itself must always work even if its optional audit event
+    // cannot be saved.
+  }
+}
+
 export async function createAccount(email: string, password: string): Promise<boolean> {
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (!error) {
-    if (data.session) void supabase.rpc('record_auth_activity', { p_action: 'signed_in' });
+    if (data.session) await recordAuthenticatedActivity('signed_in');
     return Boolean(data.session);
   }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
@@ -21,9 +36,7 @@ export async function createAccount(email: string, password: string): Promise<bo
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (!error) {
-    // Logging is best-effort. A successful sign-in must never fail because its
-    // optional audit record could not be written.
-    void supabase.rpc('record_auth_activity', { p_action: 'signed_in' });
+    await recordAuthenticatedActivity('signed_in');
     return;
   }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
@@ -43,11 +56,7 @@ export async function updatePassword(password: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  try {
-    await supabase.rpc('record_auth_activity', { p_action: 'signed_out' });
-  } catch {
-    // Signing out is more important than an optional audit event.
-  }
+  await recordAuthenticatedActivity('signed_out');
   await supabase.auth.signOut({ scope: 'local' });
 }
 
