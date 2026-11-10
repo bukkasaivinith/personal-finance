@@ -59,6 +59,8 @@ For the secured-workspace, recurring automation, transaction editing, and activi
 
 Do not deploy the new frontend before this migration has succeeded, because it reads the added recurring and transaction fields.
 
+If that migration has already been run, apply newer migrations in filename order as they are added. The current follow-ups are [20261111110000_fix_workspace_validation_triggers.sql](supabase/migrations/20261111110000_fix_workspace_validation_triggers.sql) and [20261111130000_add_detailed_activity_log.sql](supabase/migrations/20261111130000_add_detailed_activity_log.sql). They only repair the validation trigger and extend audit-event details; neither deletes finance data.
+
 ## Security note
 
 The latest security migration replaces the earlier shared policies with authenticated, owner-only row-level security. Never add a `VITE_SUPABASE_SERVICE_ROLE_KEY`; browser code uses only the publishable/anon key. Legacy data is intentionally claimable once because old rows had no owner; make sure the intended owner signs in first after the migration.

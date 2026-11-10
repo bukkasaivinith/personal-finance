@@ -110,6 +110,7 @@ export type ActivityEvent = {
   entityName: string;
   action: ActivityAction;
   createdAt: string;
+  details: Record<string, unknown>;
 };
 
 export type FinanceData = {

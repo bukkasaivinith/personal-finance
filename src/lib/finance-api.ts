@@ -73,6 +73,7 @@ type ActivityRow = {
   entity_name: string;
   action: ActivityAction;
   created_at: string;
+  details: Record<string, unknown> | null;
 };
 
 type PostgrestError = { code?: string; message: string };
@@ -459,7 +460,7 @@ export async function loadActivityEvents(input: {
   const end = start + input.pageSize - 1;
   let query = supabase
     .from('audit_events')
-    .select('id, entity_table, entity_id, entity_name, action, created_at', { count: 'exact' })
+    .select('id, entity_table, entity_id, entity_name, action, created_at, details', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(start, end);
   if (input.action && input.action !== 'all') query = query.eq('action', input.action);
@@ -475,6 +476,7 @@ export async function loadActivityEvents(input: {
     entityName: row.entity_name,
     action: row.action,
     createdAt: row.created_at,
+    details: row.details ?? {},
   }));
   return { events, hasMore: (count ?? 0) > start + input.pageSize };
 }

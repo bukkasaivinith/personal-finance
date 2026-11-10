@@ -413,6 +413,7 @@ function ActivityLog() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let active = true;
@@ -432,6 +433,13 @@ function ActivityLog() {
   }, [action, entity, from, to, page]);
 
   const changeFilters = (next: () => void) => { setPage(0); next(); };
+  const toggleDetails = (id: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   return (
     <div className="surface-card activity-log-card">
       <div className="card-title-row"><div><h3>Activity log</h3><p>Important changes to your finance workspace. Records cannot be edited here.</p></div></div>
@@ -445,9 +453,39 @@ function ActivityLog() {
         <label>From<input type="date" value={from} max={to || undefined} onChange={(event) => changeFilters(() => setFrom(event.target.value))} /></label>
         <label>To<input type="date" value={to} min={from || undefined} onChange={(event) => changeFilters(() => setTo(event.target.value))} /></label>
       </div>
-      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <article key={event.id} className="activity-row"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(event.createdAt))}</time></article>)}</div>}
+      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
       <div className="table-pagination"><span>{events.length ? `Page ${page + 1}` : ''}</span><div><button className="secondary-button" type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => Math.max(0, value - 1))}>Previous</button><button className="secondary-button" type="button" disabled={!hasMore || loading} onClick={() => setPage((value) => value + 1)}>Next</button></div></div>
     </div>
+  );
+}
+
+function isDetailObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readableDetail(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
+
+function DetailGroup({ title, values }: { title: string; values: Record<string, unknown> }) {
+  const entries = Object.entries(values).filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!entries.length) return null;
+  return <section className="activity-detail-group"><h4>{title}</h4><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{readableDetail(value)}</dd></div>)}</dl></section>;
+}
+
+function ActivityLogRow({ event, expanded, onToggle }: { event: ActivityEvent; expanded: boolean; onToggle: () => void }) {
+  const current = isDetailObject(event.details.current) ? event.details.current : null;
+  const previous = isDetailObject(event.details.previous) ? event.details.previous : null;
+  const directDetails = current || previous ? null : event.details;
+  const detailCount = [current, previous, directDetails].filter((value) => value && Object.keys(value).length).length;
+  const dateTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(event.createdAt));
+  return (
+    <article className={`activity-row ${expanded ? 'expanded' : ''}`}>
+      <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time>{detailCount ? <button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button> : null}</div>
+      {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? directDetails ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!detailCount ? <p>Detailed fields were not captured for this earlier activity record.</p> : null}</div> : null}
+    </article>
   );
 }
 
