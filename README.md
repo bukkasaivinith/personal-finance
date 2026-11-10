@@ -59,7 +59,7 @@ For the secured-workspace, recurring automation, transaction editing, and activi
 
 Do not deploy the new frontend before this migration has succeeded, because it reads the added recurring and transaction fields.
 
-If that migration has already been run, apply newer migrations in filename order as they are added. The current follow-ups are [20261111110000_fix_workspace_validation_triggers.sql](supabase/migrations/20261111110000_fix_workspace_validation_triggers.sql) and [20261111130000_add_detailed_activity_log.sql](supabase/migrations/20261111130000_add_detailed_activity_log.sql). They only repair the validation trigger and extend audit-event details; neither deletes finance data.
+If that migration has already been run, apply newer migrations in filename order as they are added. The current follow-ups are [20261111110000_fix_workspace_validation_triggers.sql](supabase/migrations/20261111110000_fix_workspace_validation_triggers.sql), [20261111130000_add_detailed_activity_log.sql](supabase/migrations/20261111130000_add_detailed_activity_log.sql), and [20261111150000_add_investments.sql](supabase/migrations/20261111150000_add_investments.sql). They repair validation, add richer audit details, and introduce universal investment tracking; none deletes finance data.
 
 ## Security note
 

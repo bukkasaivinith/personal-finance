@@ -4,6 +4,7 @@ import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
 import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
+import { InvestmentsView } from '@/components/investments-view';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
 import { createFinanceActions } from '@/lib/finance-actions';
@@ -34,6 +35,7 @@ const emptyFinance: FinanceData = {
   transactions: [],
   budgets: [],
   recurringEntries: [],
+  investments: [],
 };
 
 function csvCell(value: string): string {
@@ -76,7 +78,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<View>('overview');
   const finance = useFinanceData();
   const data = finance.data ?? emptyFinance;
-  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries } = data;
+  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh), [finance.refresh]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -262,6 +264,8 @@ export default function App() {
             onNotify={showToast}
           />
         );
+      case 'investments':
+        return <InvestmentsView investments={investments} accounts={accounts} actions={actions} onNotify={showToast} />;
       case 'settings':
         return <SettingsView onExport={exportCsv} hasData={hasTransactions} />;
     }

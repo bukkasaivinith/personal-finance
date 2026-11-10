@@ -448,7 +448,7 @@ function ActivityLog() {
           <option value="all">All actions</option><option value="created">Created</option><option value="updated">Updated</option><option value="renamed">Renamed</option><option value="deleted">Deleted</option><option value="paused">Paused</option><option value="resumed">Resumed</option><option value="signed_in">Signed in</option><option value="signed_out">Signed out</option>
         </select>
         <select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
-          <option value="all">All items</option><option value="transactions">Transactions</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
+          <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
         </select>
         <label>From<input type="date" value={from} max={to || undefined} onChange={(event) => changeFilters(() => setFrom(event.target.value))} /></label>
         <label>To<input type="date" value={to} min={from || undefined} onChange={(event) => changeFilters(() => setTo(event.target.value))} /></label>

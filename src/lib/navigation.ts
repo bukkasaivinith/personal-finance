@@ -2,6 +2,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   CalendarDays,
+  ChartNoAxesCombined,
   Home,
   PiggyBank,
   Tags,
@@ -18,6 +19,7 @@ export type View =
   | 'analytics'
   | 'goals'
   | 'recurring'
+  | 'investments'
   | 'setup'
   | 'settings';
 
@@ -43,6 +45,7 @@ export const workspaceNavigation: NavItem[] = [
 export const manageNavigation: NavItem[] = [
   { id: 'setup', label: 'Types & categories', icon: Tags },
   { id: 'recurring', label: 'Recurring', icon: CalendarDays },
+  { id: 'investments', label: 'Investments', icon: ChartNoAxesCombined },
 ];
 
 export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
@@ -53,6 +56,7 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   analytics: { title: 'Analytics', eyebrow: 'Insights for the selected month' },
   goals: { title: 'Savings goals', eyebrow: 'Track what you are saving toward' },
   recurring: { title: 'Recurring', eyebrow: 'Repeating income and bills' },
+  investments: { title: 'Investments', eyebrow: 'Capital, returns and reinvestment' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },
   settings: { title: 'Settings', eyebrow: 'Preferences and data' },
 };
