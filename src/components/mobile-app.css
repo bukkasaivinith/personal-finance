@@ -1,0 +1,92 @@
+.premium-mobile-shell {
+  background:
+    radial-gradient(circle at 18% -14%, rgba(56, 110, 84, .82), transparent 38%),
+    radial-gradient(circle at 110% 35%, rgba(63, 82, 72, .38), transparent 42%),
+    #101211;
+  color: #f8faf7;
+  padding: 18px 14px 30px;
+}
+
+.premium-mobile-shell .premium-mobile-content { margin: 18px auto 0; max-width: 540px; }
+
+.premium-mobile-shell .premium-mobile-card {
+  background: linear-gradient(145deg, rgba(47, 50, 49, .98), rgba(31, 33, 32, .99));
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 26px;
+  box-shadow: 0 26px 64px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .055);
+  overflow: hidden;
+  padding: 24px 18px 21px;
+  position: relative;
+}
+
+.premium-mobile-shell .premium-mobile-card::before {
+  background: linear-gradient(90deg, transparent, rgba(232, 255, 236, .08), transparent);
+  content: '';
+  height: 1px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.premium-mobile-shell .mobile-header { margin: 0; max-width: none; }
+.premium-mobile-shell .mobile-header > strong { color: #fff; font-size: 17px; letter-spacing: -.02em; }
+.premium-mobile-shell .mobile-icon-button { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .09); color: #c9ceca; }
+.premium-mobile-shell .mobile-icon-button:hover { background: rgba(255, 255, 255, .13); color: #fff; }
+
+.premium-mobile-shell .mobile-app-card > h1 {
+  color: #fff;
+  font-size: clamp(37px, 11vw, 52px);
+  font-weight: 700;
+  letter-spacing: -.06em;
+  margin: 29px 0 28px;
+}
+
+.premium-mobile-shell .mobile-kind-tabs { margin-top: 0; }
+.premium-mobile-shell .mobile-kind-tabs button { font-size: 15px; }
+.premium-mobile-shell .mobile-kind-tabs button.active { border-bottom-color: #fff; }
+.premium-mobile-shell .mobile-form { gap: 13px; margin-top: 21px; }
+
+.premium-mobile-shell .mobile-amount-card {
+  background: linear-gradient(145deg, #151816, #101211);
+  border: 1px solid rgba(255, 255, 255, .05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .03);
+  padding: 21px 18px 18px;
+}
+
+.premium-mobile-shell .mobile-amount-card strong { color: #fff; font-size: clamp(43px, 13vw, 56px); }
+.premium-mobile-shell .mobile-amount-card input { background: #171a18; border-color: #464d48; }
+
+.premium-mobile-shell .mobile-field {
+  background: rgba(255, 255, 255, .028);
+  border-color: rgba(255, 255, 255, .13);
+  border-radius: 13px;
+  min-height: 65px;
+}
+
+.premium-mobile-shell .mobile-field:hover { border-color: rgba(174, 211, 182, .4); }
+.premium-mobile-shell .mobile-field:focus-within { border-color: #8ab596; box-shadow: 0 0 0 3px rgba(105, 155, 117, .17); }
+.premium-mobile-shell .mobile-field span { color: #b0b6b1; font-size: 14px; }
+.premium-mobile-shell .mobile-field input,
+.premium-mobile-shell .mobile-field select { color: #fff; font-size: 15px; }
+.premium-mobile-shell .mobile-field select { max-width: 58vw; }
+.premium-mobile-shell .mobile-date-grid { gap: 11px; }
+.premium-mobile-shell .mobile-field .mobile-time-input { color: #fff; }
+.premium-mobile-shell .mobile-field .mobile-time-input input { color: #fff; }
+.premium-mobile-shell .mobile-description { background: rgba(255, 255, 255, .04); }
+
+.premium-mobile-shell .mobile-save {
+  background: linear-gradient(135deg, #f9faf6, #d8e6d9);
+  box-shadow: 0 9px 22px rgba(0, 0, 0, .2);
+  min-height: 58px;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.premium-mobile-shell .mobile-save:hover:not(:disabled) { box-shadow: 0 14px 28px rgba(0, 0, 0, .28); transform: translateY(-1px); }
+
+@media (max-width: 370px) {
+  .premium-mobile-shell .premium-mobile-content { margin-top: 0; }
+  .premium-mobile-shell .premium-mobile-card { padding: 21px 15px 18px; }
+  .premium-mobile-shell .mobile-app-card > h1 { font-size: 37px; }
+  .premium-mobile-shell .mobile-date-grid { grid-template-columns: 1fr; }
+}

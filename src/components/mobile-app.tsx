@@ -4,6 +4,7 @@ import { signOut } from '@/lib/auth-api';
 import { createFinanceActions } from '@/lib/finance-actions';
 import { categoriesFor, currentTimeKey, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
 import { useFinanceData } from '@/lib/use-finance-data';
+import './mobile-app.css';
 
 const kinds: { value: TransactionKind; label: string }[] = [
   { value: 'expense', label: 'Expense' },
@@ -87,13 +88,13 @@ export function MobileApp() {
   };
 
   if (!finance.data) {
-    return <div className="mobile-shell"><div className="mobile-loading">{finance.loadError || 'Loading your workspace...'}</div></div>;
+    return <div className="mobile-shell premium-mobile-shell"><div className="mobile-loading">{finance.loadError || 'Loading your workspace...'}</div></div>;
   }
 
   return (
-    <div className="mobile-shell">
-      <main className="mobile-content">
-        <section className="mobile-app-card">
+    <div className="mobile-shell premium-mobile-shell">
+      <main className="mobile-content premium-mobile-content">
+        <section className="mobile-app-card premium-mobile-card">
           <header className="mobile-header">
             <strong>My Finance</strong>
             <div className="mobile-header-actions">
