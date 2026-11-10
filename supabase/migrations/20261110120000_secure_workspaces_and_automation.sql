@@ -290,7 +290,7 @@ CREATE TRIGGER validate_category_transaction_type_link
   BEFORE INSERT OR UPDATE ON public.category_transaction_types
   FOR EACH ROW EXECUTE FUNCTION public.validate_category_transaction_type_link();
 
-CREATE OR REPLACE FUNCTION public.validate_finance_workspace_references()
+CREATE OR REPLACE FUNCTION public.validate_category_workspace_references()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public
@@ -299,21 +299,44 @@ BEGIN
   IF TG_OP = 'UPDATE' AND OLD.user_id IS NULL AND NEW.user_id = auth.uid() THEN
     RETURN NEW;
   END IF;
-  IF TG_TABLE_NAME = 'categories' AND NEW.parent_id IS NOT NULL
+  IF NEW.parent_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM public.categories WHERE id = NEW.parent_id AND user_id = NEW.user_id) THEN
     RAISE EXCEPTION 'A category parent must belong to the same workspace.';
   END IF;
-  IF TG_TABLE_NAME = 'budgets'
-     AND NOT EXISTS (SELECT 1 FROM public.categories WHERE id = NEW.category_id AND user_id = NEW.user_id) THEN
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.validate_budget_workspace_references()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.user_id IS NULL AND NEW.user_id = auth.uid() THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.categories WHERE id = NEW.category_id AND user_id = NEW.user_id) THEN
     RAISE EXCEPTION 'A budget category must belong to the same workspace.';
   END IF;
-  IF TG_TABLE_NAME = 'recurring_entries' THEN
-    IF NOT EXISTS (SELECT 1 FROM public.transaction_types WHERE id = NEW.transaction_type_id AND user_id = NEW.user_id)
-       OR NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = NEW.account_id AND user_id = NEW.user_id)
-       OR (NEW.category_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.categories WHERE id = NEW.category_id AND user_id = NEW.user_id))
-       OR (NEW.to_account_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = NEW.to_account_id AND user_id = NEW.user_id)) THEN
-      RAISE EXCEPTION 'A recurring entry can only reference records in the same workspace.';
-    END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.validate_recurring_workspace_references()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.user_id IS NULL AND NEW.user_id = auth.uid() THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.transaction_types WHERE id = NEW.transaction_type_id AND user_id = NEW.user_id)
+     OR NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = NEW.account_id AND user_id = NEW.user_id)
+     OR (NEW.category_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.categories WHERE id = NEW.category_id AND user_id = NEW.user_id))
+     OR (NEW.to_account_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = NEW.to_account_id AND user_id = NEW.user_id)) THEN
+    RAISE EXCEPTION 'A recurring entry can only reference records in the same workspace.';
   END IF;
   RETURN NEW;
 END;
@@ -321,15 +344,15 @@ $$;
 DROP TRIGGER IF EXISTS validate_category_workspace_references ON public.categories;
 CREATE TRIGGER validate_category_workspace_references
   BEFORE INSERT OR UPDATE ON public.categories
-  FOR EACH ROW EXECUTE FUNCTION public.validate_finance_workspace_references();
+  FOR EACH ROW EXECUTE FUNCTION public.validate_category_workspace_references();
 DROP TRIGGER IF EXISTS validate_budget_workspace_references ON public.budgets;
 CREATE TRIGGER validate_budget_workspace_references
   BEFORE INSERT OR UPDATE ON public.budgets
-  FOR EACH ROW EXECUTE FUNCTION public.validate_finance_workspace_references();
+  FOR EACH ROW EXECUTE FUNCTION public.validate_budget_workspace_references();
 DROP TRIGGER IF EXISTS validate_recurring_workspace_references ON public.recurring_entries;
 CREATE TRIGGER validate_recurring_workspace_references
   BEFORE INSERT OR UPDATE ON public.recurring_entries
-  FOR EACH ROW EXECUTE FUNCTION public.validate_finance_workspace_references();
+  FOR EACH ROW EXECUTE FUNCTION public.validate_recurring_workspace_references();
 
 -- A single user may safely claim the original unowned single-user workspace.
 CREATE OR REPLACE FUNCTION public.claim_unowned_finance_data()
@@ -522,4 +545,6 @@ REVOKE EXECUTE ON FUNCTION public.record_transaction_audit() FROM PUBLIC, anon, 
 REVOKE EXECUTE ON FUNCTION public.record_simple_audit() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.snapshot_transaction_history() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.validate_category_transaction_type_link() FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.validate_finance_workspace_references() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.validate_category_workspace_references() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.validate_budget_workspace_references() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.validate_recurring_workspace_references() FROM PUBLIC, anon, authenticated;
