@@ -267,7 +267,7 @@ export default function App() {
       case 'investments':
         return <InvestmentsView investments={investments} accounts={accounts} actions={actions} onNotify={showToast} />;
       case 'settings':
-        return <SettingsView onExport={exportCsv} hasData={hasTransactions} />;
+        return <SettingsView onExport={exportCsv} hasData={hasTransactions} data={data} />;
     }
   };
 

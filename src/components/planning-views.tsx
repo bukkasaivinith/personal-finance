@@ -9,6 +9,7 @@ import {
   currentMonthKey,
   formatDate,
   formatMoney,
+  formatTime,
   isUsable,
   parseAmount,
   todayKey,
@@ -17,6 +18,8 @@ import {
   type ActivityEvent,
   type Budget,
   type CategoryOption,
+  type FinanceData,
+  type Investment,
   type RecurringEntry,
   type RecurringEntryDraft,
   type Transaction,
@@ -403,7 +406,7 @@ export function GoalsView({ onNotify }: { onNotify: (message: string) => void })
   return <PlanningEmptyView title="Savings goals" description="Track what you are saving toward." icon={<Target size={20} />} emptyTitle="No savings goals yet" emptyDescription="Goals with target amounts and deadlines will show their progress here." actionLabel="Create goal" onAction={() => onNotify('Savings goals are coming in the next phase.')} />;
 }
 
-function ActivityLog() {
+function ActivityLog({ data }: { data: FinanceData }) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [action, setAction] = useState<ActivityAction | 'all'>('all');
   const [entity, setEntity] = useState<ActivityEvent['entityTable'] | 'all'>('all');
@@ -453,7 +456,7 @@ function ActivityLog() {
         <label>From<input type="date" value={from} max={to || undefined} onChange={(event) => changeFilters(() => setFrom(event.target.value))} /></label>
         <label>To<input type="date" value={to} min={from || undefined} onChange={(event) => changeFilters(() => setTo(event.target.value))} /></label>
       </div>
-      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
+      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} data={data} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
       <div className="table-pagination"><span>{events.length ? `Page ${page + 1}` : ''}</span><div><button className="secondary-button" type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => Math.max(0, value - 1))}>Previous</button><button className="secondary-button" type="button" disabled={!hasMore || loading} onClick={() => setPage((value) => value + 1)}>Next</button></div></div>
     </div>
   );
@@ -475,27 +478,96 @@ function DetailGroup({ title, values }: { title: string; values: Record<string, 
   return <section className="activity-detail-group"><h4>{title}</h4><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{readableDetail(value)}</dd></div>)}</dl></section>;
 }
 
-function ActivityLogRow({ event, expanded, onToggle }: { event: ActivityEvent; expanded: boolean; onToggle: () => void }) {
+function currentRecordDetails(event: ActivityEvent, data: FinanceData): Record<string, unknown> | null {
+  const accountById = new Map(data.accounts.map((account) => [account.id, account]));
+  const typeById = new Map(data.transactionTypes.map((type) => [type.id, type]));
+  const categoryById = new Map(data.categories.map((category) => [category.id, category]));
+  if (event.entityTable === 'transactions') {
+    const item = data.transactions.find((transaction) => transaction.id === event.entityId);
+    if (!item) return null;
+    return {
+      'Name': item.name, 'Amount': formatMoney(item.amount), 'Counts as': item.kind,
+      'Transaction type': item.typeName, 'Category': item.categoryName ?? 'None', 'Account': item.accountName,
+      'To account': item.toAccountName ?? '—', 'Date': formatDate(item.date), 'Time': item.time ? formatTime(item.time) : 'Not recorded',
+      'Source': item.source === 'scheduled' ? 'Scheduled recurring entry' : item.source === 'investment' ? 'Investment entry' : 'Manual entry',
+    };
+  }
+  if (event.entityTable === 'recurring_entries') {
+    const item = data.recurringEntries.find((entry) => entry.id === event.entityId);
+    if (!item) return null;
+    return {
+      'Name': item.name, 'Amount': formatMoney(item.amount), 'Transaction type': typeById.get(item.typeId)?.name ?? 'Archived type',
+      'Category': item.categoryId ? (categoryById.get(item.categoryId)?.name ?? 'Archived category') : 'Transfer',
+      'Account': accountById.get(item.accountId)?.name ?? 'Archived account',
+      'To account': item.toAccountId ? (accountById.get(item.toAccountId)?.name ?? 'Archived account') : '—',
+      'Frequency': `Every ${item.intervalValue} ${item.intervalUnit}${item.intervalValue === 1 ? '' : 's'}`,
+      'Next due': formatDate(item.nextDate), 'End date': item.endDate ? formatDate(item.endDate) : 'No end date',
+      'Status': item.isActive ? 'Active' : 'Paused', 'Last processed': item.lastProcessedDate ? formatDate(item.lastProcessedDate) : 'Not processed yet',
+    };
+  }
+  if (event.entityTable === 'budgets') {
+    const item = data.budgets.find((budget) => budget.id === event.entityId);
+    if (!item) return null;
+    return { 'Category': categoryById.get(item.categoryId)?.name ?? 'Archived category', 'Monthly limit': formatMoney(item.amount) };
+  }
+  if (event.entityTable === 'accounts') {
+    const item = data.accounts.find((account) => account.id === event.entityId);
+    if (!item) return null;
+    return { 'Account name': item.name, 'Description': item.description || '—', 'Opening balance': formatMoney(item.openingBalance), 'Opening balance date': formatDate(item.openingBalanceDate), 'Account kind': item.isLiability ? 'Credit card / loan' : 'Asset', 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
+  }
+  if (event.entityTable === 'categories') {
+    const item = data.categories.find((category) => category.id === event.entityId);
+    if (!item) return null;
+    return { 'Category name': item.name, 'Emoji': item.emoji || 'None', 'Transaction types': item.transactionTypeIds.map((id) => typeById.get(id)?.name ?? 'Archived type').join(', ') || 'None', 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
+  }
+  if (event.entityTable === 'transaction_types') {
+    const item = data.transactionTypes.find((type) => type.id === event.entityId);
+    if (!item) return null;
+    return { 'Type name': item.name, 'Counts as': item.kind, 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
+  }
+  if (event.entityTable === 'investments') {
+    const item = data.investments.find((investment) => investment.id === event.entityId);
+    if (!item) return null;
+    return investmentDetails(item, accountById);
+  }
+  if (event.entityTable === 'authentication') return { 'Email': event.entityName, 'Action': event.action.replace(/_/g, ' '), 'Session policy': 'This browser tab only' };
+  return null;
+}
+
+function investmentDetails(item: Investment, accountById: Map<string, Account>): Record<string, unknown> {
+  return {
+    'Investment name': item.name, 'Investment type': item.investmentType, 'Capital': formatMoney(item.principalAmount),
+    'Funded from': accountById.get(item.fundingAccountId)?.name ?? 'Archived account',
+    'Investment Capital account': accountById.get(item.capitalAccountId)?.name ?? 'Archived account',
+    'Invested on': formatDate(item.investedOn), 'Status': item.status === 'active' ? 'Active' : 'Settled',
+    'Final value': item.finalAmount === null ? 'Not settled' : formatMoney(item.finalAmount),
+    'Profit / loss': item.profitAmount === null ? 'Not settled' : formatMoney(item.profitAmount),
+    'Settled on': item.settledOn ? formatDate(item.settledOn) : 'Not settled', 'Notes': item.notes || '—',
+  };
+}
+
+function ActivityLogRow({ event, data, expanded, onToggle }: { event: ActivityEvent; data: FinanceData; expanded: boolean; onToggle: () => void }) {
   const current = isDetailObject(event.details.current) ? event.details.current : null;
   const previous = isDetailObject(event.details.previous) ? event.details.previous : null;
   const directDetails = current || previous ? null : event.details;
-  const detailCount = [current, previous, directDetails].filter((value) => value && Object.keys(value).length).length;
+  const hasStoredDetails = [current, previous, directDetails].some((value) => value && Object.keys(value).length);
+  const fallbackDetails = hasStoredDetails ? null : currentRecordDetails(event, data);
   const dateTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(event.createdAt));
   return (
     <article className={`activity-row ${expanded ? 'expanded' : ''}`}>
-      <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time>{detailCount ? <button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button> : null}</div>
-      {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? directDetails ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!detailCount ? <p>Detailed fields were not captured for this earlier activity record.</p> : null}</div> : null}
+      <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time><button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button></div>
+      {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? directDetails ?? fallbackDetails ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!hasStoredDetails ? <p className="activity-legacy-note">{fallbackDetails ? 'This event happened before detailed auditing was enabled. Values above are the current record and may have changed since this activity.' : 'Detailed fields were not captured for this earlier activity, and its original record is no longer available.'}</p> : null}</div> : null}
     </article>
   );
 }
 
-export function SettingsView({ onExport, hasData }: { onExport: () => void; hasData: boolean }) {
+export function SettingsView({ onExport, hasData, data }: { onExport: () => void; hasData: boolean; data: FinanceData }) {
   return (
     <>
       <SectionHeading title="Settings" description="Preferences and your data." />
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Settings size={16} /> Currency</h3><p>All amounts are shown in Indian Rupees (₹).</p></div></div></div>
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Download size={16} /> Export data</h3><p>Download every transaction as a spreadsheet-ready CSV file.</p></div><button className="secondary-button" type="button" onClick={onExport} disabled={!hasData}><Download size={16} /> Export CSV</button></div></div>
-      <ActivityLog />
+      <ActivityLog data={data} />
     </>
   );
 }

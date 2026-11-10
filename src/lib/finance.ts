@@ -101,7 +101,8 @@ export type ActivityAction =
   | 'resumed'
   | 'processed'
   | 'signed_in'
-  | 'signed_out';
+  | 'signed_out'
+  | 'settled';
 
 export type ActivityEvent = {
   id: string;
