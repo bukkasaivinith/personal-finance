@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
@@ -18,6 +18,7 @@ import {
   type Account,
   type FinanceData,
   type TransactionKind,
+  type Transaction,
 } from '@/lib/finance';
 import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
@@ -76,13 +77,15 @@ export default function App() {
   const finance = useFinanceData();
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries } = data;
-  const actions = createFinanceActions(finance.refresh);
+  const actions = useMemo(() => createFinanceActions(finance.refresh), [finance.refresh]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | TransactionKind>('all');
+  const [recurringChecked, setRecurringChecked] = useState(false);
   const selectedMonth = monthOptions[0];
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
@@ -113,6 +116,17 @@ export default function App() {
     window.setTimeout(() => setToast(''), 2600);
   };
 
+  useEffect(() => {
+    if (!finance.data || recurringChecked) return;
+    setRecurringChecked(true);
+    void actions.processDueRecurringEntries()
+      .then((generated) => { if (generated) showToast(`${generated} due recurring ${generated === 1 ? 'entry was' : 'entries were'} added.`); })
+      .catch(() => {
+        // A recurring rule is optional. The Recurring page gives the user a
+        // visible retry button if processing is temporarily unavailable.
+      });
+  }, [actions, finance.data, recurringChecked]);
+
   const navigate = (view: View) => {
     setActiveView(view);
     setMobileMenuOpen(false);
@@ -134,7 +148,14 @@ export default function App() {
     showToast(`${input.name} updated.`);
   };
 
-  const addTransaction = async (draft: Parameters<typeof actions.addTransaction>[0]) => {
+  const saveTransaction = async (draft: Parameters<typeof actions.addTransaction>[0]) => {
+    if (editingTransaction) {
+      await actions.updateTransaction(editingTransaction.id, draft);
+      setEditingTransaction(null);
+      setModal(null);
+      showToast('Transaction updated. Balances and reports have been recalculated.');
+      return;
+    }
     await actions.addTransaction(draft);
     setModal(null);
     showToast('Transaction saved.');
@@ -191,7 +212,8 @@ export default function App() {
             filter={filter}
             onSearch={setSearchQuery}
             onFilter={setFilter}
-            onAddTransaction={() => setModal('transaction')}
+            onAddTransaction={() => { setEditingTransaction(null); setModal('transaction'); }}
+            onEditTransaction={(transaction) => { setEditingTransaction(transaction); setModal('transaction'); }}
           />
         );
       case 'accounts':
@@ -216,7 +238,7 @@ export default function App() {
           />
         );
       case 'analytics':
-        return <AnalyticsView summary={summary} monthLabel={monthLabel} />;
+        return <AnalyticsView transactions={transactions} />;
       case 'budgets':
         return (
           <BudgetsView
@@ -347,8 +369,9 @@ export default function App() {
           accounts={usableAccounts}
           transactionTypes={usableTypes}
           categories={usableCategories}
-          onClose={closeModal}
-          onSubmit={addTransaction}
+          transaction={editingTransaction}
+          onClose={() => { setEditingTransaction(null); closeModal(); }}
+          onSubmit={saveTransaction}
           onCreateTransactionType={actions.createTransactionType}
           onUpdateTransactionType={actions.updateTransactionType}
           onCreateCategory={actions.createCategory}

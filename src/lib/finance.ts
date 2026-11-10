@@ -44,6 +44,8 @@ export type Transaction = {
   toAccountId: string | null;
   toAccountName: string | null;
   toAccountArchived: boolean;
+  recurringEntryId: string | null;
+  source: 'manual' | 'scheduled';
 };
 
 export type TransactionDraft = {
@@ -63,7 +65,8 @@ export type Budget = {
   amount: number;
 };
 
-export type RecurringFrequency = 'weekly' | 'monthly';
+export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'custom';
+export type RecurringIntervalUnit = 'day' | 'week' | 'month';
 
 export type RecurringEntry = {
   id: string;
@@ -74,11 +77,40 @@ export type RecurringEntry = {
   accountId: string;
   toAccountId: string | null;
   frequency: RecurringFrequency;
+  intervalValue: number;
+  intervalUnit: RecurringIntervalUnit;
   nextDate: string;
+  endDate: string | null;
+  monthDay: number | null;
   isActive: boolean;
+  lastProcessedDate: string | null;
 };
 
-export type RecurringEntryDraft = Omit<RecurringEntry, 'id' | 'isActive'>;
+export type RecurringEntryDraft = Omit<RecurringEntry, 'id' | 'isActive' | 'lastProcessedDate'>;
+
+export type ActivityAction =
+  | 'created'
+  | 'renamed'
+  | 'deactivated'
+  | 'activated'
+  | 'deleted'
+  | 'restored'
+  | 'updated'
+  | 'permanently_deleted'
+  | 'paused'
+  | 'resumed'
+  | 'processed'
+  | 'signed_in'
+  | 'signed_out';
+
+export type ActivityEvent = {
+  id: string;
+  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication';
+  entityId: string;
+  entityName: string;
+  action: ActivityAction;
+  createdAt: string;
+};
 
 export type FinanceData = {
   transactionTypes: TransactionTypeOption[];

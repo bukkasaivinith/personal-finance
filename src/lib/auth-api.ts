@@ -9,7 +9,10 @@ export function isValidEmail(value: string): boolean {
 
 export async function createAccount(email: string, password: string): Promise<boolean> {
   const { data, error } = await supabase.auth.signUp({ email, password });
-  if (!error) return Boolean(data.session);
+  if (!error) {
+    if (data.session) void supabase.rpc('record_auth_activity', { p_action: 'signed_in' });
+    return Boolean(data.session);
+  }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
   if (error.message.toLowerCase().includes('password')) throw new Error('Choose a stronger password with at least 12 characters.');
   throw new Error('We could not create that account. Please check your details and try again.');
@@ -17,7 +20,12 @@ export async function createAccount(email: string, password: string): Promise<bo
 
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (!error) return;
+  if (!error) {
+    // Logging is best-effort. A successful sign-in must never fail because its
+    // optional audit record could not be written.
+    void supabase.rpc('record_auth_activity', { p_action: 'signed_in' });
+    return;
+  }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
   if (!error.status || error.status >= 500) throw new Error('The sign-in service is unavailable. Please try again.');
   throw new Error('Email or password is incorrect.');
@@ -35,6 +43,11 @@ export async function updatePassword(password: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
+  try {
+    await supabase.rpc('record_auth_activity', { p_action: 'signed_out' });
+  } catch {
+    // Signing out is more important than an optional audit event.
+  }
   await supabase.auth.signOut({ scope: 'local' });
 }
 

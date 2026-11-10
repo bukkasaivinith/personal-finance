@@ -1,5 +1,7 @@
 import {
   type Account,
+  type ActivityAction,
+  type ActivityEvent,
   type Budget,
   type CategoryOption,
   type FinanceData,
@@ -7,12 +9,12 @@ import {
   type RecurringEntry,
   type RecurringEntryDraft,
   type RecurringFrequency,
+  type RecurringIntervalUnit,
   type Transaction,
   type TransactionDraft,
   type TransactionKind,
   type TransactionTypeOption,
   isUsable,
-  toDateKey,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
 
@@ -44,6 +46,8 @@ type TransactionRow = {
   account_name: string;
   to_account_id: string | null;
   to_account_name: string | null;
+  recurring_entry_id: string | null;
+  transaction_source: 'manual' | 'scheduled';
 };
 type BudgetRow = { id: string; category_id: string; amount: number | string };
 type RecurringEntryRow = {
@@ -55,8 +59,20 @@ type RecurringEntryRow = {
   account_id: string;
   to_account_id: string | null;
   frequency: RecurringFrequency;
+  interval_value: number;
+  interval_unit: RecurringIntervalUnit;
   next_date: string;
+  end_date: string | null;
+  month_day: number | null;
   is_active: boolean;
+};
+type ActivityRow = {
+  id: string;
+  entity_table: ActivityEvent['entityTable'];
+  entity_id: string;
+  entity_name: string;
+  action: ActivityAction;
+  created_at: string;
 };
 
 type PostgrestError = { code?: string; message: string };
@@ -91,13 +107,13 @@ export async function loadFinanceData(): Promise<FinanceData> {
     supabase
       .from('transactions')
       .select(
-        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name',
+        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name, recurring_entry_id, transaction_source',
       )
       .order('transaction_date', { ascending: false }),
     supabase.from('budgets').select('id, category_id, amount').order('created_at', { ascending: true }),
     supabase
       .from('recurring_entries')
-      .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, next_date, is_active')
+      .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, interval_value, interval_unit, next_date, end_date, month_day, is_active')
       .order('next_date', { ascending: true }),
   ]);
 
@@ -172,6 +188,8 @@ export async function loadFinanceData(): Promise<FinanceData> {
       toAccountId: row.to_account_id,
       toAccountName: row.to_account_id === null ? null : destinationAccount?.name ?? row.to_account_name,
       toAccountArchived: row.to_account_id !== null && archived(destinationAccount),
+      recurringEntryId: row.recurring_entry_id,
+      source: row.transaction_source ?? 'manual',
     };
   });
 
@@ -180,6 +198,14 @@ export async function loadFinanceData(): Promise<FinanceData> {
     categoryId: row.category_id,
     amount: Number(row.amount),
   }));
+
+  const lastProcessedByEntry = new Map<string, string>();
+  for (const transaction of transactions) {
+    if (transaction.recurringEntryId && transaction.source === 'scheduled') {
+      const current = lastProcessedByEntry.get(transaction.recurringEntryId);
+      if (!current || transaction.date > current) lastProcessedByEntry.set(transaction.recurringEntryId, transaction.date);
+    }
+  }
 
   const recurringEntries: RecurringEntry[] = recurringRows.map((row) => ({
     id: row.id,
@@ -190,8 +216,13 @@ export async function loadFinanceData(): Promise<FinanceData> {
     accountId: row.account_id,
     toAccountId: row.to_account_id,
     frequency: row.frequency,
+    intervalValue: row.interval_value,
+    intervalUnit: row.interval_unit,
     nextDate: row.next_date,
+    endDate: row.end_date,
+    monthDay: row.month_day,
     isActive: row.is_active,
+    lastProcessedDate: lastProcessedByEntry.get(row.id) ?? null,
   }));
 
   return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries };
@@ -318,6 +349,23 @@ export async function insertTransaction(draft: TransactionDraft): Promise<void> 
   if (error) failWith(error);
 }
 
+export async function updateTransaction(id: string, draft: TransactionDraft): Promise<void> {
+  const { error } = await supabase
+    .from('transactions')
+    .update({
+      name: draft.name,
+      transaction_type_id: draft.typeId,
+      category_id: draft.categoryId,
+      amount: draft.amount,
+      transaction_date: draft.date,
+      transaction_time: draft.time,
+      account_id: draft.accountId,
+      to_account_id: draft.toAccountId,
+    })
+    .eq('id', id);
+  if (error) failWith(error);
+}
+
 export async function upsertBudget(input: { categoryId: string; amount: number }): Promise<void> {
   const { error } = await supabase.from('budgets').upsert(
     {
@@ -346,12 +394,38 @@ export async function insertRecurringEntry(input: RecurringEntryDraft): Promise<
       account_id: input.accountId,
       to_account_id: input.toAccountId,
       frequency: input.frequency,
+      interval_value: input.intervalValue,
+      interval_unit: input.intervalUnit,
       next_date: input.nextDate,
+      end_date: input.endDate,
+      month_day: input.monthDay,
     })
     .select('id')
     .single();
   if (error) failWith(error);
   return (data as { id: string }).id;
+}
+
+export async function updateRecurringEntry(id: string, input: RecurringEntryDraft): Promise<void> {
+  const { error } = await supabase
+    .from('recurring_entries')
+    .update({
+      name: input.name,
+      transaction_type_id: input.typeId,
+      category_id: input.categoryId,
+      amount: input.amount,
+      account_id: input.accountId,
+      to_account_id: input.toAccountId,
+      frequency: input.frequency,
+      interval_value: input.intervalValue,
+      interval_unit: input.intervalUnit,
+      next_date: input.nextDate,
+      end_date: input.endDate,
+      month_day: input.monthDay,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (error) failWith(error);
 }
 
 export async function setRecurringEntryActive(id: string, isActive: boolean): Promise<void> {
@@ -367,36 +441,40 @@ export async function deleteRecurringEntry(id: string): Promise<void> {
   if (error) failWith(error);
 }
 
-function nextRecurringDate(dateKey: string, frequency: RecurringFrequency): string {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const current = new Date(year, month - 1, day, 12);
-  if (frequency === 'weekly') {
-    current.setDate(current.getDate() + 7);
-    return toDateKey(current);
-  }
-
-  const nextMonthIndex = current.getMonth() + 1;
-  const nextYear = current.getFullYear() + Math.floor(nextMonthIndex / 12);
-  const nextMonth = nextMonthIndex % 12;
-  const lastDay = new Date(nextYear, nextMonth + 1, 0).getDate();
-  return toDateKey(new Date(nextYear, nextMonth, Math.min(current.getDate(), lastDay), 12));
+export async function processDueRecurringEntries(): Promise<number> {
+  const { data, error } = await supabase.rpc('process_due_recurring_entries');
+  if (error) failWith(error);
+  return Number(data ?? 0);
 }
 
-export async function recordRecurringEntry(entry: RecurringEntry): Promise<void> {
-  await insertTransaction({
-    name: entry.name,
-    typeId: entry.typeId,
-    categoryId: entry.categoryId,
-    amount: entry.amount,
-    date: entry.nextDate,
-    time: null,
-    accountId: entry.accountId,
-    toAccountId: entry.toAccountId,
-  });
-
-  const { error } = await supabase
-    .from('recurring_entries')
-    .update({ next_date: nextRecurringDate(entry.nextDate, entry.frequency), updated_at: new Date().toISOString() })
-    .eq('id', entry.id);
+export async function loadActivityEvents(input: {
+  action?: ActivityAction | 'all';
+  entity?: ActivityEvent['entityTable'] | 'all';
+  from?: string;
+  to?: string;
+  page: number;
+  pageSize: number;
+}): Promise<{ events: ActivityEvent[]; hasMore: boolean }> {
+  const start = Math.max(0, input.page * input.pageSize);
+  const end = start + input.pageSize - 1;
+  let query = supabase
+    .from('audit_events')
+    .select('id, entity_table, entity_id, entity_name, action, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(start, end);
+  if (input.action && input.action !== 'all') query = query.eq('action', input.action);
+  if (input.entity && input.entity !== 'all') query = query.eq('entity_table', input.entity);
+  if (input.from) query = query.gte('created_at', `${input.from}T00:00:00`);
+  if (input.to) query = query.lte('created_at', `${input.to}T23:59:59.999`);
+  const { data, error, count } = await query;
   if (error) failWith(error);
+  const events = ((data ?? []) as ActivityRow[]).map((row) => ({
+    id: row.id,
+    entityTable: row.entity_table,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    action: row.action,
+    createdAt: row.created_at,
+  }));
+  return { events, hasMore: (count ?? 0) > start + input.pageSize };
 }

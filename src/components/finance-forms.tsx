@@ -10,6 +10,7 @@ import {
   type Account,
   type CategoryOption,
   type TransactionDraft,
+  type Transaction,
   type TransactionKind,
   type TransactionTypeOption,
 } from '@/lib/finance';
@@ -106,6 +107,7 @@ export function AddTransactionModal({
   onUpdateCategory,
   onCreateAccount,
   onUpdateAccount,
+  transaction,
 }: {
   accounts: Account[];
   transactionTypes: TransactionTypeOption[];
@@ -118,15 +120,17 @@ export function AddTransactionModal({
   onUpdateCategory: (id: string, input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] }) => Promise<void>;
   onCreateAccount: (draft: AccountDraft) => Promise<string>;
   onUpdateAccount: (id: string, input: { name: string; description: string }) => Promise<void>;
+  transaction?: Transaction | null;
 }) {
-  const [typeId, setTypeId] = useState('');
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [accountId, setAccountId] = useState('');
-  const [toAccountId, setToAccountId] = useState('');
-  const [date, setDate] = useState(todayKey());
-  const [time, setTime] = useState(currentTimeKey());
+  const editing = Boolean(transaction);
+  const [typeId, setTypeId] = useState(transaction?.typeId ?? '');
+  const [name, setName] = useState(transaction?.name ?? '');
+  const [amount, setAmount] = useState(transaction ? String(transaction.amount) : '');
+  const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? '');
+  const [accountId, setAccountId] = useState(transaction?.accountId ?? '');
+  const [toAccountId, setToAccountId] = useState(transaction?.toAccountId ?? '');
+  const [date, setDate] = useState(transaction?.date ?? todayKey());
+  const [time, setTime] = useState(transaction?.time ?? currentTimeKey());
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -189,8 +193,9 @@ export function AddTransactionModal({
   };
 
   return (
-    <ModalShell eyebrow="Transactions" title="Add transaction" labelId="transaction-modal-title" onClose={onClose}>
+    <ModalShell eyebrow="Transactions" title={editing ? 'Edit transaction' : 'Add transaction'} labelId="transaction-modal-title" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
+        {editing ? <p className="modal-description">Update the details below. Account balances and reports recalculate from the corrected entry.</p> : null}
         <div className="form-grid">
           <TypePicker
             value={typeId}
@@ -272,7 +277,7 @@ export function AddTransactionModal({
             Cancel
           </button>
           <button className="primary-button" type="submit" disabled={saving}>
-            {saving ? 'Saving...' : 'Save transaction'}
+            {saving ? 'Saving...' : editing ? 'Save changes' : 'Save transaction'}
           </button>
         </div>
       </form>

@@ -50,6 +50,15 @@ The build intentionally stops if either required environment variable is missing
 
 The SQL migrations in `supabase/migrations` define the finance tables and audit trail. Apply any unapplied migrations to the same Supabase project before testing the deployed app.
 
+For the secured-workspace, recurring automation, transaction editing, and activity-log release, run [20261110120000_secure_workspaces_and_automation.sql](supabase/migrations/20261110120000_secure_workspaces_and_automation.sql) once in **Supabase → SQL Editor**:
+
+1. Open the file and copy its complete contents.
+2. Paste it into a new SQL query for the production project and choose **Run**.
+3. Sign in to the deployed app using the existing owner account. Its first successful workspace load claims the legacy single-user records and makes them private to that account.
+4. Verify a transaction, recurring rule, and Settings → Activity log. Then deploy the matching frontend commit.
+
+Do not deploy the new frontend before this migration has succeeded, because it reads the added recurring and transaction fields.
+
 ## Security note
 
-The included database policies are intentionally shared (`USING (true)`) for both anonymous and signed-in users. That means this codebase should be used as a single-user app unless the policies are changed to associate every row with `auth.uid()` before inviting other people.
+The latest security migration replaces the earlier shared policies with authenticated, owner-only row-level security. Never add a `VITE_SUPABASE_SERVICE_ROLE_KEY`; browser code uses only the publishable/anon key. Legacy data is intentionally claimable once because old rows had no owner; make sure the intended owner signs in first after the migration.

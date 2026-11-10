@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -8,6 +8,7 @@ import {
   FileText,
   PiggyBank,
   Plus,
+  Pencil,
   Search,
   Wallet,
 } from 'lucide-react';
@@ -80,10 +81,12 @@ function TransactionTable({
   transactions,
   compact = false,
   emptyMessage = 'No transactions match your filters.',
+  onEdit,
 }: {
   transactions: Transaction[];
   compact?: boolean;
   emptyMessage?: string;
+  onEdit?: (transaction: Transaction) => void;
 }) {
 
   return (
@@ -96,12 +99,13 @@ function TransactionTable({
             <th>Account</th>
             <th>Date & time</th>
             <th className="amount-column">Amount</th>
+            {onEdit ? <th aria-label="Actions" /> : null}
           </tr>
         </thead>
         <tbody>
           {transactions.length === 0 ? (
             <tr>
-              <td colSpan={compact ? 4 : 5} className="table-empty">
+              <td colSpan={(compact ? 4 : 5) + (onEdit ? 1 : 0)} className="table-empty">
                 {emptyMessage}
               </td>
             </tr>
@@ -122,6 +126,7 @@ function TransactionTable({
                         <small>
                           {transaction.categoryEmoji ? `${transaction.categoryEmoji} ` : ''}{transaction.categoryName ?? transaction.typeName}
                           {transaction.categoryArchived ? <ArchivedTag /> : null}
+                          {transaction.source === 'scheduled' ? <span className="scheduled-tag">Scheduled</span> : null}
                         </small>
                       </span>
                     </div>
@@ -153,6 +158,13 @@ function TransactionTable({
                     {sign}
                     {formatMoney(transaction.amount)}
                   </td>
+                  {onEdit ? (
+                    <td className="table-action-cell">
+                      <button className="ghost-button table-edit-button" type="button" onClick={() => onEdit(transaction)} aria-label={`Edit ${transaction.name}`}>
+                        <Pencil size={15} /> Edit
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })
@@ -373,6 +385,7 @@ export function TransactionsView({
   onSearch,
   onFilter,
   onAddTransaction,
+  onEditTransaction,
 }: {
   transactions: Transaction[];
   totalCount: number;
@@ -381,7 +394,13 @@ export function TransactionsView({
   onSearch: (value: string) => void;
   onFilter: (value: 'all' | TransactionKind) => void;
   onAddTransaction: () => void;
+  onEditTransaction: (transaction: Transaction) => void;
 }) {
+  const pageSize = 25;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(transactions.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const shownTransactions = transactions.slice(safePage * pageSize, (safePage + 1) * pageSize);
   return (
     <>
       <SectionHeading
@@ -413,7 +432,7 @@ export function TransactionsView({
               <Search size={16} />
               <input
                 value={searchQuery}
-                onChange={(event) => onSearch(event.target.value)}
+                onChange={(event) => { setPage(0); onSearch(event.target.value); }}
                 placeholder="Search transactions"
                 aria-label="Search transactions"
               />
@@ -421,7 +440,7 @@ export function TransactionsView({
             <select
               className="compact-select"
               value={filter}
-              onChange={(event) => onFilter(event.target.value as 'all' | TransactionKind)}
+              onChange={(event) => { setPage(0); onFilter(event.target.value as 'all' | TransactionKind); }}
               aria-label="Filter by kind"
             >
               <option value="all">All kinds</option>
@@ -430,7 +449,16 @@ export function TransactionsView({
               <option value="transfer">Counts as transfer</option>
             </select>
           </div>
-          <TransactionTable transactions={transactions} />
+          <TransactionTable transactions={shownTransactions} onEdit={onEditTransaction} />
+          {transactions.length > pageSize ? (
+            <div className="table-pagination" aria-label="Transaction pages">
+              <span>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, transactions.length)} of {transactions.length}</span>
+              <div>
+                <button className="secondary-button" type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={safePage === 0}>Previous</button>
+                <button className="secondary-button" type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={safePage >= pageCount - 1}>Next</button>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </>
@@ -517,49 +545,107 @@ export function AccountsView({
   );
 }
 
-export function AnalyticsView({ summary, monthLabel }: { summary: MonthSummary; monthLabel: string }) {
-  const hasData = summary.transactionCount > 0;
+type AnalyticsRange = 'daily' | 'weekly' | 'monthly' | 'custom';
+
+function dateOffset(date: Date, days: number): string {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return `${copy.getFullYear()}-${String(copy.getMonth() + 1).padStart(2, '0')}-${String(copy.getDate()).padStart(2, '0')}`;
+}
+
+function rangeForPreset(range: Exclude<AnalyticsRange, 'custom'>) {
+  const now = new Date();
+  const end = dateOffset(now, 0);
+  if (range === 'daily') return { from: end, to: end };
+  if (range === 'weekly') {
+    const mondayOffset = (now.getDay() + 6) % 7;
+    return { from: dateOffset(now, -mondayOffset), to: end };
+  }
+  return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: end };
+}
+
+export function AnalyticsView({ transactions }: { transactions: Transaction[] }) {
+  const [range, setRange] = useState<AnalyticsRange>('monthly');
+  const monthly = rangeForPreset('monthly');
+  const [customFrom, setCustomFrom] = useState(monthly.from);
+  const [customTo, setCustomTo] = useState(monthly.to);
+  const activeRange = range === 'custom' ? { from: customFrom, to: customTo } : rangeForPreset(range);
+  const analytics = useMemo(() => {
+    const filtered = transactions.filter((transaction) => transaction.date >= activeRange.from && transaction.date <= activeRange.to);
+    let income = 0;
+    let expense = 0;
+    const categories = new Map<string, number>();
+    const daily = new Map<string, { income: number; expense: number }>();
+    for (const transaction of filtered) {
+      if (!daily.has(transaction.date)) daily.set(transaction.date, { income: 0, expense: 0 });
+      const flow = daily.get(transaction.date)!;
+      if (transaction.kind === 'income') { income += transaction.amount; flow.income += transaction.amount; }
+      if (transaction.kind === 'expense') {
+        expense += transaction.amount;
+        flow.expense += transaction.amount;
+        const label = transaction.categoryName || 'Uncategorised';
+        categories.set(label, (categories.get(label) ?? 0) + transaction.amount);
+      }
+    }
+    const categoryTotals = [...categories].map(([name, total]) => ({ name, total, share: expense ? Math.round((total / expense) * 100) : 0 })).sort((a, b) => b.total - a.total);
+    const trend = [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, ...value }));
+    return { filtered, income, expense, categoryTotals, trend };
+  }, [transactions, activeRange.from, activeRange.to]);
+  const peak = Math.max(1, ...analytics.trend.flatMap((point) => [point.income, point.expense]));
+  const days = Math.max(1, Math.round((new Date(`${activeRange.to}T12:00:00`).getTime() - new Date(`${activeRange.from}T12:00:00`).getTime()) / 86_400_000) + 1);
+  const savingsRate = analytics.income ? Math.round(((analytics.income - analytics.expense) / analytics.income) * 100) : null;
   return (
     <>
-      <SectionHeading title="Analytics" description={`Insights for ${monthLabel}.`} />
+      <SectionHeading title="Analytics" description="Understand how money moves across the period you choose." />
+      <div className="analytics-controls surface-card">
+        <div className="analytics-tabs" role="tablist" aria-label="Analytics period">
+          {(['daily', 'weekly', 'monthly', 'custom'] as AnalyticsRange[]).map((option) => (
+            <button key={option} type="button" className={range === option ? 'active' : ''} onClick={() => setRange(option)}>{option[0].toUpperCase() + option.slice(1)}</button>
+          ))}
+        </div>
+        {range === 'custom' ? <div className="analytics-date-range"><label>From<input type="date" value={customFrom} max={customTo} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>To<input type="date" value={customTo} min={customFrom} onChange={(event) => setCustomTo(event.target.value)} /></label></div> : null}
+        <p>{formatDate(activeRange.from)} – {formatDate(activeRange.to)}</p>
+      </div>
       <div className="metrics-grid">
         <Metric
           label="Savings rate"
-          value={summary.savingsRate === null ? '—' : `${summary.savingsRate}%`}
+          value={savingsRate === null ? '—' : `${savingsRate}%`}
           foot="Share of income left over"
           icon={<PiggyBank size={16} />}
         />
         <Metric
           label="Largest expense"
-          value={summary.categories[0]?.name ?? '—'}
-          foot={summary.categories[0] ? formatMoney(summary.categories[0].total) : 'No expenses yet'}
+          value={analytics.categoryTotals[0]?.name ?? '—'}
+          foot={analytics.categoryTotals[0] ? formatMoney(analytics.categoryTotals[0].total) : 'No expenses yet'}
           icon={<ArrowUpRight size={16} />}
         />
         <Metric
           label="Daily average spend"
-          value={formatMoney(summary.dailyAverage)}
-          foot="Expenses divided by days so far"
+          value={formatMoney(analytics.expense / days)}
+          foot="Expenses divided by selected days"
           icon={<FileText size={16} />}
         />
         <Metric
           label="Transactions"
-          value={String(summary.transactionCount)}
-          foot="Recorded this month"
+          value={String(analytics.filtered.length)}
+          foot="Recorded in this period"
           icon={<ArrowLeftRight size={16} />}
         />
       </div>
-      <div className="surface-card">
+      <div className="content-grid analytics-grid">
         <div className="card-title-row">
           <div>
-            <h3>Expenses by category</h3>
-            <p>Share of this month's spending</p>
+            <h3>Cash-flow trend</h3>
+            <p>Income and spending by day</p>
           </div>
         </div>
-        {hasData ? (
-          <CategoryBreakdown categories={summary.categories} />
-        ) : (
-          <p className="card-note">Record transactions for this month to see insights.</p>
-        )}
+        <div className="surface-card analytics-trend" role="img" aria-label="Income and expense trend for the selected dates">
+          {analytics.trend.length ? <div className="analytics-bars">{analytics.trend.map((point) => <div className="analytics-bar-pair" key={point.date} title={`${formatDate(point.date)} · income ${formatMoney(point.income)} · expense ${formatMoney(point.expense)}`}><i className="expense-bar" style={{ height: `${(point.expense / peak) * 100}%` }} /><i className="income-bar" style={{ height: `${(point.income / peak) * 100}%` }} /><small>{point.date.slice(8)}</small></div>)}</div> : <p className="card-note">Record transactions in this period to see your trend.</p>}
+        </div>
+        <div className="surface-card">
+          <div className="card-title-row"><div><h3>Expenses by category</h3><p>Share of selected spending</p></div></div>
+          {analytics.categoryTotals.length ? <CategoryBreakdown categories={analytics.categoryTotals} /> : <p className="card-note">No expenses in this period.</p>}
+        </div>
       </div>
     </>
   );
