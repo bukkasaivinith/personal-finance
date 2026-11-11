@@ -257,6 +257,7 @@ export default function App() {
         return (
           <RecurringView
             entries={recurringEntries}
+            transactions={transactions}
             categories={categories}
             accounts={accounts}
             transactionTypes={transactionTypes}

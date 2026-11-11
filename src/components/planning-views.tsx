@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { CalendarDays, Download, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
-import { EmptyPanel, ModalShell, SectionHeading } from '@/components/ui';
+import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
 import { loadActivityEvents } from '@/lib/finance-api';
+import {
+  AVERAGE_DAYS_PER_MONTH,
+  addDays,
+  frequencyLabel,
+  monthBounds,
+  monthlyEquivalent,
+  recurringDistribution,
+  scheduledOccurrences,
+  shiftMonthBounds,
+} from '@/lib/recurring-analytics';
 import {
   categoriesFor,
   currentMonthKey,
@@ -317,6 +327,7 @@ function RecurringModal({
 
 export function RecurringView({
   entries,
+  transactions,
   categories,
   accounts,
   transactionTypes,
@@ -324,6 +335,7 @@ export function RecurringView({
   onNotify,
 }: {
   entries: RecurringEntry[];
+  transactions: Transaction[];
   categories: CategoryOption[];
   accounts: Account[];
   transactionTypes: TransactionTypeOption[];
@@ -332,9 +344,130 @@ export function RecurringView({
 }) {
   const [editingEntry, setEditingEntry] = useState<RecurringEntry | null | undefined>(undefined);
   const [busyId, setBusyId] = useState('');
-  const typeById = new Map(transactionTypes.map((item) => [item.id, item]));
-  const categoryById = new Map(categories.map((item) => [item.id, item]));
-  const accountById = new Map(accounts.map((item) => [item.id, item]));
+  const [distributionMode, setDistributionMode] = useState<'category' | 'account'>('category');
+  const [selectedDistributionId, setSelectedDistributionId] = useState('');
+  const [rangePreset, setRangePreset] = useState<'next7' | 'next30' | 'thisMonth' | 'nextMonth' | 'custom'>('next30');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [selectedDate, setSelectedDate] = useState('');
+  const [entryKindFilter, setEntryKindFilter] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
+  const [entryStateFilter, setEntryStateFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [entryCategoryFilter, setEntryCategoryFilter] = useState('all');
+  const [entryAccountFilter, setEntryAccountFilter] = useState('all');
+  const [entrySort, setEntrySort] = useState<'nextDate' | 'amount' | 'name'>('nextDate');
+  const typeById = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item])), [transactionTypes]);
+  const categoryById = useMemo(() => new Map(categories.map((item) => [item.id, item])), [categories]);
+  const accountById = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
+  const kindByTypeId = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item.kind])), [transactionTypes]);
+  const today = todayKey();
+
+  const activeExpenseEntries = useMemo(
+    () => entries.filter((entry) => entry.isActive && kindByTypeId.get(entry.typeId) === 'expense'),
+    [entries, kindByTypeId],
+  );
+  const activeIncomeEntries = useMemo(
+    () => entries.filter((entry) => entry.isActive && kindByTypeId.get(entry.typeId) === 'income'),
+    [entries, kindByTypeId],
+  );
+  const pausedExpenseCount = useMemo(
+    () => entries.filter((entry) => !entry.isActive && kindByTypeId.get(entry.typeId) === 'expense').length,
+    [entries, kindByTypeId],
+  );
+  const monthlyExpense = useMemo(() => activeExpenseEntries.reduce((total, entry) => total + monthlyEquivalent(entry), 0), [activeExpenseEntries]);
+  const monthlyIncome = useMemo(() => activeIncomeEntries.reduce((total, entry) => total + monthlyEquivalent(entry), 0), [activeIncomeEntries]);
+  const netMonthlyCashFlow = monthlyIncome - monthlyExpense;
+
+  const upcoming = useMemo(
+    () => scheduledOccurrences(entries, transactions, kindByTypeId, today, addDays(today, 29))
+      .filter((occurrence) => occurrence.kind === 'expense' && occurrence.status === 'scheduled'),
+    [entries, transactions, kindByTypeId, today],
+  );
+  const upcomingSeven = useMemo(
+    () => upcoming.filter((occurrence) => occurrence.date <= addDays(today, 6)),
+    [upcoming, today],
+  );
+  const upcomingThirtyAmount = useMemo(() => upcoming.reduce((total, occurrence) => total + occurrence.amount, 0), [upcoming]);
+  const upcomingSevenAmount = useMemo(() => upcomingSeven.reduce((total, occurrence) => total + occurrence.amount, 0), [upcomingSeven]);
+
+  const distributionLabels = useMemo(() => {
+    const source = distributionMode === 'category' ? categories : accounts;
+    return new Map(source.map((item) => [item.id, { name: item.name, emoji: 'emoji' in item ? item.emoji : null }]));
+  }, [distributionMode, categories, accounts]);
+  const distribution = useMemo(
+    () => recurringDistribution(entries, kindByTypeId, distributionMode, distributionLabels),
+    [entries, kindByTypeId, distributionMode, distributionLabels],
+  );
+  const donutBackground = useMemo(() => {
+    if (distribution.length === 0) return '#edf1ec';
+    let position = 0;
+    const colors = ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'];
+    return `conic-gradient(${distribution.map((item, index) => {
+      const next = position + item.share * 100;
+      const segment = `${colors[index % colors.length]} ${position}% ${next}%`;
+      position = next;
+      return segment;
+    }).join(', ')})`;
+  }, [distribution]);
+  const selectedDistribution = distribution.find((item) => item.id === selectedDistributionId) ?? null;
+
+  const analysisRange = useMemo(() => {
+    if (rangePreset === 'next7') return { start: today, end: addDays(today, 6), label: 'Next 7 days' };
+    if (rangePreset === 'next30') return { start: today, end: addDays(today, 29), label: 'Next 30 days' };
+    if (rangePreset === 'thisMonth') {
+      const bounds = monthBounds(today);
+      return { ...bounds, label: 'This month' };
+    }
+    if (rangePreset === 'nextMonth') return { ...shiftMonthBounds(today, 1), label: 'Next month' };
+    return {
+      start: customFrom || today,
+      end: customTo && customTo >= (customFrom || today) ? customTo : customFrom || today,
+      label: 'Custom range',
+    };
+  }, [rangePreset, customFrom, customTo, today]);
+  const dateOccurrences = useMemo(
+    () => scheduledOccurrences(entries, transactions, kindByTypeId, analysisRange.start, analysisRange.end)
+      .filter((occurrence) => occurrence.kind === 'expense'),
+    [entries, transactions, kindByTypeId, analysisRange],
+  );
+  const dailySchedule = useMemo(() => {
+    const dates = new Map<string, { date: string; total: number; processed: number; scheduled: number; occurrences: typeof dateOccurrences }>();
+    for (const occurrence of dateOccurrences) {
+      const current = dates.get(occurrence.date) ?? { date: occurrence.date, total: 0, processed: 0, scheduled: 0, occurrences: [] };
+      current.total += occurrence.amount;
+      current[occurrence.status] += occurrence.amount;
+      current.occurrences.push(occurrence);
+      dates.set(occurrence.date, current);
+    }
+    return [...dates.values()].sort((left, right) => left.date.localeCompare(right.date));
+  }, [dateOccurrences]);
+  const selectedDay = dailySchedule.find((day) => day.date === selectedDate) ?? null;
+  const chartMaximum = Math.max(1, ...dailySchedule.map((day) => day.total));
+
+  const forecast = useMemo(() => [0, 1, 2].map((offset) => {
+    const bounds = shiftMonthBounds(today, offset);
+    const occurrences = scheduledOccurrences(entries, transactions, kindByTypeId, bounds.start, bounds.end);
+    const expense = occurrences.filter((item) => item.kind === 'expense').reduce((total, item) => total + item.amount, 0);
+    const income = occurrences.filter((item) => item.kind === 'income').reduce((total, item) => total + item.amount, 0);
+    return { ...bounds, expense, income, net: income - expense };
+  }), [entries, transactions, kindByTypeId, today]);
+  const forecastMaximum = Math.max(1, ...forecast.flatMap((month) => [month.expense, month.income]));
+
+  const filteredEntries = useMemo(() => {
+    const visible = entries.filter((entry) => {
+      const kind = kindByTypeId.get(entry.typeId);
+      if (entryKindFilter !== 'all' && kind !== entryKindFilter) return false;
+      if (entryStateFilter === 'active' && !entry.isActive) return false;
+      if (entryStateFilter === 'paused' && entry.isActive) return false;
+      if (entryCategoryFilter !== 'all' && entry.categoryId !== entryCategoryFilter) return false;
+      if (entryAccountFilter !== 'all' && entry.accountId !== entryAccountFilter) return false;
+      return true;
+    });
+    return [...visible].sort((left, right) => {
+      if (entrySort === 'amount') return right.amount - left.amount;
+      if (entrySort === 'name') return left.name.localeCompare(right.name);
+      return left.nextDate.localeCompare(right.nextDate) || left.name.localeCompare(right.name);
+    });
+  }, [entries, kindByTypeId, entryKindFilter, entryStateFilter, entryCategoryFilter, entryAccountFilter, entrySort]);
 
   const createEntry = async (draft: RecurringEntryDraft) => {
     if (editingEntry) {
@@ -371,11 +504,69 @@ export function RecurringView({
   return (
     <>
       <SectionHeading title="Recurring" description="Salary, rent, subscriptions and other repeating entries." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} />
+      <section className="recurring-dashboard" aria-label="Recurring financial commitments dashboard">
+        <div className="recurring-summary-grid">
+          <Metric label="Active recurring expenses" value={String(activeExpenseEntries.length)} foot={pausedExpenseCount ? `${pausedExpenseCount} paused expense${pausedExpenseCount === 1 ? '' : 's'}` : 'No paused recurring expenses'} icon={<Repeat2 size={17} />} />
+          <Metric label="Monthly recurring spending" value={formatMoney(monthlyExpense)} foot="Normalised from each schedule interval" icon={<CalendarDays size={17} />} />
+          <Metric label="Average daily commitment" value={formatMoney(monthlyExpense / AVERAGE_DAYS_PER_MONTH)} foot="Monthly total ÷ 30.4375 days" icon={<CalendarDays size={17} />} />
+          <Metric label="Monthly recurring income" value={formatMoney(monthlyIncome)} foot={`${activeIncomeEntries.length} active income ${activeIncomeEntries.length === 1 ? 'entry' : 'entries'}`} icon={<Repeat2 size={17} />} />
+          <Metric label="Net recurring cash flow" value={formatMoney(netMonthlyCashFlow)} foot={netMonthlyCashFlow >= 0 ? 'Positive monthly recurring cash flow' : 'Recurring expenses exceed recurring income'} icon={<PiggyBank size={17} />} />
+          <Metric label="Upcoming payments" value={String(upcoming.length)} foot={upcoming.length ? `${formatMoney(upcomingSevenAmount)} in 7 days · ${formatMoney(upcomingThirtyAmount)} in 30 days · next ${formatDate(upcoming[0].date)}` : 'No future recurring debits scheduled'} icon={<CalendarDays size={17} />} />
+        </div>
+
+        <div className="recurring-analytics-grid">
+          <section className="surface-card recurring-analytics-card">
+            <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>Monthly-normalised active expense commitments.</p></div><div className="analytics-tabs" aria-label="Distribution view"><button className={distributionMode === 'category' ? 'active' : ''} type="button" onClick={() => { setDistributionMode('category'); setSelectedDistributionId(''); }}>Category</button><button className={distributionMode === 'account' ? 'active' : ''} type="button" onClick={() => { setDistributionMode('account'); setSelectedDistributionId(''); }}>Account</button></div></div>
+            {distribution.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses to chart yet.</div> : <>
+              <div className="recurring-donut-layout">
+                <div className="recurring-donut" style={{ background: donutBackground }} aria-label={`Recurring expenses by ${distributionMode}`}><span>{formatMoney(monthlyExpense)}<small>per month</small></span></div>
+                <div className="recurring-distribution-list">
+                  {distribution.map((item, index) => <button className={`recurring-distribution-item ${selectedDistributionId === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedDistributionId(item.id)}><i style={{ background: ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'][index % 8] }} /><span>{item.emoji ? `${item.emoji} ` : ''}{item.label}<small>{item.entryCount} {item.entryCount === 1 ? 'entry' : 'entries'} · {(item.share * 100).toFixed(1)}%</small></span><b>{formatMoney(item.amount)}</b></button>)}
+                </div>
+              </div>
+              {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries">{selectedDistribution.entries.map((entry) => <div key={entry.id}><span>{entry.name}<small>{frequencyLabel(entry)} · {accountById.get(entry.accountId)?.name ?? 'Archived account'} · next {formatDate(entry.nextDate)}</small></span><b>{formatMoney(entry.amount)}</b></div>)}</div></div> : <p className="recurring-hint">Select a category or account to inspect its recurring entries.</p>}
+            </>}
+          </section>
+
+          <section className="surface-card recurring-analytics-card">
+            <div className="card-title-row"><div><h3>Scheduled expense dates</h3><p>Actual scheduled debits. Processed entries are marked separately.</p></div></div>
+            <div className="recurring-range-controls">
+              {([['next7', 'Next 7 days'], ['next30', 'Next 30 days'], ['thisMonth', 'This month'], ['nextMonth', 'Next month'], ['custom', 'Custom']] as const).map(([value, label]) => <button key={value} className={rangePreset === value ? 'active' : ''} type="button" onClick={() => setRangePreset(value)}>{label}</button>)}
+              {rangePreset === 'custom' ? <div className="recurring-custom-range"><label>From<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>To<input type="date" min={customFrom || undefined} value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></div> : null}
+            </div>
+            {dailySchedule.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses are scheduled in this range.</div> : <>
+              <div className="recurring-date-bars" aria-label={`${analysisRange.label} scheduled recurring expense chart`}>
+                {dailySchedule.map((day) => <button type="button" className={`recurring-date-bar ${selectedDate === day.date ? 'selected' : ''}`} key={day.date} onClick={() => setSelectedDate(day.date)} title={`${formatDate(day.date)}: ${formatMoney(day.total)}`}><span style={{ height: `${Math.max(7, Math.round((day.total / chartMaximum) * 100))}%` }} /><b>{formatMoney(day.total)}</b><small>{new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(new Date(`${day.date}T12:00:00`))}</small></button>)}
+              </div>
+              <p className="recurring-hint">{analysisRange.label}: {formatMoney(dailySchedule.reduce((total, day) => total + day.total, 0))} across {dailySchedule.length} scheduled date{dailySchedule.length === 1 ? '' : 's'}.</p>
+              {selectedDay ? <div className="recurring-selection-detail recurring-date-detail"><div><strong>{formatDate(selectedDay.date)}</strong><span>{formatMoney(selectedDay.total)} scheduled · {selectedDay.processed ? `${formatMoney(selectedDay.processed)} already processed` : 'Not processed yet'}</span></div><div className="recurring-selection-entries">{selectedDay.occurrences.map((occurrence) => <div key={occurrence.key}><span>{occurrence.entry.name}<small>{frequencyLabel(occurrence.entry)} · {accountById.get(occurrence.entry.accountId)?.name ?? 'Archived account'} · <em className={occurrence.status}>{occurrence.status === 'processed' ? 'Processed' : 'Scheduled'}</em></small></span><b>{formatMoney(occurrence.amount)}</b></div>)}</div></div> : <p className="recurring-hint">Select a scheduled date to inspect the entries behind it.</p>}
+            </>}
+          </section>
+        </div>
+
+        <section className="surface-card recurring-analytics-card recurring-forecast-card">
+          <div className="card-title-row"><div><h3>Monthly recurring expense forecast</h3><p>Actual scheduled occurrences for the current and next two months, including processed entries where available.</p></div><span className="recurring-legend"><i /> Expenses <i className="income" /> Income</span></div>
+          <div className="recurring-forecast-bars">
+            {forecast.map((month) => <article key={month.start}><div className="recurring-forecast-chart"><i className="expense" style={{ height: `${Math.max(4, Math.round((month.expense / forecastMaximum) * 100))}%` }} /><i className="income" style={{ height: `${Math.max(4, Math.round((month.income / forecastMaximum) * 100))}%` }} /></div><h4>{month.label}</h4><dl><div><dt>Expenses</dt><dd>{formatMoney(month.expense)}</dd></div><div><dt>Income</dt><dd>{formatMoney(month.income)}</dd></div><div><dt>Net cash flow</dt><dd className={month.net >= 0 ? 'positive' : 'negative'}>{formatMoney(month.net)}</dd></div></dl></article>)}
+          </div>
+        </section>
+      </section>
+
+      <div className="recurring-list-heading"><div><h3>Recurring entries</h3><p>Keep your existing schedules organised and ready to process.</p></div></div>
+      <div className="surface-card recurring-entry-filters">
+        <label>Type<select value={entryKindFilter} onChange={(event) => setEntryKindFilter(event.target.value as typeof entryKindFilter)}><option value="all">All entries</option><option value="expense">Expenses</option><option value="income">Income</option><option value="transfer">Transfers</option></select></label>
+        <label>Status<select value={entryStateFilter} onChange={(event) => setEntryStateFilter(event.target.value as typeof entryStateFilter)}><option value="all">Active and paused</option><option value="active">Active</option><option value="paused">Paused</option></select></label>
+        <label>Category<select value={entryCategoryFilter} onChange={(event) => setEntryCategoryFilter(event.target.value)}><option value="all">All categories</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}</select></label>
+        <label>Account<select value={entryAccountFilter} onChange={(event) => setEntryAccountFilter(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+        <label>Sort<select value={entrySort} onChange={(event) => setEntrySort(event.target.value as typeof entrySort)}><option value="nextDate">Upcoming due date</option><option value="amount">Highest amount</option><option value="name">Name</option></select></label>
+      </div>
       {entries.length === 0 ? (
         <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No recurring entries yet" description="Add a repeating income, bill or transfer. It will generate once when its due date arrives." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} /></div>
+      ) : filteredEntries.length === 0 ? (
+        <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No matching recurring entries" description="Try a different type, status, category or account filter." /></div>
       ) : (
         <div className="recurring-list">
-          {entries.map((entry) => {
+          {filteredEntries.map((entry) => {
             const type = typeById.get(entry.typeId);
             const category = entry.categoryId ? categoryById.get(entry.categoryId) : null;
             const account = accountById.get(entry.accountId);
