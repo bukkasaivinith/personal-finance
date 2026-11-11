@@ -355,6 +355,7 @@ export function RecurringView({
 }) {
   const [editingEntry, setEditingEntry] = useState<RecurringEntry | null | undefined>(undefined);
   const [busyId, setBusyId] = useState('');
+  const [distributionView, setDistributionView] = useState<'entry' | 'account'>('entry');
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
   const [scheduleMonth, setScheduleMonth] = useState(() => todayKey());
   const [entryKindFilter, setEntryKindFilter] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
@@ -398,13 +399,25 @@ export function RecurringView({
 
   const distribution = useMemo(() => {
     const total = activeExpenseEntries.reduce((sum, entry) => sum + monthlyEquivalent(entry), 0);
-    return activeExpenseEntries
-      .map((entry) => {
-        const amount = monthlyEquivalent(entry);
-        return { id: entry.id, label: entry.name, amount, share: total ? amount / total : 0, entry };
-      })
+    if (distributionView === 'entry') {
+      return activeExpenseEntries
+        .map((entry) => {
+          const amount = monthlyEquivalent(entry);
+          return { id: entry.id, label: entry.name, amount, share: total ? amount / total : 0, entries: [entry] };
+        })
+        .sort((left, right) => right.amount - left.amount || left.label.localeCompare(right.label));
+    }
+    const grouped = new Map<string, { label: string; amount: number; entries: RecurringEntry[] }>();
+    for (const entry of activeExpenseEntries) {
+      const current = grouped.get(entry.accountId) ?? { label: accountById.get(entry.accountId)?.name ?? 'Archived account', amount: 0, entries: [] };
+      current.amount += monthlyEquivalent(entry);
+      current.entries.push(entry);
+      grouped.set(entry.accountId, current);
+    }
+    return [...grouped.entries()]
+      .map(([id, item]) => ({ id, ...item, share: total ? item.amount / total : 0 }))
       .sort((left, right) => right.amount - left.amount || left.label.localeCompare(right.label));
-  }, [activeExpenseEntries]);
+  }, [activeExpenseEntries, accountById, distributionView]);
   const donutBackground = useMemo(() => {
     if (distribution.length === 0) return '#edf1ec';
     let position = 0;
@@ -503,15 +516,15 @@ export function RecurringView({
 
         <div className="recurring-analytics-grid">
           <section className="surface-card recurring-analytics-card recurring-distribution-card">
-            <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>Each active recurring expense, normalised to its monthly equivalent.</p></div></div>
+            <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>{distributionView === 'entry' ? 'Each active recurring expense, normalised to its monthly equivalent.' : 'The accounts recurring expenses are taken from, normalised to monthly equivalents.'}</p></div><div className="analytics-tabs" aria-label="Recurring expense distribution view"><button className={distributionView === 'entry' ? 'active' : ''} type="button" onClick={() => { setDistributionView('entry'); setSelectedDistributionId(''); }}>Recurring entries</button><button className={distributionView === 'account' ? 'active' : ''} type="button" onClick={() => { setDistributionView('account'); setSelectedDistributionId(''); }}>Accounts</button></div></div>
             {distribution.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses to chart yet.</div> : <>
               <div className="recurring-donut-layout">
                 <div className="recurring-donut" style={{ background: donutBackground }} aria-label="Recurring expenses by entry"><span>{formatMoney(monthlyExpense)}<small>per month</small></span></div>
                 <div className="recurring-distribution-list">
-                  {distribution.map((item, index) => <button className={`recurring-distribution-item ${selectedDistributionId === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedDistributionId(item.id)}><i style={{ background: ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'][index % 8] }} /><span>{item.label}<small>{(item.share * 100).toFixed(1)}% of recurring spending</small></span><b>{formatMoney(item.amount)}</b></button>)}
+                  {distribution.map((item, index) => <button className={`recurring-distribution-item ${selectedDistributionId === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedDistributionId(item.id)}><i style={{ background: ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'][index % 8] }} /><span>{item.label}<small>{distributionView === 'entry' ? `${accountById.get(item.entries[0].accountId)?.name ?? 'Archived account'} · ` : `${item.entries.length} ${item.entries.length === 1 ? 'entry' : 'entries'} · `}{(item.share * 100).toFixed(1)}% of recurring spending</small></span><b>{formatMoney(item.amount)}</b></button>)}
                 </div>
               </div>
-              {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries"><div><span>{selectedDistribution.entry.name}<small>{frequencyLabel(selectedDistribution.entry)} · {accountById.get(selectedDistribution.entry.accountId)?.name ?? 'Archived account'} · next {formatDate(selectedDistribution.entry.nextDate)}</small></span><b>{formatMoney(selectedDistribution.entry.amount)}</b></div></div></div> : <p className="recurring-hint">Select a recurring entry to inspect its schedule.</p>}
+              {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries">{selectedDistribution.entries.map((entry) => <div key={entry.id}><span>{entry.name}<small>{frequencyLabel(entry)} · {accountById.get(entry.accountId)?.name ?? 'Archived account'} · next {formatDate(entry.nextDate)}</small></span><b>{formatMoney(entry.amount)}</b></div>)}</div></div> : <p className="recurring-hint">Select a {distributionView === 'entry' ? 'recurring entry' : 'funding account'} to inspect its schedule.</p>}
             </>}
           </section>
         </div>
