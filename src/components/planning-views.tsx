@@ -358,11 +358,6 @@ export function RecurringView({
   const [distributionView, setDistributionView] = useState<'entry' | 'account'>('entry');
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
   const [scheduleMonth, setScheduleMonth] = useState(() => todayKey());
-  const [entryKindFilter, setEntryKindFilter] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
-  const [entryStateFilter, setEntryStateFilter] = useState<'all' | 'active' | 'paused'>('all');
-  const [entryCategoryFilter, setEntryCategoryFilter] = useState('all');
-  const [entryAccountFilter, setEntryAccountFilter] = useState('all');
-  const [entrySort, setEntrySort] = useState<'nextDate' | 'amount' | 'name'>('nextDate');
   const typeById = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item])), [transactionTypes]);
   const categoryById = useMemo(() => new Map(categories.map((item) => [item.id, item])), [categories]);
   const accountById = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
@@ -451,23 +446,6 @@ export function RecurringView({
     () => [...scheduledExpensesByDate.values()].reduce((total, occurrences) => total + occurrences.length, 0),
     [scheduledExpensesByDate],
   );
-
-  const filteredEntries = useMemo(() => {
-    const visible = entries.filter((entry) => {
-      const kind = kindByTypeId.get(entry.typeId);
-      if (entryKindFilter !== 'all' && kind !== entryKindFilter) return false;
-      if (entryStateFilter === 'active' && !entry.isActive) return false;
-      if (entryStateFilter === 'paused' && entry.isActive) return false;
-      if (entryCategoryFilter !== 'all' && entry.categoryId !== entryCategoryFilter) return false;
-      if (entryAccountFilter !== 'all' && entry.accountId !== entryAccountFilter) return false;
-      return true;
-    });
-    return [...visible].sort((left, right) => {
-      if (entrySort === 'amount') return right.amount - left.amount;
-      if (entrySort === 'name') return left.name.localeCompare(right.name);
-      return left.nextDate.localeCompare(right.nextDate) || left.name.localeCompare(right.name);
-    });
-  }, [entries, kindByTypeId, entryKindFilter, entryStateFilter, entryCategoryFilter, entryAccountFilter, entrySort]);
 
   const createEntry = async (draft: RecurringEntryDraft) => {
     if (editingEntry) {
@@ -562,20 +540,11 @@ export function RecurringView({
       </section>
 
       <div className="recurring-list-heading"><div><h3>Recurring entries</h3><p>Keep your existing schedules organised and ready to process.</p></div></div>
-      <div className="surface-card recurring-entry-filters">
-        <label>Type<select value={entryKindFilter} onChange={(event) => setEntryKindFilter(event.target.value as typeof entryKindFilter)}><option value="all">All entries</option><option value="expense">Expenses</option><option value="income">Income</option><option value="transfer">Transfers</option></select></label>
-        <label>Status<select value={entryStateFilter} onChange={(event) => setEntryStateFilter(event.target.value as typeof entryStateFilter)}><option value="all">Active and paused</option><option value="active">Active</option><option value="paused">Paused</option></select></label>
-        <label>Category<select value={entryCategoryFilter} onChange={(event) => setEntryCategoryFilter(event.target.value)}><option value="all">All categories</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}</select></label>
-        <label>Account<select value={entryAccountFilter} onChange={(event) => setEntryAccountFilter(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-        <label>Sort<select value={entrySort} onChange={(event) => setEntrySort(event.target.value as typeof entrySort)}><option value="nextDate">Upcoming due date</option><option value="amount">Highest amount</option><option value="name">Name</option></select></label>
-      </div>
       {entries.length === 0 ? (
         <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No recurring entries yet" description="Add a repeating income, bill or transfer. It will generate once when its due date arrives." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} /></div>
-      ) : filteredEntries.length === 0 ? (
-        <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No matching recurring entries" description="Try a different type, status, category or account filter." /></div>
       ) : (
         <div className="recurring-list">
-          {filteredEntries.map((entry) => {
+          {entries.map((entry) => {
             const type = typeById.get(entry.typeId);
             const category = entry.categoryId ? categoryById.get(entry.categoryId) : null;
             const account = accountById.get(entry.accountId);
