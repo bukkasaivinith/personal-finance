@@ -1,6 +1,20 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, Eye, EyeOff, IndianRupee, Loader2, ShieldCheck } from 'lucide-react';
-import { PASSWORD_MIN_LENGTH, createAccount, isValidEmail, sendPasswordReset, signIn, updatePassword } from '@/lib/auth-api';
+import { AuthEmailRateLimitError, PASSWORD_MIN_LENGTH, createAccount, isValidEmail, sendPasswordReset, signIn, updatePassword } from '@/lib/auth-api';
+
+const SIGNUP_COOLDOWN_KEY = 'personal-financing-signup-cooldown-until';
+const SIGNUP_COOLDOWN_MS = 60 * 60 * 1000;
+
+function signupCooldownUntil(): number {
+  const saved = Number(window.localStorage.getItem(SIGNUP_COOLDOWN_KEY) ?? 0);
+  return Number.isFinite(saved) && saved > Date.now() ? saved : 0;
+}
+
+function formatWait(remainingSeconds: number): string {
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, '0')}s` : `${seconds}s`;
+}
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return <main className="auth-page"><section className="auth-panel">{children}</section></main>;
@@ -24,9 +38,12 @@ export function SignInForm({ notice, onForgot, onCreateAccount }: { notice: stri
 }
 
 export function CreateAccountForm({ onBack }: { onBack: () => void }) {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [confirm, setConfirm] = useState(''); const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(false);
-  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const value = email.trim(); if (!isValidEmail(value)) { setError('Enter a valid email address.'); return; } if (password.length < PASSWORD_MIN_LENGTH) { setError(`Use at least ${PASSWORD_MIN_LENGTH} characters for your password.`); return; } if (password !== confirm) { setError('The passwords do not match.'); return; } setLoading(true); setError(''); try { const signedIn = await createAccount(value, password); setMessage(signedIn ? 'Your account is ready. Opening your workspace.' : 'Account created. Check your email to confirm it, then return to sign in.'); } catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not create your account.'); } finally { setLoading(false); } };
-  return <AuthShell><Brand /><div className="auth-heading"><h1>Create your account</h1><p>Set up a private workspace for your personal finances.</p></div>{message ? <p className="auth-notice" role="status">{message}</p> : <form className="auth-form" onSubmit={submit} noValidate><div className="auth-field"><label htmlFor="create-email">Email address</label><div className="auth-input"><input id="create-email" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={loading} /></div></div><PasswordInput id="create-password" label="Password" value={password} onChange={setPassword} placeholder="At least 12 characters" autoComplete="new-password" disabled={loading} /><PasswordInput id="create-confirm" label="Confirm password" value={confirm} onChange={setConfirm} placeholder="Re-enter your password" autoComplete="new-password" disabled={loading} />{error && <p className="form-error" role="alert">{error}</p>}<button className="auth-button" type="submit" disabled={loading}>{loading ? 'Creating account' : 'Create account'}</button></form>}<div className="auth-center"><button type="button" className="auth-link" onClick={onBack}>Back to sign in</button></div><Footer /></AuthShell>;
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [confirm, setConfirm] = useState(''); const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(false); const [cooldownUntil, setCooldownUntil] = useState(signupCooldownUntil); const [now, setNow] = useState(Date.now());
+  const remainingSeconds = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
+  useEffect(() => { if (!remainingSeconds) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [remainingSeconds]);
+  const startCooldown = () => { const until = Date.now() + SIGNUP_COOLDOWN_MS; window.localStorage.setItem(SIGNUP_COOLDOWN_KEY, String(until)); setCooldownUntil(until); setNow(Date.now()); };
+  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (loading || remainingSeconds) return; const value = email.trim(); if (!isValidEmail(value)) { setError('Enter a valid email address.'); return; } if (password.length < PASSWORD_MIN_LENGTH) { setError(`Use at least ${PASSWORD_MIN_LENGTH} characters for your password.`); return; } if (password !== confirm) { setError('The passwords do not match.'); return; } setLoading(true); setError(''); try { const signedIn = await createAccount(value, password); setMessage(signedIn ? 'Your account is ready. Opening your workspace.' : 'Account created. Check your email to confirm it, then return to sign in.'); } catch (caught) { if (caught instanceof AuthEmailRateLimitError) startCooldown(); setError(caught instanceof Error ? caught.message : 'We could not create your account.'); } finally { setLoading(false); } };
+  return <AuthShell><Brand /><div className="auth-heading"><h1>Create your account</h1><p>Set up a private workspace for your personal finances.</p></div>{message ? <p className="auth-notice" role="status">{message}</p> : <form className="auth-form" onSubmit={submit} noValidate><div className="auth-field"><label htmlFor="create-email">Email address</label><div className="auth-input"><input id="create-email" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={loading || Boolean(remainingSeconds)} /></div></div><PasswordInput id="create-password" label="Password" value={password} onChange={setPassword} placeholder="At least 12 characters" autoComplete="new-password" disabled={loading || Boolean(remainingSeconds)} /><PasswordInput id="create-confirm" label="Confirm password" value={confirm} onChange={setConfirm} placeholder="Re-enter your password" autoComplete="new-password" disabled={loading || Boolean(remainingSeconds)} />{error && <p className="form-error" role="alert">{error}</p>}{remainingSeconds ? <p className="auth-hint" role="status">You can try again in {formatWait(remainingSeconds)}. Please do not request another email before then.</p> : null}<button className="auth-button" type="submit" disabled={loading || Boolean(remainingSeconds)}>{loading ? 'Creating account' : remainingSeconds ? `Try again in ${formatWait(remainingSeconds)}` : 'Create account'}</button></form>}<div className="auth-center"><button type="button" className="auth-link" onClick={onBack}>Back to sign in</button></div><Footer /></AuthShell>;
 }
 
 export function ForgotPasswordForm({ onBack }: { onBack: () => void }) {

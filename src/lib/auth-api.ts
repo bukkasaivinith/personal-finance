@@ -4,6 +4,13 @@ import { openFinanceWorkspace } from '@/lib/workspace-api';
 export const PASSWORD_MIN_LENGTH = 12;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export class AuthEmailRateLimitError extends Error {
+  constructor() {
+    super('Confirmation emails are temporarily limited. Wait up to one hour, then submit this form once.');
+    this.name = 'AuthEmailRateLimitError';
+  }
+}
+
 export function isValidEmail(value: string): boolean {
   return value.length <= 254 && EMAIL_PATTERN.test(value);
 }
@@ -29,7 +36,7 @@ export async function createAccount(email: string, password: string): Promise<bo
     if (data.session) await recordAuthenticatedActivity('signed_in');
     return Boolean(data.session);
   }
-  if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
+  if (error.status === 429) throw new AuthEmailRateLimitError();
   if (error.message.toLowerCase().includes('password')) throw new Error('Choose a stronger password with at least 12 characters.');
   throw new Error('We could not create that account. Please check your details and try again.');
 }
