@@ -19,6 +19,7 @@ import {
   formatDate,
   formatMoney,
   formatTime,
+  isInvestmentManagedTransactionType,
   isUsable,
   parseAmount,
   todayKey,
@@ -260,7 +261,7 @@ function RecurringModal({
   onClose: () => void;
   onSubmit: (draft: RecurringEntryDraft) => Promise<void>;
 }) {
-  const usableTypes = transactionTypes.filter(isUsable);
+  const usableTypes = transactionTypes.filter((type) => isUsable(type) && !isInvestmentManagedTransactionType(type));
   const usableAccounts = accounts.filter(isUsable);
   const [typeId, setTypeId] = useState(entry?.typeId ?? usableTypes[0]?.id ?? '');
   const [name, setName] = useState(entry?.name ?? '');
