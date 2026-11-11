@@ -42,6 +42,8 @@
   margin: 29px 0 28px;
 }
 
+.mobile-workspace-picker { align-items: center; background: rgba(255, 255, 255, .045); border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px; display: flex; gap: 8px; margin-top: 18px; padding: 9px 11px; }.mobile-workspace-picker span { color: #aeb4af; font-size: 11px; }.mobile-workspace-picker select { background: transparent; border: 0; color: #fff; flex: 1; font: inherit; font-size: 12px; outline: 0; text-align: right; }.mobile-workspace-picker option { background: #242524; color: #fff; }
+
 .premium-mobile-shell .mobile-kind-tabs { margin-top: 0; }
 .premium-mobile-shell .mobile-kind-tabs button { font-size: 15px; }
 .premium-mobile-shell .mobile-kind-tabs button.active { border-bottom-color: #fff; }

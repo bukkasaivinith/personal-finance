@@ -7,6 +7,7 @@ import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/component
 import { InvestmentsView } from '@/components/investments-view';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
+import { WorkspaceSettings } from '@/components/workspace-settings';
 import { createFinanceActions } from '@/lib/finance-actions';
 import {
   formatMonth,
@@ -23,6 +24,8 @@ import {
 } from '@/lib/finance';
 import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
+import { useWorkspaceAccess } from '@/lib/use-workspace-access';
+import { supabase } from '@/lib/supabase';
 
 type ModalKind = 'transaction' | 'account';
 
@@ -42,6 +45,10 @@ const emptyFinance: FinanceData = {
 function csvCell(value: string): string {
   const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function SharedWorkspaceNotice({ title }: { title: string }) {
+  return <div className="surface-card"><EmptyPanel icon={<IndianRupee size={20} />} title={`${title} stay with the workspace owner`} description="Your shared access is limited to the accounts the owner selected. You can view or edit those account transactions according to your permission." /></div>;
 }
 
 function NavigationGroup({
@@ -77,10 +84,13 @@ function NavigationGroup({
 
 export default function App() {
   const [activeView, setActiveView] = useState<View>('overview');
-  const finance = useFinanceData();
+  const workspaceAccess = useWorkspaceAccess();
+  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState('');
+  const finance = useFinanceData(activeOwnerId);
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments, investmentTypes } = data;
-  const actions = useMemo(() => createFinanceActions(finance.refresh), [finance.refresh]);
+  const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -90,6 +100,28 @@ export default function App() {
   const [filter, setFilter] = useState<'all' | TransactionKind>('all');
   const [recurringChecked, setRecurringChecked] = useState(false);
   const selectedMonth = monthOptions[0];
+
+  const activeWorkspace = workspaceAccess.workspaces.find((workspace) => workspace.ownerId === activeOwnerId) ?? null;
+  const isWorkspaceOwner = activeWorkspace?.role === 'owner';
+  const canEditSharedWorkspace = activeWorkspace?.role === 'editor';
+  const canEditTransactions = Boolean(isWorkspaceOwner || canEditSharedWorkspace);
+
+  useEffect(() => {
+    void supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? ''));
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceAccess.workspaces.length) {
+      setActiveOwnerId(null);
+      return;
+    }
+    setActiveOwnerId((current) => {
+      if (current && workspaceAccess.workspaces.some((workspace) => workspace.ownerId === current)) return current;
+      return workspaceAccess.workspaces.find((workspace) => workspace.role === 'owner')?.ownerId ?? workspaceAccess.workspaces[0].ownerId;
+    });
+  }, [workspaceAccess.workspaces]);
+
+  useEffect(() => { setRecurringChecked(false); }, [activeOwnerId]);
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
   const usableTypes = useMemo(() => transactionTypes.filter(isUsable), [transactionTypes]);
@@ -120,7 +152,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!finance.data || recurringChecked) return;
+    if (!finance.data || recurringChecked || !isWorkspaceOwner) return;
     setRecurringChecked(true);
     void actions.processDueRecurringEntries()
       .then((generated) => { if (generated) showToast(`${generated} due recurring ${generated === 1 ? 'entry was' : 'entries were'} added.`); })
@@ -128,7 +160,7 @@ export default function App() {
         // A recurring rule is optional. The Recurring page gives the user a
         // visible retry button if processing is temporarily unavailable.
       });
-  }, [actions, finance.data, recurringChecked]);
+  }, [actions, finance.data, recurringChecked, isWorkspaceOwner]);
 
   const navigate = (view: View) => {
     setActiveView(view);
@@ -211,8 +243,8 @@ export default function App() {
             flows={flows}
             position={position}
             monthLabel={monthLabel}
-            onAddAccount={() => setModal('account')}
-            onAddTransaction={() => setModal('transaction')}
+            onAddAccount={isWorkspaceOwner ? () => setModal('account') : undefined}
+            onAddTransaction={canEditTransactions ? () => setModal('transaction') : undefined}
             onNavigate={navigate}
           />
         );
@@ -225,9 +257,9 @@ export default function App() {
             filter={filter}
             onSearch={setSearchQuery}
             onFilter={setFilter}
-            onAddTransaction={() => { setEditingTransaction(null); setModal('transaction'); }}
-            onEditTransaction={(transaction) => { setEditingTransaction(transaction); setModal('transaction'); }}
-            onDeleteTransaction={(transaction) => void deleteTransaction(transaction)}
+            onAddTransaction={canEditTransactions ? () => { setEditingTransaction(null); setModal('transaction'); } : undefined}
+            onEditTransaction={canEditTransactions ? (transaction) => { setEditingTransaction(transaction); setModal('transaction'); } : undefined}
+            onDeleteTransaction={canEditTransactions ? (transaction) => void deleteTransaction(transaction) : undefined}
           />
         );
       case 'accounts':
@@ -237,12 +269,12 @@ export default function App() {
             transactions={transactions}
             position={position}
             actions={actions}
-            onAddAccount={() => setModal('account')}
-            onEditAccount={setEditingAccount}
+            onAddAccount={isWorkspaceOwner ? () => setModal('account') : undefined}
+            onEditAccount={isWorkspaceOwner ? setEditingAccount : undefined}
           />
         );
       case 'setup':
-        return (
+        return isWorkspaceOwner ? (
           <SetupView
             transactionTypes={transactionTypes}
             categories={categories}
@@ -250,11 +282,11 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        );
+        ) : <SharedWorkspaceNotice title="Types & categories" />;
       case 'analytics':
         return <AnalyticsView transactions={transactions} />;
       case 'budgets':
-        return (
+        return isWorkspaceOwner ? (
           <BudgetsView
             budgets={budgets}
             categories={categories}
@@ -262,11 +294,11 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        );
+        ) : <SharedWorkspaceNotice title="Budgets" />;
       case 'goals':
         return <GoalsView onNotify={showToast} />;
       case 'recurring':
-        return (
+        return isWorkspaceOwner ? (
           <RecurringView
             entries={recurringEntries}
             transactions={transactions}
@@ -276,11 +308,11 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        );
+        ) : <SharedWorkspaceNotice title="Recurring" />;
       case 'investments':
-        return <InvestmentsView investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} />;
+        return isWorkspaceOwner ? <InvestmentsView investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} /> : <SharedWorkspaceNotice title="Investments" />;
       case 'settings':
-        return <SettingsView onExport={exportCsv} hasData={hasTransactions} data={data} />;
+        return <SettingsView onExport={exportCsv} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={activeWorkspace && currentUserId ? <WorkspaceSettings ownerId={activeWorkspace.ownerId} isOwner={Boolean(isWorkspaceOwner)} isPlatformAdmin={workspaceAccess.isPlatformAdmin} currentUserId={currentUserId} accounts={accounts} onWorkspaceChanged={async () => { await workspaceAccess.refresh(); await finance.refresh(); }} onDeleteOwnAccount={async () => { await supabase.auth.signOut({ scope: 'local' }); }} /> : undefined} />;
     }
   };
 
@@ -330,8 +362,16 @@ export default function App() {
           <div>
             <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
             <h1>{pageCopy[activeView].title}</h1>
+            {workspaceAccess.workspaces.length > 1 ? (
+              <label className="workspace-switcher">
+                <span>Workspace</span>
+                <select value={activeOwnerId ?? ''} onChange={(event) => { setActiveOwnerId(event.target.value); setRecurringChecked(false); }}>
+                  {workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared (${workspace.role})`}</option>)}
+                </select>
+              </label>
+            ) : null}
           </div>
-          {activeView !== 'transactions' ? (
+          {activeView !== 'transactions' && canEditTransactions ? (
             <div className="top-actions">
               <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
                 <span className="header-action-icon" aria-hidden="true">

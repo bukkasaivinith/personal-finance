@@ -28,7 +28,7 @@ import {
 } from '@/lib/finance-api';
 import type { ItemState } from '@/lib/finance';
 
-export function createFinanceActions(refresh: () => Promise<void>) {
+export function createFinanceActions(refresh: () => Promise<void>, workspaceOwnerId: string) {
   const run = async <T,>(operation: Promise<T>): Promise<T> => {
     const result = await operation;
     await refresh();
@@ -36,15 +36,15 @@ export function createFinanceActions(refresh: () => Promise<void>) {
   };
 
   return {
-    createTransactionType: (input: Parameters<typeof insertTransactionType>[0]) => run(insertTransactionType(input)),
+    createTransactionType: (input: Parameters<typeof insertTransactionType>[0]) => run(insertTransactionType(input, workspaceOwnerId)),
     updateTransactionType: (id: string, input: Parameters<typeof updateTransactionType>[1]) => run(updateTransactionType(id, input)),
-    createCategory: (input: Parameters<typeof insertCategory>[0]) => run(insertCategory(input)),
-    updateCategory: (id: string, input: Parameters<typeof updateCategory>[1]) => run(updateCategory(id, input)),
-    createAccount: (input: Parameters<typeof insertAccount>[0]) => run(insertAccount(input)),
+    createCategory: (input: Parameters<typeof insertCategory>[0]) => run(insertCategory(input, workspaceOwnerId)),
+    updateCategory: (id: string, input: Parameters<typeof updateCategory>[1]) => run(updateCategory(id, input, workspaceOwnerId)),
+    createAccount: (input: Parameters<typeof insertAccount>[0]) => run(insertAccount(input, workspaceOwnerId)),
     updateAccount: (id: string, input: Parameters<typeof updateAccount>[1]) => run(updateAccount(id, input)),
     setItemState: (table: ItemTable, id: string, state: ItemState) => run(setItemState(table, id, state)),
     deleteItemPermanently: (table: ItemTable, id: string) => run(deleteItemPermanently(table, id)),
-    addTransaction: (draft: Parameters<typeof insertTransaction>[0]) => run(insertTransaction(draft)),
+    addTransaction: (draft: Parameters<typeof insertTransaction>[0]) => run(insertTransaction(draft, workspaceOwnerId)),
     updateTransaction: (id: string, draft: Parameters<typeof updateTransaction>[1]) => run(updateTransaction(id, draft)),
     deleteTransaction: (id: string) => run(deleteTransaction(id)),
     createInvestmentType: (input: Parameters<typeof createInvestmentType>[0]) => run(createInvestmentType(input)),
@@ -54,9 +54,9 @@ export function createFinanceActions(refresh: () => Promise<void>) {
     updateInvestment: (id: string, input: Parameters<typeof updateInvestment>[1]) => run(updateInvestment(id, input)),
     deleteInvestment: (id: string) => run(deleteInvestment(id)),
     settleInvestment: (input: Parameters<typeof settleInvestment>[0]) => run(settleInvestment(input)),
-    saveBudget: (input: Parameters<typeof upsertBudget>[0]) => run(upsertBudget(input)),
+    saveBudget: (input: Parameters<typeof upsertBudget>[0]) => run(upsertBudget(input, workspaceOwnerId)),
     removeBudget: (id: string) => run(deleteBudget(id)),
-    createRecurringEntry: (input: Parameters<typeof insertRecurringEntry>[0]) => run(insertRecurringEntry(input)),
+    createRecurringEntry: (input: Parameters<typeof insertRecurringEntry>[0]) => run(insertRecurringEntry(input, workspaceOwnerId)),
     updateRecurringEntry: (id: string, input: Parameters<typeof updateRecurringEntry>[1]) => run(updateRecurringEntry(id, input)),
     setRecurringEntryActive: (id: string, isActive: boolean) => run(setRecurringEntryActive(id, isActive)),
     removeRecurringEntry: (id: string) => run(deleteRecurringEntry(id)),

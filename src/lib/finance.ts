@@ -50,6 +50,8 @@ export type Transaction = {
   toAccountId: string | null;
   toAccountName: string | null;
   toAccountArchived: boolean;
+  /** Direction of a transfer shown to a member when its other account is private. */
+  transferDirection: 'in' | 'out' | null;
   recurringEntryId: string | null;
   investmentId: string | null;
   source: 'manual' | 'scheduled' | 'investment';
@@ -109,16 +111,22 @@ export type ActivityAction =
   | 'processed'
   | 'signed_in'
   | 'signed_out'
-  | 'settled';
+  | 'settled'
+  | 'invited'
+  | 'access_granted'
+  | 'access_revoked'
+  | 'suspended'
+  | 'reactivated';
 
 export type ActivityEvent = {
   id: string;
-  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments' | 'investment_types';
+  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments' | 'investment_types' | 'workspace' | 'workspace_invitation';
   entityId: string;
   entityName: string;
   action: ActivityAction;
   createdAt: string;
   details: Record<string, unknown>;
+  actorEmail?: string;
 };
 
 export type InvestmentStatus = 'active' | 'settled';
@@ -265,8 +273,12 @@ export function signedBalance(account: Account, transactions: Transaction[]): nu
       balance -= transaction.amount;
     }
     if (transaction.kind === 'transfer') {
+      if (transaction.transferDirection === 'in' && transaction.accountId === account.id) balance += transaction.amount;
+      else if (transaction.transferDirection === 'out' && transaction.accountId === account.id) balance -= transaction.amount;
+      else {
       if (transaction.accountId === account.id) balance -= transaction.amount;
       if (transaction.toAccountId === account.id) balance += transaction.amount;
+      }
     }
   }
   return balance;

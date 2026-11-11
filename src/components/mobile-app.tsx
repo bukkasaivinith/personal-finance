@@ -1,10 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
 import { signOut } from '@/lib/auth-api';
 import { createFinanceActions } from '@/lib/finance-actions';
 import { categoriesFor, currentTimeKey, isInvestmentManagedTransactionType, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
 import { useFinanceData } from '@/lib/use-finance-data';
+import { useWorkspaceAccess } from '@/lib/use-workspace-access';
 import './mobile-app.css';
 
 const kinds: { value: TransactionKind; label: string }[] = [
@@ -14,8 +15,16 @@ const kinds: { value: TransactionKind; label: string }[] = [
 ];
 
 export function MobileApp() {
-  const finance = useFinanceData();
-  const actions = createFinanceActions(finance.refresh);
+  const workspaceAccess = useWorkspaceAccess();
+  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
+  const activeWorkspace = workspaceAccess.workspaces.find((workspace) => workspace.ownerId === workspaceOwnerId) ?? null;
+  const canEdit = activeWorkspace?.role === 'owner' || activeWorkspace?.role === 'editor';
+  useEffect(() => {
+    if (!workspaceAccess.workspaces.length) { setWorkspaceOwnerId(null); return; }
+    setWorkspaceOwnerId((current) => current && workspaceAccess.workspaces.some((workspace) => workspace.ownerId === current) ? current : (workspaceAccess.workspaces.find((workspace) => workspace.role === 'owner')?.ownerId ?? workspaceAccess.workspaces[0].ownerId));
+  }, [workspaceAccess.workspaces]);
+  const finance = useFinanceData(workspaceOwnerId);
+  const actions = useMemo(() => createFinanceActions(finance.refresh, workspaceOwnerId ?? ''), [finance.refresh, workspaceOwnerId]);
   const [kind, setKind] = useState<TransactionKind>('expense');
   const [amount, setAmount] = useState('');
   const [name, setName] = useState('');
@@ -108,6 +117,8 @@ export function MobileApp() {
             </div>
           </header>
 
+          {workspaceAccess.workspaces.length > 1 ? <label className="mobile-workspace-picker"><span>Workspace</span><select value={workspaceOwnerId ?? ''} onChange={(event) => setWorkspaceOwnerId(event.target.value)}>{workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared`}</option>)}</select></label> : null}
+
           <h1>New Transaction</h1>
           <div className="mobile-kind-tabs" role="tablist" aria-label="Transaction kind">
             {kinds.map((choice) => (
@@ -195,8 +206,8 @@ export function MobileApp() {
 
             {error ? <p className="mobile-error" role="alert">{error}</p> : null}
             {saved ? <p className="mobile-success" role="status"><Check size={17} /> Transaction saved</p> : null}
-            <button className="mobile-save" type="submit" disabled={saving}>
-              {saving ? 'Saving transaction...' : <><ArrowLeftRight size={18} /> Save Transaction</>}
+            <button className="mobile-save" type="submit" disabled={saving || !canEdit}>
+              {saving ? 'Saving transaction...' : !canEdit ? 'View-only access' : <><ArrowLeftRight size={18} /> Save Transaction</>}
             </button>
           </form>
         </section>

@@ -144,7 +144,7 @@ function TransactionTable({
                   <td>
                     {transaction.accountName}
                     {transaction.accountArchived ? <ArchivedTag /> : null}
-                    {transaction.kind === 'transfer' ? (
+                    {transaction.kind === 'transfer' && transaction.transferDirection === null ? (
                       <>
                         {' → '}
                         {transaction.toAccountName ?? '—'}
@@ -164,7 +164,7 @@ function TransactionTable({
                   </td>
                   {onEdit || onDelete ? (
                     <td className="table-action-cell">
-                      {transaction.investmentId ? <span className="managed-entry">Investment-managed</span> : <div className="table-row-actions">
+                      {transaction.investmentId ? <span className="managed-entry">Investment-managed</span> : transaction.transferDirection ? <span className="managed-entry">Private counterpart hidden</span> : <div className="table-row-actions">
                         {onEdit ? <button className="ghost-button table-edit-button" type="button" onClick={() => onEdit(transaction)} aria-label={`Edit ${transaction.name}`}><Pencil size={15} /> Edit</button> : null}
                         {onDelete ? <button className="ghost-button table-edit-button danger" type="button" onClick={() => onDelete(transaction)} aria-label={`Delete ${transaction.name}`}><Trash2 size={15} /> Delete</button> : null}
                       </div>}
@@ -262,8 +262,8 @@ export function OverviewView({
   flows: MonthlyFlow[];
   position: { assets: number; owed: number; net: number };
   monthLabel: string;
-  onAddAccount: () => void;
-  onAddTransaction: () => void;
+  onAddAccount?: () => void;
+  onAddTransaction?: () => void;
   onNavigate: (view: View) => void;
 }) {
   return (
@@ -283,11 +283,11 @@ export function OverviewView({
           icon={<Wallet size={20} />}
           title="Add your first account"
           description="Start with a bank account, cash, wallet, or credit card. Balances update as you record transactions."
-          action={
+          action={onAddAccount ? (
             <button className="primary-button" type="button" onClick={onAddAccount}>
               <Plus size={16} /> Add account
             </button>
-          }
+          ) : undefined}
         />
       ) : null}
 
@@ -349,11 +349,11 @@ export function OverviewView({
               icon={<FileText size={20} />}
               title="No transactions yet"
               description="Record income, expenses, or transfers to see them here."
-              action={
+              action={onAddTransaction ? (
                 <button className="primary-button" type="button" onClick={onAddTransaction}>
                   <Plus size={16} /> Add transaction
                 </button>
-              }
+              ) : undefined}
             />
           ) : (
             <TransactionTable transactions={transactions.slice(0, 4)} compact />
@@ -399,9 +399,9 @@ export function TransactionsView({
   filter: 'all' | TransactionKind;
   onSearch: (value: string) => void;
   onFilter: (value: 'all' | TransactionKind) => void;
-  onAddTransaction: () => void;
-  onEditTransaction: (transaction: Transaction) => void;
-  onDeleteTransaction: (transaction: Transaction) => void;
+  onAddTransaction?: () => void;
+  onEditTransaction?: (transaction: Transaction) => void;
+  onDeleteTransaction?: (transaction: Transaction) => void;
 }) {
   const pageSize = 25;
   const [page, setPage] = useState(0);
@@ -413,11 +413,11 @@ export function TransactionsView({
       <SectionHeading
         title="Transactions"
         description="Every income, expense and transfer you have recorded."
-        action={
+        action={onAddTransaction ? (
           <button className="primary-button" type="button" onClick={onAddTransaction}>
             <Plus size={16} /> Add transaction
           </button>
-        }
+        ) : undefined}
       />
       {totalCount === 0 ? (
         <div className="surface-card">
@@ -425,11 +425,11 @@ export function TransactionsView({
             icon={<FileText size={20} />}
             title="No transactions yet"
             description="Record your first income, expense, or transfer to start building your history."
-            action={
+            action={onAddTransaction ? (
               <button className="primary-button" type="button" onClick={onAddTransaction}>
                 <Plus size={16} /> Add transaction
               </button>
-            }
+            ) : undefined}
           />
         </div>
       ) : (
@@ -484,8 +484,8 @@ export function AccountsView({
   transactions: Transaction[];
   position: { assets: number; owed: number; net: number };
   actions: FinanceActions;
-  onAddAccount: () => void;
-  onEditAccount: (account: Account) => void;
+  onAddAccount?: () => void;
+  onEditAccount?: (account: Account) => void;
 }) {
   const rank = { active: 0, inactive: 1, deleted: 2 } as const;
   const ordered = [...accounts].sort((a, b) => rank[stateOf(a)] - rank[stateOf(b)]);
@@ -494,11 +494,11 @@ export function AccountsView({
       <SectionHeading
         title="Accounts"
         description="Bank accounts, cash, wallets and credit cards in one place."
-        action={
+        action={onAddAccount ? (
           <button className="primary-button" type="button" onClick={onAddAccount}>
             <Plus size={16} /> Add account
           </button>
-        }
+        ) : undefined}
       />
       <div className="metrics-grid">
         <Metric label="Total assets" value={formatMoney(position.assets)} foot="Bank, cash and wallets" icon={<Wallet size={16} />} />
@@ -517,11 +517,11 @@ export function AccountsView({
             icon={<Wallet size={20} />}
             title="No accounts yet"
             description="Add the places your money lives so every transaction has somewhere to go."
-            action={
+            action={onAddAccount ? (
               <button className="primary-button" type="button" onClick={onAddAccount}>
                 <Plus size={16} /> Add account
               </button>
-            }
+            ) : undefined}
           />
         ) : (
           <div className="account-list expanded">
@@ -532,16 +532,16 @@ export function AccountsView({
                   key={account.id}
                   account={account}
                   transactions={transactions}
-                  actions={
+                  actions={onEditAccount ? (
                     <ItemActions
                       name={account.name}
                       state={stateOf(account)}
                       usageCount={usage}
-                      onEdit={() => onEditAccount(account)}
+                      onEdit={onEditAccount ? () => onEditAccount(account) : undefined}
                       onSetState={(state) => actions.setItemState('accounts', account.id, state)}
                       onDeletePermanently={() => actions.deleteItemPermanently('accounts', account.id)}
                     />
-                  }
+                  ) : undefined}
                 />
               );
             })}

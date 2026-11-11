@@ -53,6 +53,7 @@ type TransactionRow = {
   recurring_entry_id: string | null;
   investment_id: string | null;
   transaction_source: 'manual' | 'scheduled' | 'investment';
+  visible_transfer_direction?: 'in' | 'out' | null;
 };
 type BudgetRow = { id: string; category_id: string; amount: number | string };
 type RecurringEntryRow = {
@@ -96,6 +97,7 @@ type ActivityRow = {
   action: ActivityAction;
   created_at: string;
   details: Record<string, unknown> | null;
+  actor_email?: string;
 };
 
 type PostgrestError = { code?: string; message: string };
@@ -112,37 +114,37 @@ function statusOf(row: StatusRow) {
   return { isActive: row.is_active, deletedAt: row.deleted_at };
 }
 
-export async function loadFinanceData(): Promise<FinanceData> {
+export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
   const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
+      .eq('user_id', workspaceOwnerId)
       .order('created_at', { ascending: true }),
     supabase
       .from('categories')
       .select('id, name, emoji, parent_id, is_active, deleted_at')
+      .eq('user_id', workspaceOwnerId)
       .order('created_at', { ascending: true }),
-    supabase.from('category_transaction_types').select('category_id, transaction_type_id'),
+    supabase.from('category_transaction_types').select('category_id, transaction_type_id').eq('user_id', workspaceOwnerId),
     supabase
       .from('accounts')
       .select('id, name, description, opening_balance, opening_balance_date, is_liability, is_active, deleted_at')
+      .eq('user_id', workspaceOwnerId)
       .order('created_at', { ascending: true }),
-    supabase
-      .from('transactions')
-      .select(
-        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name, recurring_entry_id, investment_id, transaction_source',
-      )
-      .order('transaction_date', { ascending: false }),
-    supabase.from('budgets').select('id, category_id, amount').order('created_at', { ascending: true }),
+    supabase.rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId }),
+    supabase.from('budgets').select('id, category_id, amount').eq('user_id', workspaceOwnerId).order('created_at', { ascending: true }),
     supabase
       .from('recurring_entries')
       .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, interval_value, interval_unit, next_date, end_date, month_day, is_active')
+      .eq('user_id', workspaceOwnerId)
       .order('next_date', { ascending: true }),
     supabase
       .from('investments')
       .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode')
+      .eq('user_id', workspaceOwnerId)
       .order('invested_on', { ascending: false }),
-    supabase.from('investment_types').select('id, name').order('name', { ascending: true }),
+    supabase.from('investment_types').select('id, name').eq('user_id', workspaceOwnerId).order('name', { ascending: true }),
   ]);
 
   for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult]) {
@@ -221,6 +223,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
       recurringEntryId: row.recurring_entry_id,
       investmentId: row.investment_id,
       source: row.transaction_source ?? 'manual',
+      transferDirection: row.visible_transfer_direction ?? null,
     };
   });
 
@@ -277,17 +280,17 @@ export async function loadFinanceData(): Promise<FinanceData> {
   return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes };
 }
 
-export async function insertTransactionType(input: { name: string; kind: TransactionKind }): Promise<string> {
+export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {
   const { data, error } = await supabase
     .from('transaction_types')
-    .insert({ name: input.name, kind: input.kind })
+    .insert({ name: input.name, kind: input.kind, user_id: workspaceOwnerId })
     .select('id')
     .single();
   if (error) failWith(error);
   return (data as { id: string }).id;
 }
 
-async function replaceCategoryLinks(categoryId: string, transactionTypeIds: string[]): Promise<void> {
+async function replaceCategoryLinks(categoryId: string, transactionTypeIds: string[], workspaceOwnerId: string): Promise<void> {
   const { error: clearError } = await supabase
     .from('category_transaction_types')
     .delete()
@@ -296,7 +299,7 @@ async function replaceCategoryLinks(categoryId: string, transactionTypeIds: stri
   if (transactionTypeIds.length === 0) return;
   const { error: linkError } = await supabase
     .from('category_transaction_types')
-    .insert(transactionTypeIds.map((typeId) => ({ category_id: categoryId, transaction_type_id: typeId })));
+    .insert(transactionTypeIds.map((typeId) => ({ category_id: categoryId, transaction_type_id: typeId, user_id: workspaceOwnerId })));
   if (linkError) failWith(linkError);
 }
 
@@ -305,28 +308,29 @@ export async function insertCategory(input: {
   emoji: string | null;
   parentId: string | null;
   transactionTypeIds: string[];
-}): Promise<string> {
+}, workspaceOwnerId: string): Promise<string> {
   const { data, error } = await supabase
     .from('categories')
-    .insert({ name: input.name, emoji: input.emoji, parent_id: input.parentId })
+    .insert({ name: input.name, emoji: input.emoji, parent_id: input.parentId, user_id: workspaceOwnerId })
     .select('id')
     .single();
   if (error) failWith(error);
   const categoryId = (data as { id: string }).id;
-  await replaceCategoryLinks(categoryId, input.transactionTypeIds);
+  await replaceCategoryLinks(categoryId, input.transactionTypeIds, workspaceOwnerId);
   return categoryId;
 }
 
 export async function updateCategory(
   id: string,
   input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] },
+  workspaceOwnerId: string,
 ): Promise<void> {
   const { error } = await supabase
     .from('categories')
     .update({ name: input.name, emoji: input.emoji, parent_id: input.parentId, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) failWith(error);
-  await replaceCategoryLinks(id, input.transactionTypeIds);
+  await replaceCategoryLinks(id, input.transactionTypeIds, workspaceOwnerId);
 }
 
 export async function updateTransactionType(id: string, input: { name: string; kind: TransactionKind }): Promise<void> {
@@ -368,7 +372,7 @@ export async function insertAccount(input: {
   openingBalance: number;
   openingBalanceDate: string;
   isLiability: boolean;
-}): Promise<string> {
+}, workspaceOwnerId: string): Promise<string> {
   const { data, error } = await supabase
     .from('accounts')
     .insert({
@@ -377,6 +381,7 @@ export async function insertAccount(input: {
       opening_balance: input.openingBalance,
       opening_balance_date: input.openingBalanceDate,
       is_liability: input.isLiability,
+      user_id: workspaceOwnerId,
     })
     .select('id')
     .single();
@@ -384,7 +389,7 @@ export async function insertAccount(input: {
   return (data as { id: string }).id;
 }
 
-export async function insertTransaction(draft: TransactionDraft): Promise<void> {
+export async function insertTransaction(draft: TransactionDraft, workspaceOwnerId: string): Promise<void> {
   const { error } = await supabase.from('transactions').insert({
     name: draft.name,
     transaction_type_id: draft.typeId,
@@ -394,6 +399,7 @@ export async function insertTransaction(draft: TransactionDraft): Promise<void> 
     transaction_time: draft.time,
     account_id: draft.accountId,
     to_account_id: draft.toAccountId,
+    user_id: workspaceOwnerId,
   });
   if (error) failWith(error);
 }
@@ -476,12 +482,13 @@ export async function settleInvestment(input: { id: string; finalAmount: number;
   if (error) failWith(error);
 }
 
-export async function upsertBudget(input: { categoryId: string; amount: number }): Promise<void> {
+export async function upsertBudget(input: { categoryId: string; amount: number }, workspaceOwnerId: string): Promise<void> {
   const { error } = await supabase.from('budgets').upsert(
     {
       category_id: input.categoryId,
       amount: input.amount,
       updated_at: new Date().toISOString(),
+      user_id: workspaceOwnerId,
     },
     { onConflict: 'category_id' },
   );
@@ -493,7 +500,7 @@ export async function deleteBudget(id: string): Promise<void> {
   if (error) failWith(error);
 }
 
-export async function insertRecurringEntry(input: RecurringEntryDraft): Promise<string> {
+export async function insertRecurringEntry(input: RecurringEntryDraft, workspaceOwnerId: string): Promise<string> {
   const { data, error } = await supabase
     .from('recurring_entries')
     .insert({
@@ -509,6 +516,7 @@ export async function insertRecurringEntry(input: RecurringEntryDraft): Promise<
       next_date: input.nextDate,
       end_date: input.endDate,
       month_day: input.monthDay,
+      user_id: workspaceOwnerId,
     })
     .select('id')
     .single();
@@ -558,6 +566,7 @@ export async function processDueRecurringEntries(): Promise<number> {
 }
 
 export async function loadActivityEvents(input: {
+  workspaceOwnerId: string;
   action?: ActivityAction | 'all';
   entity?: ActivityEvent['entityTable'] | 'all';
   from?: string;
@@ -566,19 +575,18 @@ export async function loadActivityEvents(input: {
   pageSize: number;
 }): Promise<{ events: ActivityEvent[]; hasMore: boolean }> {
   const start = Math.max(0, input.page * input.pageSize);
-  const end = start + input.pageSize - 1;
-  let query = supabase
-    .from('audit_events')
-    .select('id, entity_table, entity_id, entity_name, action, created_at, details', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(start, end);
-  if (input.action && input.action !== 'all') query = query.eq('action', input.action);
-  if (input.entity && input.entity !== 'all') query = query.eq('entity_table', input.entity);
-  if (input.from) query = query.gte('created_at', `${input.from}T00:00:00`);
-  if (input.to) query = query.lte('created_at', `${input.to}T23:59:59.999`);
-  const { data, error, count } = await query;
+  const { data, error } = await supabase.rpc('get_workspace_activity', {
+    p_owner_id: input.workspaceOwnerId,
+    p_action: input.action && input.action !== 'all' ? input.action : null,
+    p_entity: input.entity && input.entity !== 'all' ? input.entity : null,
+    p_from: input.from ? `${input.from}T00:00:00` : null,
+    p_to: input.to ? `${input.to}T23:59:59.999` : null,
+    p_limit: input.pageSize,
+    p_offset: start,
+  });
   if (error) failWith(error);
-  const events = ((data ?? []) as ActivityRow[]).map((row) => ({
+  const response = (data ?? {}) as { events?: ActivityRow[]; count?: number | string };
+  const events = (response.events ?? []).map((row) => ({
     id: row.id,
     entityTable: row.entity_table,
     entityId: row.entity_id,
@@ -586,6 +594,7 @@ export async function loadActivityEvents(input: {
     action: row.action,
     createdAt: row.created_at,
     details: row.details ?? {},
+    actorEmail: row.actor_email,
   }));
-  return { events, hasMore: (count ?? 0) > start + input.pageSize };
+  return { events, hasMore: Number(response.count ?? 0) > start + input.pageSize };
 }

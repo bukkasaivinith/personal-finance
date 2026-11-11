@@ -576,7 +576,7 @@ export function GoalsView({ onNotify }: { onNotify: (message: string) => void })
   return <PlanningEmptyView title="Savings goals" description="Track what you are saving toward." icon={<Target size={20} />} emptyTitle="No savings goals yet" emptyDescription="Goals with target amounts and deadlines will show their progress here." actionLabel="Create goal" onAction={() => onNotify('Savings goals are coming in the next phase.')} />;
 }
 
-function ActivityLog({ data }: { data: FinanceData }) {
+function ActivityLog({ data, workspaceOwnerId }: { data: FinanceData; workspaceOwnerId: string }) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [action, setAction] = useState<ActivityAction | 'all'>('all');
   const [entity, setEntity] = useState<ActivityEvent['entityTable'] | 'all'>('all');
@@ -591,7 +591,7 @@ function ActivityLog({ data }: { data: FinanceData }) {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    void loadActivityEvents({ action, entity, from: from || undefined, to: to || undefined, page, pageSize: 20 })
+    void loadActivityEvents({ workspaceOwnerId, action, entity, from: from || undefined, to: to || undefined, page, pageSize: 20 })
       .then((result) => {
         if (!active) return;
         setEvents(result.events);
@@ -603,7 +603,7 @@ function ActivityLog({ data }: { data: FinanceData }) {
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [action, entity, from, to, page]);
+  }, [action, entity, from, to, page, workspaceOwnerId]);
 
   const changeFilters = (next: () => void) => { setPage(0); next(); };
   const toggleDetails = (id: string) => {
@@ -615,7 +615,7 @@ function ActivityLog({ data }: { data: FinanceData }) {
   };
   return (
     <div className="surface-card activity-log-card">
-      <div className="card-title-row"><div><h3>Activity log</h3><p>Important changes to your finance workspace. Records cannot be edited here.</p></div></div>
+      <div className="card-title-row"><div><h3>Activity log</h3><p>Important changes to this workspace, including who made each change.</p></div></div>
       <div className="filter-row activity-filters">
         <select value={action} onChange={(event) => changeFilters(() => setAction(event.target.value as ActivityAction | 'all'))} aria-label="Filter activity by action">
           <option value="all">All actions</option><option value="created">Created</option><option value="updated">Updated</option><option value="renamed">Renamed</option><option value="deleted">Deleted</option><option value="paused">Paused</option><option value="resumed">Resumed</option><option value="signed_in">Signed in</option><option value="signed_out">Signed out</option>
@@ -729,19 +729,20 @@ function ActivityLogRow({ event, data, expanded, onToggle }: { event: ActivityEv
   const dateTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(event.createdAt));
   return (
     <article className={`activity-row ${expanded ? 'expanded' : ''}`}>
-      <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time><button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button></div>
+      <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}{event.actorEmail ? ` · by ${event.actorEmail}` : ''}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time><button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button></div>
       {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? directDetails ?? fallbackDetails ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!hasStoredDetails ? <p className="activity-legacy-note">{fallbackDetails ? 'This event happened before detailed auditing was enabled. Values above are the current record and may have changed since this activity.' : 'Detailed fields were not captured for this earlier activity, and its original record is no longer available.'}</p> : null}</div> : null}
     </article>
   );
 }
 
-export function SettingsView({ onExport, hasData, data }: { onExport: () => void; hasData: boolean; data: FinanceData }) {
+export function SettingsView({ onExport, hasData, data, workspaceOwnerId, workspaceControls }: { onExport: () => void; hasData: boolean; data: FinanceData; workspaceOwnerId: string; workspaceControls?: ReactNode }) {
   return (
     <>
       <SectionHeading title="Settings" description="Preferences and your data." />
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Settings size={16} /> Currency</h3><p>All amounts are shown in Indian Rupees (₹).</p></div></div></div>
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Download size={16} /> Export data</h3><p>Download every transaction as a spreadsheet-ready CSV file.</p></div><button className="secondary-button" type="button" onClick={onExport} disabled={!hasData}><Download size={16} /> Export CSV</button></div></div>
-      <ActivityLog data={data} />
+      {workspaceControls}
+      <ActivityLog data={data} workspaceOwnerId={workspaceOwnerId} />
     </>
   );
 }

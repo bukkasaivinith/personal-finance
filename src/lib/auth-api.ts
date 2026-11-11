@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { openFinanceWorkspace } from '@/lib/workspace-api';
 
 export const PASSWORD_MIN_LENGTH = 12;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -61,6 +62,5 @@ export async function signOut(): Promise<void> {
 }
 
 export async function claimWorkspace(): Promise<void> {
-  const { error } = await supabase.rpc('claim_unowned_finance_data');
-  if (error) throw new Error('We could not open your workspace. Please try again.');
+  await openFinanceWorkspace();
 }
