@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Download, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Download, List, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
@@ -359,6 +359,7 @@ export function RecurringView({
   const [distributionView, setDistributionView] = useState<'entry' | 'account'>('entry');
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
   const [scheduleMonth, setScheduleMonth] = useState(() => todayKey());
+  const [showEntriesPage, setShowEntriesPage] = useState(false);
   const typeById = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item])), [transactionTypes]);
   const categoryById = useMemo(() => new Map(categories.map((item) => [item.id, item])), [categories]);
   const accountById = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
@@ -480,9 +481,42 @@ export function RecurringView({
     } catch (error) { onNotify(errorMessage(error)); } finally { setBusyId(''); }
   };
 
+  if (showEntriesPage) {
+    return <>
+      <SectionHeading title="Recurring entries" description="Keep your existing schedules organised and ready to process." action={<div className="heading-actions"><button className="secondary-button" type="button" onClick={() => setShowEntriesPage(false)}><ArrowLeft size={15} /> Back to dashboard</button><button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button></div>} />
+      <section className="recurring-entries-page" aria-label="Recurring entries">
+        {entries.length === 0 ? (
+          <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No recurring entries yet" description="Add a repeating income, bill or transfer. It will generate once when its due date arrives." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} /></div>
+        ) : (
+          <div className="recurring-list">
+            {entries.map((entry) => {
+              const type = typeById.get(entry.typeId);
+              const category = entry.categoryId ? categoryById.get(entry.categoryId) : null;
+              const account = accountById.get(entry.accountId);
+              const due = entry.nextDate <= todayKey();
+              return <article className={`surface-card recurring-card ${entry.isActive ? '' : 'paused'}`} key={entry.id}>
+                <div className="recurring-icon">{category?.emoji || <Repeat2 size={18} />}</div>
+                <div className="recurring-main"><div className="recurring-title-row"><h3>{entry.name}</h3>{!entry.isActive ? <span className="status-tag inactive">Paused</span> : due ? <span className="due-tag">Due now</span> : null}</div><p>{type?.name || 'Archived type'} · {category?.name || (type?.kind === 'transfer' ? 'Transfer' : 'Archived category')} · {account?.name || 'Archived account'}</p><small>Every {entry.intervalValue} {entry.intervalUnit}{entry.intervalValue === 1 ? '' : 's'} · Next due {formatDate(entry.nextDate)}{entry.endDate ? ` · Ends ${formatDate(entry.endDate)}` : ''}{entry.lastProcessedDate ? ` · Last processed ${formatDate(entry.lastProcessedDate)}` : ''}</small></div>
+                <div className="recurring-amount"><strong className={type?.kind === 'income' ? 'positive' : ''}>{formatMoney(entry.amount)}</strong><span>{type?.kind || 'transaction'}</span></div>
+                <div className="item-actions recurring-actions">
+                  {due ? <button className="primary-button compact-primary" type="button" onClick={() => void processDue()} disabled={busyId === 'processing' || !entry.isActive}><Play size={14} /> Process due</button> : null}
+                  <button className="ghost-button" type="button" onClick={() => setEditingEntry(entry)} disabled={busyId === entry.id}><Pencil size={15} /> Edit</button>
+                  <button className="ghost-button" type="button" onClick={() => void changeActive(entry)} disabled={busyId === entry.id}>{entry.isActive ? 'Pause' : 'Resume'}</button>
+                  <button className="ghost-button danger" type="button" aria-label="Remove recurring entry" onClick={() => void remove(entry)} disabled={busyId === entry.id}><Trash2 size={15} /></button>
+                </div>
+              </article>;
+            })}
+          </div>
+        )}
+        {entries.some((entry) => entry.isActive && entry.nextDate <= todayKey()) ? <div className="recurring-process-row"><span>Due entries generate once only and are labelled Scheduled.</span><button className="secondary-button" type="button" onClick={() => void processDue()} disabled={busyId === 'processing'}>{busyId === 'processing' ? 'Processing...' : 'Process all due entries'}</button></div> : null}
+      </section>
+      {editingEntry !== undefined ? <RecurringModal transactionTypes={transactionTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
+    </>;
+  }
+
   return (
     <>
-      <SectionHeading title="Recurring" description="Salary, rent, subscriptions and other repeating entries." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} />
+      <SectionHeading title="Recurring" description="Salary, rent, subscriptions and other repeating entries." action={<div className="heading-actions"><button className="secondary-button" type="button" onClick={() => setShowEntriesPage(true)}><List size={15} /> View recurring entries</button><button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button></div>} />
       <section className="recurring-dashboard" aria-label="Recurring financial commitments dashboard">
         <div className="recurring-summary-grid">
           <Metric label="Active recurring expenses" value={String(activeExpenseEntries.length)} foot={pausedExpenseCount ? `${pausedExpenseCount} paused expense${pausedExpenseCount === 1 ? '' : 's'}` : 'No paused recurring expenses'} icon={<Repeat2 size={17} />} />
@@ -539,34 +573,6 @@ export function RecurringView({
         </section>
 
       </section>
-
-      <div className="recurring-list-heading"><div><h3>Recurring entries</h3><p>Keep your existing schedules organised and ready to process.</p></div></div>
-      {entries.length === 0 ? (
-        <div className="surface-card"><EmptyPanel icon={<CalendarDays size={20} />} title="No recurring entries yet" description="Add a repeating income, bill or transfer. It will generate once when its due date arrives." action={<button className="primary-button" type="button" onClick={() => setEditingEntry(null)}><Plus size={16} /> Add recurring entry</button>} /></div>
-      ) : (
-        <div className="recurring-list">
-          {entries.map((entry) => {
-            const type = typeById.get(entry.typeId);
-            const category = entry.categoryId ? categoryById.get(entry.categoryId) : null;
-            const account = accountById.get(entry.accountId);
-            const due = entry.nextDate <= todayKey();
-            return (
-              <article className={`surface-card recurring-card ${entry.isActive ? '' : 'paused'}`} key={entry.id}>
-                <div className="recurring-icon">{category?.emoji || <Repeat2 size={18} />}</div>
-                <div className="recurring-main"><div className="recurring-title-row"><h3>{entry.name}</h3>{!entry.isActive ? <span className="status-tag inactive">Paused</span> : due ? <span className="due-tag">Due now</span> : null}</div><p>{type?.name || 'Archived type'} · {category?.name || (type?.kind === 'transfer' ? 'Transfer' : 'Archived category')} · {account?.name || 'Archived account'}</p><small>Every {entry.intervalValue} {entry.intervalUnit}{entry.intervalValue === 1 ? '' : 's'} · Next due {formatDate(entry.nextDate)}{entry.endDate ? ` · Ends ${formatDate(entry.endDate)}` : ''}{entry.lastProcessedDate ? ` · Last processed ${formatDate(entry.lastProcessedDate)}` : ''}</small></div>
-                <div className="recurring-amount"><strong className={type?.kind === 'income' ? 'positive' : ''}>{formatMoney(entry.amount)}</strong><span>{type?.kind || 'transaction'}</span></div>
-                <div className="item-actions recurring-actions">
-                  {due ? <button className="primary-button compact-primary" type="button" onClick={() => void processDue()} disabled={busyId === 'processing' || !entry.isActive}><Play size={14} /> Process due</button> : null}
-                  <button className="ghost-button" type="button" onClick={() => setEditingEntry(entry)} disabled={busyId === entry.id}><Pencil size={15} /> Edit</button>
-                  <button className="ghost-button" type="button" onClick={() => void changeActive(entry)} disabled={busyId === entry.id}>{entry.isActive ? 'Pause' : 'Resume'}</button>
-                  <button className="ghost-button danger" type="button" aria-label="Remove recurring entry" onClick={() => void remove(entry)} disabled={busyId === entry.id}><Trash2 size={15} /></button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-      {entries.some((entry) => entry.isActive && entry.nextDate <= todayKey()) ? <div className="recurring-process-row"><span>Due entries generate once only and are labelled Scheduled.</span><button className="secondary-button" type="button" onClick={() => void processDue()} disabled={busyId === 'processing'}>{busyId === 'processing' ? 'Processing...' : 'Process all due entries'}</button></div> : null}
       {editingEntry !== undefined ? <RecurringModal transactionTypes={transactionTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
     </>
   );
