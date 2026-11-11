@@ -5,6 +5,9 @@ import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui'
 import type { FinanceActions } from '@/lib/finance-actions';
 import { formatDate, formatMoney, isUsable, parseAmount, todayKey, type Account, type Investment, type InvestmentDraft, type InvestmentType } from '@/lib/finance';
 
+const CREATE_INVESTMENT_TYPE = '__create_investment_type__';
+const MANAGE_INVESTMENT_TYPES = '__manage_investment_types__';
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }
@@ -16,6 +19,8 @@ function InvestmentTypeManager({
   onCreate,
   onUpdate,
   onDelete,
+  mode,
+  onClose,
 }: {
   investmentTypes: InvestmentType[];
   selectedTypeId?: string;
@@ -23,6 +28,8 @@ function InvestmentTypeManager({
   onCreate: (name: string) => Promise<string>;
   onUpdate: (id: string, name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  mode: 'create' | 'manage';
+  onClose: () => void;
 }) {
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState('');
@@ -37,6 +44,7 @@ function InvestmentTypeManager({
       const id = await onCreate(newName.trim());
       onSelectedTypeIdChange?.(id);
       setNewName('');
+      onClose();
     } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   };
   const saveType = async () => {
@@ -54,9 +62,9 @@ function InvestmentTypeManager({
   };
 
   return <section className="investment-type-manager">
-    <div className="investment-type-manager-heading"><span><Tag size={14} /> Investment types</span><small>Create reusable types for stocks, a business, loans to friends, or anything else.</small></div>
-    <div className="investment-type-create"><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Real estate" maxLength={40} disabled={busy} /><button className="secondary-button" type="button" onClick={() => void createType()} disabled={busy}>{busy ? 'Saving...' : 'Add type'}</button></div>
-    {investmentTypes.length ? <div className="investment-type-list">{investmentTypes.map((type) => editingId === type.id ? <div className="investment-type-row editing" key={type.id}><input value={editingName} onChange={(event) => setEditingName(event.target.value)} maxLength={40} autoFocus disabled={busy} /><div><button className="ghost-button" type="button" onClick={() => void saveType()} disabled={busy}>Save</button><button className="ghost-button" type="button" onClick={() => { setEditingId(''); setEditingName(''); }}>Cancel</button></div></div> : <div className="investment-type-row" key={type.id}><span>{type.name}</span><div><button className="ghost-button" type="button" aria-label={`Edit ${type.name}`} onClick={() => { setEditingId(type.id); setEditingName(type.name); setError(''); }} disabled={busy}><Pencil size={14} /></button><button className="ghost-button danger" type="button" aria-label={`Delete ${type.name}`} onClick={() => void removeType(type)} disabled={busy}><Trash2 size={14} /></button></div></div>)}</div> : <p className="form-hint">Create your first investment type to continue.</p>}
+    <div className="investment-type-manager-heading"><span><Tag size={14} /> {mode === 'create' ? 'New investment type' : 'Manage investment types'}</span><small>{mode === 'create' ? 'Create a reusable type for stocks, a business, loans to friends, or anything else.' : 'Correct the names of your existing types or remove a type you no longer use.'}</small></div>
+    {mode === 'create' ? <div className="investment-type-create"><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="e.g. Real estate" maxLength={40} autoFocus disabled={busy} /><button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="primary-button" type="button" onClick={() => void createType()} disabled={busy}>{busy ? 'Saving...' : 'Add type'}</button></div> : null}
+    {mode === 'manage' ? (investmentTypes.length ? <div className="investment-type-list">{investmentTypes.map((type) => editingId === type.id ? <div className="investment-type-row editing" key={type.id}><input value={editingName} onChange={(event) => setEditingName(event.target.value)} maxLength={40} autoFocus disabled={busy} /><div><button className="ghost-button" type="button" onClick={() => void saveType()} disabled={busy}>Save</button><button className="ghost-button" type="button" onClick={() => { setEditingId(''); setEditingName(''); }}>Cancel</button></div></div> : <div className="investment-type-row" key={type.id}><span>{type.name}</span><div><button className="ghost-button" type="button" aria-label={`Edit ${type.name}`} onClick={() => { setEditingId(type.id); setEditingName(type.name); setError(''); }} disabled={busy}><Pencil size={14} /></button><button className="ghost-button danger" type="button" aria-label={`Delete ${type.name}`} onClick={() => void removeType(type)} disabled={busy}><Trash2 size={14} /></button></div></div>)}</div> : <p className="form-hint">Create your first investment type to continue.</p>) : null}
     {error ? <p className="form-error">{error}</p> : null}
   </section>;
 }
@@ -84,12 +92,26 @@ function InvestmentModal({
   const settled = entry?.status === 'settled';
   const [name, setName] = useState(entry?.name ?? '');
   const [investmentTypeId, setInvestmentTypeId] = useState(entry?.investmentTypeId ?? investmentTypes[0]?.id ?? '');
+  const [typePanel, setTypePanel] = useState<'create' | 'manage' | null>(investmentTypes.length === 0 ? 'create' : null);
   const [notes, setNotes] = useState(entry?.notes ?? '');
   const [amount, setAmount] = useState(entry ? String(entry.principalAmount) : '');
   const [fundingAccountId, setFundingAccountId] = useState(entry?.fundingAccountId ?? usableAccounts[0]?.id ?? '');
   const [investedOn, setInvestedOn] = useState(entry?.investedOn ?? todayKey());
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const chooseType = (value: string) => {
+    if (value === CREATE_INVESTMENT_TYPE) {
+      setTypePanel('create');
+      return;
+    }
+    if (value === MANAGE_INVESTMENT_TYPES) {
+      setTypePanel('manage');
+      return;
+    }
+    setTypePanel(null);
+    setInvestmentTypeId(value);
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -108,8 +130,8 @@ function InvestmentModal({
       <p className="modal-description">{settled ? 'A settled investment keeps its account, capital and investment date to protect the recorded return. You can still correct its name, type and notes.' : 'Record any money you commit. Capital leaves the selected account. At settlement, capital return and profit are added back as separate transaction entries.'}</p>
       <div className="form-grid">
         <label className="full-field">Investment name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Nifty index fund" maxLength={80} autoFocus /></label>
-        <label className="full-field">Investment type<select value={investmentTypeId} onChange={(event) => setInvestmentTypeId(event.target.value)}><option value="">Choose an investment type</option>{investmentTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
-        <div className="full-field"><InvestmentTypeManager investmentTypes={investmentTypes} selectedTypeId={investmentTypeId} onSelectedTypeIdChange={setInvestmentTypeId} onCreate={onCreateType} onUpdate={onUpdateType} onDelete={onDeleteType} /></div>
+        <label className="full-field">Investment type<select value={investmentTypeId} onChange={(event) => chooseType(event.target.value)}><option value="">Choose an investment type</option>{investmentTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}<option value={CREATE_INVESTMENT_TYPE}>+ Create investment type</option>{investmentTypes.length ? <option value={MANAGE_INVESTMENT_TYPES}>Manage investment types</option> : null}</select></label>
+        {typePanel ? <div className="full-field"><InvestmentTypeManager investmentTypes={investmentTypes} selectedTypeId={investmentTypeId} onSelectedTypeIdChange={setInvestmentTypeId} onCreate={onCreateType} onUpdate={onUpdateType} onDelete={onDeleteType} mode={typePanel} onClose={() => setTypePanel(null)} /></div> : null}
         <label>Capital invested (₹)<input type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 15000" disabled={settled} /></label>
         <div><DatePicker label="Investment date" value={investedOn} onChange={setInvestedOn} disabled={settled} /></div>
         <label className="full-field">Invested from account<select value={fundingAccountId} onChange={(event) => setFundingAccountId(event.target.value)} disabled={settled}><option value="">Choose an account</option>{usableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
