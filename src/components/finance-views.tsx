@@ -13,6 +13,7 @@ import {
   Trash2,
   Wallet,
 } from 'lucide-react';
+import { DatePicker } from '@/components/date-picker';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
 import type { FinanceActions } from '@/lib/finance-actions';
@@ -609,7 +610,7 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
             <button key={option} type="button" className={range === option ? 'active' : ''} onClick={() => setRange(option)}>{option[0].toUpperCase() + option.slice(1)}</button>
           ))}
         </div>
-        {range === 'custom' ? <div className="analytics-date-range"><label>From<input type="date" value={customFrom} max={customTo} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>To<input type="date" value={customTo} min={customFrom} onChange={(event) => setCustomTo(event.target.value)} /></label></div> : null}
+        {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
         <p>{formatDate(activeRange.from)} – {formatDate(activeRange.to)}</p>
       </div>
       <div className="metrics-grid">

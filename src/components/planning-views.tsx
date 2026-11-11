@@ -10,7 +10,6 @@ import {
   frequencyLabel,
   monthBounds,
   monthlyEquivalent,
-  recurringDistribution,
   scheduledOccurrences,
   shiftMonthBounds,
 } from '@/lib/recurring-analytics';
@@ -316,7 +315,7 @@ function RecurringModal({
           <label className={isTransfer ? '' : 'full-field'}>{isTransfer ? 'From account' : 'Account'}<select value={accountId} onChange={(event) => { setAccountId(event.target.value); setToAccountId(''); }}><option value="">Choose an account</option>{usableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
           {isTransfer ? <label>To account<select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">Choose an account</option>{destinationAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label> : null}
           <div className="full-field"><DatePicker label="First due date" value={nextDate} onChange={setNextDate} /></div>
-          <label className="full-field">End date (optional)<input type="date" min={nextDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>
+          <div className="full-field"><DatePicker label="End date (optional)" value={endDate} onChange={setEndDate} min={nextDate} clearable placeholder="No end date" /></div>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
         <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || usableTypes.length === 0 || usableAccounts.length === 0}>{saving ? 'Saving...' : entry ? 'Save changes' : 'Add recurring entry'}</button></div>
@@ -344,7 +343,6 @@ export function RecurringView({
 }) {
   const [editingEntry, setEditingEntry] = useState<RecurringEntry | null | undefined>(undefined);
   const [busyId, setBusyId] = useState('');
-  const [distributionMode, setDistributionMode] = useState<'category' | 'account'>('category');
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
   const [rangePreset, setRangePreset] = useState<'next7' | 'next30' | 'thisMonth' | 'nextMonth' | 'custom'>('next30');
   const [customFrom, setCustomFrom] = useState('');
@@ -389,14 +387,15 @@ export function RecurringView({
   const upcomingThirtyAmount = useMemo(() => upcoming.reduce((total, occurrence) => total + occurrence.amount, 0), [upcoming]);
   const upcomingSevenAmount = useMemo(() => upcomingSeven.reduce((total, occurrence) => total + occurrence.amount, 0), [upcomingSeven]);
 
-  const distributionLabels = useMemo(() => {
-    const source = distributionMode === 'category' ? categories : accounts;
-    return new Map(source.map((item) => [item.id, { name: item.name, emoji: 'emoji' in item ? item.emoji : null }]));
-  }, [distributionMode, categories, accounts]);
-  const distribution = useMemo(
-    () => recurringDistribution(entries, kindByTypeId, distributionMode, distributionLabels),
-    [entries, kindByTypeId, distributionMode, distributionLabels],
-  );
+  const distribution = useMemo(() => {
+    const total = activeExpenseEntries.reduce((sum, entry) => sum + monthlyEquivalent(entry), 0);
+    return activeExpenseEntries
+      .map((entry) => {
+        const amount = monthlyEquivalent(entry);
+        return { id: entry.id, label: entry.name, amount, share: total ? amount / total : 0, entry };
+      })
+      .sort((left, right) => right.amount - left.amount || left.label.localeCompare(right.label));
+  }, [activeExpenseEntries]);
   const donutBackground = useMemo(() => {
     if (distribution.length === 0) return '#edf1ec';
     let position = 0;
@@ -442,15 +441,6 @@ export function RecurringView({
   }, [dateOccurrences]);
   const selectedDay = dailySchedule.find((day) => day.date === selectedDate) ?? null;
   const chartMaximum = Math.max(1, ...dailySchedule.map((day) => day.total));
-
-  const forecast = useMemo(() => [0, 1, 2].map((offset) => {
-    const bounds = shiftMonthBounds(today, offset);
-    const occurrences = scheduledOccurrences(entries, transactions, kindByTypeId, bounds.start, bounds.end);
-    const expense = occurrences.filter((item) => item.kind === 'expense').reduce((total, item) => total + item.amount, 0);
-    const income = occurrences.filter((item) => item.kind === 'income').reduce((total, item) => total + item.amount, 0);
-    return { ...bounds, expense, income, net: income - expense };
-  }), [entries, transactions, kindByTypeId, today]);
-  const forecastMaximum = Math.max(1, ...forecast.flatMap((month) => [month.expense, month.income]));
 
   const filteredEntries = useMemo(() => {
     const visible = entries.filter((entry) => {
@@ -516,15 +506,15 @@ export function RecurringView({
 
         <div className="recurring-analytics-grid">
           <section className="surface-card recurring-analytics-card">
-            <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>Monthly-normalised active expense commitments.</p></div><div className="analytics-tabs" aria-label="Distribution view"><button className={distributionMode === 'category' ? 'active' : ''} type="button" onClick={() => { setDistributionMode('category'); setSelectedDistributionId(''); }}>Category</button><button className={distributionMode === 'account' ? 'active' : ''} type="button" onClick={() => { setDistributionMode('account'); setSelectedDistributionId(''); }}>Account</button></div></div>
+            <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>Each active recurring expense, normalised to its monthly equivalent.</p></div></div>
             {distribution.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses to chart yet.</div> : <>
               <div className="recurring-donut-layout">
-                <div className="recurring-donut" style={{ background: donutBackground }} aria-label={`Recurring expenses by ${distributionMode}`}><span>{formatMoney(monthlyExpense)}<small>per month</small></span></div>
+                <div className="recurring-donut" style={{ background: donutBackground }} aria-label="Recurring expenses by entry"><span>{formatMoney(monthlyExpense)}<small>per month</small></span></div>
                 <div className="recurring-distribution-list">
-                  {distribution.map((item, index) => <button className={`recurring-distribution-item ${selectedDistributionId === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedDistributionId(item.id)}><i style={{ background: ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'][index % 8] }} /><span>{item.emoji ? `${item.emoji} ` : ''}{item.label}<small>{item.entryCount} {item.entryCount === 1 ? 'entry' : 'entries'} · {(item.share * 100).toFixed(1)}%</small></span><b>{formatMoney(item.amount)}</b></button>)}
+                  {distribution.map((item, index) => <button className={`recurring-distribution-item ${selectedDistributionId === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setSelectedDistributionId(item.id)}><i style={{ background: ['#1f573f', '#6e9475', '#b99b5c', '#8291aa', '#bd806c', '#9b819e', '#4f7f82', '#c4a56e'][index % 8] }} /><span>{item.label}<small>{(item.share * 100).toFixed(1)}% of recurring spending</small></span><b>{formatMoney(item.amount)}</b></button>)}
                 </div>
               </div>
-              {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries">{selectedDistribution.entries.map((entry) => <div key={entry.id}><span>{entry.name}<small>{frequencyLabel(entry)} · {accountById.get(entry.accountId)?.name ?? 'Archived account'} · next {formatDate(entry.nextDate)}</small></span><b>{formatMoney(entry.amount)}</b></div>)}</div></div> : <p className="recurring-hint">Select a category or account to inspect its recurring entries.</p>}
+              {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries"><div><span>{selectedDistribution.entry.name}<small>{frequencyLabel(selectedDistribution.entry)} · {accountById.get(selectedDistribution.entry.accountId)?.name ?? 'Archived account'} · next {formatDate(selectedDistribution.entry.nextDate)}</small></span><b>{formatMoney(selectedDistribution.entry.amount)}</b></div></div></div> : <p className="recurring-hint">Select a recurring entry to inspect its schedule.</p>}
             </>}
           </section>
 
@@ -532,7 +522,7 @@ export function RecurringView({
             <div className="card-title-row"><div><h3>Scheduled expense dates</h3><p>Actual scheduled debits. Processed entries are marked separately.</p></div></div>
             <div className="recurring-range-controls">
               {([['next7', 'Next 7 days'], ['next30', 'Next 30 days'], ['thisMonth', 'This month'], ['nextMonth', 'Next month'], ['custom', 'Custom']] as const).map(([value, label]) => <button key={value} className={rangePreset === value ? 'active' : ''} type="button" onClick={() => setRangePreset(value)}>{label}</button>)}
-              {rangePreset === 'custom' ? <div className="recurring-custom-range"><label>From<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>To<input type="date" min={customFrom || undefined} value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></div> : null}
+              {rangePreset === 'custom' ? <div className="recurring-custom-range"><DatePicker label="From" value={customFrom} onChange={setCustomFrom} max={customTo || undefined} clearable /><DatePicker label="To" value={customTo} onChange={setCustomTo} min={customFrom || undefined} clearable /></div> : null}
             </div>
             {dailySchedule.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses are scheduled in this range.</div> : <>
               <div className="recurring-date-bars" aria-label={`${analysisRange.label} scheduled recurring expense chart`}>
@@ -544,12 +534,6 @@ export function RecurringView({
           </section>
         </div>
 
-        <section className="surface-card recurring-analytics-card recurring-forecast-card">
-          <div className="card-title-row"><div><h3>Monthly recurring expense forecast</h3><p>Actual scheduled occurrences for the current and next two months, including processed entries where available.</p></div><span className="recurring-legend"><i /> Expenses <i className="income" /> Income</span></div>
-          <div className="recurring-forecast-bars">
-            {forecast.map((month) => <article key={month.start}><div className="recurring-forecast-chart"><i className="expense" style={{ height: `${Math.max(4, Math.round((month.expense / forecastMaximum) * 100))}%` }} /><i className="income" style={{ height: `${Math.max(4, Math.round((month.income / forecastMaximum) * 100))}%` }} /></div><h4>{month.label}</h4><dl><div><dt>Expenses</dt><dd>{formatMoney(month.expense)}</dd></div><div><dt>Income</dt><dd>{formatMoney(month.income)}</dd></div><div><dt>Net cash flow</dt><dd className={month.net >= 0 ? 'positive' : 'negative'}>{formatMoney(month.net)}</dd></div></dl></article>)}
-          </div>
-        </section>
       </section>
 
       <div className="recurring-list-heading"><div><h3>Recurring entries</h3><p>Keep your existing schedules organised and ready to process.</p></div></div>
@@ -644,8 +628,8 @@ function ActivityLog({ data }: { data: FinanceData }) {
         <select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
           <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="investment_types">Investment types</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
         </select>
-        <label>From<input type="date" value={from} max={to || undefined} onChange={(event) => changeFilters(() => setFrom(event.target.value))} /></label>
-        <label>To<input type="date" value={to} min={from || undefined} onChange={(event) => changeFilters(() => setTo(event.target.value))} /></label>
+        <DatePicker label="From" value={from} max={to || undefined} onChange={(value) => changeFilters(() => setFrom(value))} clearable />
+        <DatePicker label="To" value={to} min={from || undefined} onChange={(value) => changeFilters(() => setTo(value))} clearable />
       </div>
       {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} data={data} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
       <div className="table-pagination"><span>{events.length ? `Page ${page + 1}` : ''}</span><div><button className="secondary-button" type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => Math.max(0, value - 1))}>Previous</button><button className="secondary-button" type="button" disabled={!hasMore || loading} onClick={() => setPage((value) => value + 1)}>Next</button></div></div>

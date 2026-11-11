@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'lucide-react';
+import { DatePicker } from '@/components/date-picker';
 import { signOut } from '@/lib/auth-api';
 import { createFinanceActions } from '@/lib/finance-actions';
 import { categoriesFor, currentTimeKey, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
@@ -180,10 +181,7 @@ export function MobileApp() {
             ) : null}
 
             <div className="mobile-date-grid">
-              <label className="mobile-field">
-                <span>Date</span>
-                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              </label>
+              <div className="mobile-date-picker"><DatePicker label="Date" value={date} onChange={setDate} /></div>
               <label className="mobile-field">
                 <span>Time</span>
                 <span className="mobile-time-input"><Clock3 size={15} /><input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></span>
