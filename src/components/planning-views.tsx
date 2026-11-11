@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { CalendarDays, Download, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Download, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
@@ -37,6 +37,18 @@ import {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+}
+
+function calendarKey(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function calendarDaysForMonth(monthKey: string): Date[] {
+  const [year, month] = monthKey.slice(0, 7).split('-').map(Number);
+  const firstDay = new Date(year, month - 1, 1, 12);
+  const firstVisibleDay = new Date(year, month - 1, 1 - firstDay.getDay(), 12);
+  return Array.from({ length: 42 }, (_, index) => new Date(firstVisibleDay.getFullYear(), firstVisibleDay.getMonth(), firstVisibleDay.getDate() + index, 12));
 }
 
 function PlanningEmptyView({
@@ -344,10 +356,7 @@ export function RecurringView({
   const [editingEntry, setEditingEntry] = useState<RecurringEntry | null | undefined>(undefined);
   const [busyId, setBusyId] = useState('');
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
-  const [rangePreset, setRangePreset] = useState<'next7' | 'next30' | 'thisMonth' | 'nextMonth' | 'custom'>('next30');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [selectedDate, setSelectedDate] = useState('');
+  const [scheduleMonth, setScheduleMonth] = useState(() => todayKey());
   const [entryKindFilter, setEntryKindFilter] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
   const [entryStateFilter, setEntryStateFilter] = useState<'all' | 'active' | 'paused'>('all');
   const [entryCategoryFilter, setEntryCategoryFilter] = useState('all');
@@ -409,38 +418,26 @@ export function RecurringView({
   }, [distribution]);
   const selectedDistribution = distribution.find((item) => item.id === selectedDistributionId) ?? null;
 
-  const analysisRange = useMemo(() => {
-    if (rangePreset === 'next7') return { start: today, end: addDays(today, 6), label: 'Next 7 days' };
-    if (rangePreset === 'next30') return { start: today, end: addDays(today, 29), label: 'Next 30 days' };
-    if (rangePreset === 'thisMonth') {
-      const bounds = monthBounds(today);
-      return { ...bounds, label: 'This month' };
-    }
-    if (rangePreset === 'nextMonth') return { ...shiftMonthBounds(today, 1), label: 'Next month' };
-    return {
-      start: customFrom || today,
-      end: customTo && customTo >= (customFrom || today) ? customTo : customFrom || today,
-      label: 'Custom range',
-    };
-  }, [rangePreset, customFrom, customTo, today]);
-  const dateOccurrences = useMemo(
-    () => scheduledOccurrences(entries, transactions, kindByTypeId, analysisRange.start, analysisRange.end)
-      .filter((occurrence) => occurrence.kind === 'expense'),
-    [entries, transactions, kindByTypeId, analysisRange],
+  const scheduleBounds = useMemo(() => monthBounds(scheduleMonth), [scheduleMonth]);
+  const scheduleMonthLabel = useMemo(
+    () => new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(new Date(`${scheduleBounds.start}T12:00:00`)),
+    [scheduleBounds.start],
   );
-  const dailySchedule = useMemo(() => {
-    const dates = new Map<string, { date: string; total: number; processed: number; scheduled: number; occurrences: typeof dateOccurrences }>();
-    for (const occurrence of dateOccurrences) {
-      const current = dates.get(occurrence.date) ?? { date: occurrence.date, total: 0, processed: 0, scheduled: 0, occurrences: [] };
-      current.total += occurrence.amount;
-      current[occurrence.status] += occurrence.amount;
-      current.occurrences.push(occurrence);
-      dates.set(occurrence.date, current);
+  const scheduleDays = useMemo(() => calendarDaysForMonth(scheduleBounds.start), [scheduleBounds.start]);
+  const scheduledExpensesByDate = useMemo(() => {
+    const grouped = new Map<string, ReturnType<typeof scheduledOccurrences>>();
+    for (const occurrence of scheduledOccurrences(entries, transactions, kindByTypeId, scheduleBounds.start, scheduleBounds.end)) {
+      if (occurrence.kind !== 'expense') continue;
+      const items = grouped.get(occurrence.date) ?? [];
+      items.push(occurrence);
+      grouped.set(occurrence.date, items);
     }
-    return [...dates.values()].sort((left, right) => left.date.localeCompare(right.date));
-  }, [dateOccurrences]);
-  const selectedDay = dailySchedule.find((day) => day.date === selectedDate) ?? null;
-  const chartMaximum = Math.max(1, ...dailySchedule.map((day) => day.total));
+    return grouped;
+  }, [entries, transactions, kindByTypeId, scheduleBounds]);
+  const scheduledExpenseCount = useMemo(
+    () => [...scheduledExpensesByDate.values()].reduce((total, occurrences) => total + occurrences.length, 0),
+    [scheduledExpensesByDate],
+  );
 
   const filteredEntries = useMemo(() => {
     const visible = entries.filter((entry) => {
@@ -505,7 +502,7 @@ export function RecurringView({
         </div>
 
         <div className="recurring-analytics-grid">
-          <section className="surface-card recurring-analytics-card">
+          <section className="surface-card recurring-analytics-card recurring-distribution-card">
             <div className="card-title-row"><div><h3>Recurring expense distribution</h3><p>Each active recurring expense, normalised to its monthly equivalent.</p></div></div>
             {distribution.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses to chart yet.</div> : <>
               <div className="recurring-donut-layout">
@@ -517,22 +514,37 @@ export function RecurringView({
               {selectedDistribution ? <div className="recurring-selection-detail"><div><strong>{selectedDistribution.label}</strong><span>{formatMoney(selectedDistribution.amount)} monthly-normalised · {(selectedDistribution.share * 100).toFixed(1)}% of active expenses</span></div><div className="recurring-selection-entries"><div><span>{selectedDistribution.entry.name}<small>{frequencyLabel(selectedDistribution.entry)} · {accountById.get(selectedDistribution.entry.accountId)?.name ?? 'Archived account'} · next {formatDate(selectedDistribution.entry.nextDate)}</small></span><b>{formatMoney(selectedDistribution.entry.amount)}</b></div></div></div> : <p className="recurring-hint">Select a recurring entry to inspect its schedule.</p>}
             </>}
           </section>
-
-          <section className="surface-card recurring-analytics-card">
-            <div className="card-title-row"><div><h3>Scheduled expense dates</h3><p>Actual scheduled debits. Processed entries are marked separately.</p></div></div>
-            <div className="recurring-range-controls">
-              {([['next7', 'Next 7 days'], ['next30', 'Next 30 days'], ['thisMonth', 'This month'], ['nextMonth', 'Next month'], ['custom', 'Custom']] as const).map(([value, label]) => <button key={value} className={rangePreset === value ? 'active' : ''} type="button" onClick={() => setRangePreset(value)}>{label}</button>)}
-              {rangePreset === 'custom' ? <div className="recurring-custom-range"><DatePicker label="From" value={customFrom} onChange={setCustomFrom} max={customTo || undefined} clearable /><DatePicker label="To" value={customTo} onChange={setCustomTo} min={customFrom || undefined} clearable /></div> : null}
-            </div>
-            {dailySchedule.length === 0 ? <div className="recurring-chart-empty">No active recurring expenses are scheduled in this range.</div> : <>
-              <div className="recurring-date-bars" aria-label={`${analysisRange.label} scheduled recurring expense chart`}>
-                {dailySchedule.map((day) => <button type="button" className={`recurring-date-bar ${selectedDate === day.date ? 'selected' : ''}`} key={day.date} onClick={() => setSelectedDate(day.date)} title={`${formatDate(day.date)}: ${formatMoney(day.total)}`}><span style={{ height: `${Math.max(7, Math.round((day.total / chartMaximum) * 100))}%` }} /><b>{formatMoney(day.total)}</b><small>{new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(new Date(`${day.date}T12:00:00`))}</small></button>)}
-              </div>
-              <p className="recurring-hint">{analysisRange.label}: {formatMoney(dailySchedule.reduce((total, day) => total + day.total, 0))} across {dailySchedule.length} scheduled date{dailySchedule.length === 1 ? '' : 's'}.</p>
-              {selectedDay ? <div className="recurring-selection-detail recurring-date-detail"><div><strong>{formatDate(selectedDay.date)}</strong><span>{formatMoney(selectedDay.total)} scheduled · {selectedDay.processed ? `${formatMoney(selectedDay.processed)} already processed` : 'Not processed yet'}</span></div><div className="recurring-selection-entries">{selectedDay.occurrences.map((occurrence) => <div key={occurrence.key}><span>{occurrence.entry.name}<small>{frequencyLabel(occurrence.entry)} · {accountById.get(occurrence.entry.accountId)?.name ?? 'Archived account'} · <em className={occurrence.status}>{occurrence.status === 'processed' ? 'Processed' : 'Scheduled'}</em></small></span><b>{formatMoney(occurrence.amount)}</b></div>)}</div></div> : <p className="recurring-hint">Select a scheduled date to inspect the entries behind it.</p>}
-            </>}
-          </section>
         </div>
+
+        <section className="surface-card recurring-analytics-card recurring-schedule-calendar">
+          <div className="recurring-calendar-heading">
+            <div><h3>Scheduled expense dates</h3><p>All active recurring expense dates for the month, shown directly in your calendar.</p></div>
+            <div className="recurring-calendar-controls">
+              <button type="button" aria-label="Previous month" onClick={() => setScheduleMonth((current) => shiftMonthBounds(current, -1).start)}><ChevronLeft size={17} /></button>
+              <strong>{scheduleMonthLabel}</strong>
+              <button type="button" aria-label="Next month" onClick={() => setScheduleMonth((current) => shiftMonthBounds(current, 1).start)}><ChevronRight size={17} /></button>
+            </div>
+          </div>
+          <div className="recurring-month-scroll">
+            <div className="recurring-month-weekdays" aria-hidden="true">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div>
+            <div className="recurring-month-grid">
+              {scheduleDays.map((day) => {
+                const date = calendarKey(day);
+                const occurrences = scheduledExpensesByDate.get(date) ?? [];
+                const inMonth = date >= scheduleBounds.start && date <= scheduleBounds.end;
+                return (
+                  <article className={`recurring-month-day ${inMonth ? '' : 'outside'} ${date === today ? 'today' : ''}`} key={date} aria-label={formatDate(date)}>
+                    <time dateTime={date}>{day.getDate()}</time>
+                    <div className="recurring-month-events">
+                      {occurrences.map((occurrence) => <div className={`recurring-month-event ${occurrence.status}`} key={occurrence.key} title={`${occurrence.entry.name} · ${formatMoney(occurrence.amount)}`}><span>{occurrence.entry.name}</span><b>{formatMoney(occurrence.amount)}</b></div>)}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+          {scheduledExpenseCount === 0 ? <p className="recurring-calendar-empty">No active recurring expenses are scheduled for {scheduleMonthLabel}.</p> : <p className="recurring-calendar-note">{scheduledExpenseCount} scheduled recurring expense{scheduledExpenseCount === 1 ? '' : 's'} in {scheduleMonthLabel}. Processed entries use the lighter marker.</p>}
+        </section>
 
       </section>
 
