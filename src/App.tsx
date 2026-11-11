@@ -36,6 +36,7 @@ const emptyFinance: FinanceData = {
   budgets: [],
   recurringEntries: [],
   investments: [],
+  investmentTypes: [],
 };
 
 function csvCell(value: string): string {
@@ -78,7 +79,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<View>('overview');
   const finance = useFinanceData();
   const data = finance.data ?? emptyFinance;
-  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments } = data;
+  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh), [finance.refresh]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -164,6 +165,16 @@ export default function App() {
     navigate('transactions');
   };
 
+  const deleteTransaction = async (transaction: Transaction) => {
+    if (!window.confirm(`Delete “${transaction.name}”? This cannot be undone.`)) return;
+    try {
+      await actions.deleteTransaction(transaction.id);
+      showToast('Transaction deleted. Balances, reports and dates have been recalculated.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not delete the transaction.');
+    }
+  };
+
   const exportCsv = () => {
     const rows = [
       ['Date', 'Time', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'],
@@ -216,6 +227,7 @@ export default function App() {
             onFilter={setFilter}
             onAddTransaction={() => { setEditingTransaction(null); setModal('transaction'); }}
             onEditTransaction={(transaction) => { setEditingTransaction(transaction); setModal('transaction'); }}
+            onDeleteTransaction={(transaction) => void deleteTransaction(transaction)}
           />
         );
       case 'accounts':
@@ -266,7 +278,7 @@ export default function App() {
           />
         );
       case 'investments':
-        return <InvestmentsView investments={investments} accounts={accounts} actions={actions} onNotify={showToast} />;
+        return <InvestmentsView investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} />;
       case 'settings':
         return <SettingsView onExport={exportCsv} hasData={hasTransactions} data={data} />;
     }

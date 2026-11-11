@@ -10,6 +10,7 @@ import {
   Plus,
   Pencil,
   Search,
+  Trash2,
   Wallet,
 } from 'lucide-react';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
@@ -82,11 +83,13 @@ function TransactionTable({
   compact = false,
   emptyMessage = 'No transactions match your filters.',
   onEdit,
+  onDelete,
 }: {
   transactions: Transaction[];
   compact?: boolean;
   emptyMessage?: string;
   onEdit?: (transaction: Transaction) => void;
+  onDelete?: (transaction: Transaction) => void;
 }) {
 
   return (
@@ -99,13 +102,13 @@ function TransactionTable({
             <th>Account</th>
             <th>Date & time</th>
             <th className="amount-column">Amount</th>
-            {onEdit ? <th aria-label="Actions" /> : null}
+            {onEdit || onDelete ? <th aria-label="Actions" /> : null}
           </tr>
         </thead>
         <tbody>
           {transactions.length === 0 ? (
             <tr>
-              <td colSpan={(compact ? 4 : 5) + (onEdit ? 1 : 0)} className="table-empty">
+              <td colSpan={(compact ? 4 : 5) + (onEdit || onDelete ? 1 : 0)} className="table-empty">
                 {emptyMessage}
               </td>
             </tr>
@@ -158,11 +161,12 @@ function TransactionTable({
                     {sign}
                     {formatMoney(transaction.amount)}
                   </td>
-                  {onEdit ? (
+                  {onEdit || onDelete ? (
                     <td className="table-action-cell">
-                      <button className="ghost-button table-edit-button" type="button" onClick={() => onEdit(transaction)} aria-label={`Edit ${transaction.name}`}>
-                        <Pencil size={15} /> Edit
-                      </button>
+                      {transaction.investmentId ? <span className="managed-entry">Investment-managed</span> : <div className="table-row-actions">
+                        {onEdit ? <button className="ghost-button table-edit-button" type="button" onClick={() => onEdit(transaction)} aria-label={`Edit ${transaction.name}`}><Pencil size={15} /> Edit</button> : null}
+                        {onDelete ? <button className="ghost-button table-edit-button danger" type="button" onClick={() => onDelete(transaction)} aria-label={`Delete ${transaction.name}`}><Trash2 size={15} /> Delete</button> : null}
+                      </div>}
                     </td>
                   ) : null}
                 </tr>
@@ -386,6 +390,7 @@ export function TransactionsView({
   onFilter,
   onAddTransaction,
   onEditTransaction,
+  onDeleteTransaction,
 }: {
   transactions: Transaction[];
   totalCount: number;
@@ -395,6 +400,7 @@ export function TransactionsView({
   onFilter: (value: 'all' | TransactionKind) => void;
   onAddTransaction: () => void;
   onEditTransaction: (transaction: Transaction) => void;
+  onDeleteTransaction: (transaction: Transaction) => void;
 }) {
   const pageSize = 25;
   const [page, setPage] = useState(0);
@@ -449,7 +455,7 @@ export function TransactionsView({
               <option value="transfer">Counts as transfer</option>
             </select>
           </div>
-          <TransactionTable transactions={shownTransactions} onEdit={onEditTransaction} />
+          <TransactionTable transactions={shownTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
           {transactions.length > pageSize ? (
             <div className="table-pagination" aria-label="Transaction pages">
               <span>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, transactions.length)} of {transactions.length}</span>

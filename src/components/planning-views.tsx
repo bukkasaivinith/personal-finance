@@ -642,7 +642,7 @@ function ActivityLog({ data }: { data: FinanceData }) {
           <option value="all">All actions</option><option value="created">Created</option><option value="updated">Updated</option><option value="renamed">Renamed</option><option value="deleted">Deleted</option><option value="paused">Paused</option><option value="resumed">Resumed</option><option value="signed_in">Signed in</option><option value="signed_out">Signed out</option>
         </select>
         <select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
-          <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
+          <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="investment_types">Investment types</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
         </select>
         <label>From<input type="date" value={from} max={to || undefined} onChange={(event) => changeFilters(() => setFrom(event.target.value))} /></label>
         <label>To<input type="date" value={to} min={from || undefined} onChange={(event) => changeFilters(() => setTo(event.target.value))} /></label>
@@ -720,6 +720,10 @@ function currentRecordDetails(event: ActivityEvent, data: FinanceData): Record<s
     const item = data.investments.find((investment) => investment.id === event.entityId);
     if (!item) return null;
     return investmentDetails(item, accountById);
+  }
+  if (event.entityTable === 'investment_types') {
+    const item = data.investmentTypes.find((investmentType) => investmentType.id === event.entityId);
+    return item ? { 'Investment type': item.name } : null;
   }
   if (event.entityTable === 'authentication') return { 'Email': event.entityName, 'Action': event.action.replace(/_/g, ' '), 'Session policy': 'This browser tab only' };
   return null;

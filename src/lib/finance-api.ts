@@ -8,6 +8,7 @@ import {
   type ItemState,
   type Investment,
   type InvestmentDraft,
+  type InvestmentType,
   type InvestmentStatus,
   type RecurringEntry,
   type RecurringEntryDraft,
@@ -50,6 +51,7 @@ type TransactionRow = {
   to_account_id: string | null;
   to_account_name: string | null;
   recurring_entry_id: string | null;
+  investment_id: string | null;
   transaction_source: 'manual' | 'scheduled' | 'investment';
 };
 type BudgetRow = { id: string; category_id: string; amount: number | string };
@@ -73,6 +75,7 @@ type InvestmentRow = {
   id: string;
   name: string;
   investment_type: string;
+  investment_type_id: string;
   notes: string | null;
   funding_account_id: string;
   capital_account_id: string;
@@ -84,6 +87,7 @@ type InvestmentRow = {
   settled_on: string | null;
   accounting_mode: 'capital_pool' | 'return_to_funding';
 };
+type InvestmentTypeRow = { id: string; name: string };
 type ActivityRow = {
   id: string;
   entity_table: ActivityEvent['entityTable'];
@@ -109,7 +113,7 @@ function statusOf(row: StatusRow) {
 }
 
 export async function loadFinanceData(): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
@@ -126,7 +130,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     supabase
       .from('transactions')
       .select(
-        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name, recurring_entry_id, transaction_source',
+        'id, name, transaction_type_id, transaction_type_name, transaction_kind, category_id, category_name, amount, transaction_date, transaction_time, account_id, account_name, to_account_id, to_account_name, recurring_entry_id, investment_id, transaction_source',
       )
       .order('transaction_date', { ascending: false }),
     supabase.from('budgets').select('id, category_id, amount').order('created_at', { ascending: true }),
@@ -136,11 +140,12 @@ export async function loadFinanceData(): Promise<FinanceData> {
       .order('next_date', { ascending: true }),
     supabase
       .from('investments')
-      .select('id, name, investment_type, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode')
+      .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode')
       .order('invested_on', { ascending: false }),
+    supabase.from('investment_types').select('id, name').order('name', { ascending: true }),
   ]);
 
-  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult]) {
+  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -152,6 +157,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
   const budgetRows = (budgetResult.data ?? []) as BudgetRow[];
   const recurringRows = (recurringResult.data ?? []) as RecurringEntryRow[];
   const investmentRows = (investmentResult.data ?? []) as InvestmentRow[];
+  const investmentTypeRows = (investmentTypeResult.data ?? []) as InvestmentTypeRow[];
 
   const transactionTypes: TransactionTypeOption[] = typeRows.map((row) => ({
     id: row.id,
@@ -213,6 +219,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
       toAccountName: row.to_account_id === null ? null : destinationAccount?.name ?? row.to_account_name,
       toAccountArchived: row.to_account_id !== null && archived(destinationAccount),
       recurringEntryId: row.recurring_entry_id,
+      investmentId: row.investment_id,
       source: row.transaction_source ?? 'manual',
     };
   });
@@ -253,6 +260,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     id: row.id,
     name: row.name,
     investmentType: row.investment_type,
+    investmentTypeId: row.investment_type_id,
     notes: row.notes ?? '',
     fundingAccountId: row.funding_account_id,
     capitalAccountId: row.capital_account_id,
@@ -264,8 +272,9 @@ export async function loadFinanceData(): Promise<FinanceData> {
     settledOn: row.settled_on,
     accountingMode: row.accounting_mode,
   }));
+  const investmentTypes: InvestmentType[] = investmentTypeRows.map((row) => ({ id: row.id, name: row.name }));
 
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments };
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }): Promise<string> {
@@ -406,10 +415,31 @@ export async function updateTransaction(id: string, draft: TransactionDraft): Pr
   if (error) failWith(error);
 }
 
+export async function deleteTransaction(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_transaction', { p_transaction_id: id });
+  if (error) failWith(error);
+}
+
+export async function createInvestmentType(input: { name: string }): Promise<string> {
+  const { data, error } = await supabase.rpc('create_investment_type', { p_name: input.name });
+  if (error) failWith(error);
+  return String(data);
+}
+
+export async function updateInvestmentType(id: string, input: { name: string }): Promise<void> {
+  const { error } = await supabase.rpc('rename_investment_type', { p_investment_type_id: id, p_name: input.name });
+  if (error) failWith(error);
+}
+
+export async function deleteInvestmentType(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_investment_type', { p_investment_type_id: id });
+  if (error) failWith(error);
+}
+
 export async function createInvestment(input: InvestmentDraft): Promise<string> {
   const { data, error } = await supabase.rpc('record_investment', {
     p_name: input.name,
-    p_investment_type: input.investmentType,
+    p_investment_type_id: input.investmentTypeId,
     p_notes: input.notes || null,
     p_funding_account_id: input.fundingAccountId,
     p_principal_amount: input.principalAmount,
@@ -417,6 +447,24 @@ export async function createInvestment(input: InvestmentDraft): Promise<string> 
   });
   if (error) failWith(error);
   return String(data);
+}
+
+export async function updateInvestment(id: string, input: InvestmentDraft): Promise<void> {
+  const { error } = await supabase.rpc('update_investment', {
+    p_investment_id: id,
+    p_name: input.name,
+    p_investment_type_id: input.investmentTypeId,
+    p_notes: input.notes || null,
+    p_funding_account_id: input.fundingAccountId,
+    p_principal_amount: input.principalAmount,
+    p_invested_on: input.investedOn,
+  });
+  if (error) failWith(error);
+}
+
+export async function deleteInvestment(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_investment', { p_investment_id: id });
+  if (error) failWith(error);
 }
 
 export async function settleInvestment(input: { id: string; finalAmount: number; settledOn: string }): Promise<void> {

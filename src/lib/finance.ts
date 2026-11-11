@@ -45,6 +45,7 @@ export type Transaction = {
   toAccountName: string | null;
   toAccountArchived: boolean;
   recurringEntryId: string | null;
+  investmentId: string | null;
   source: 'manual' | 'scheduled' | 'investment';
 };
 
@@ -106,7 +107,7 @@ export type ActivityAction =
 
 export type ActivityEvent = {
   id: string;
-  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments';
+  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments' | 'investment_types';
   entityId: string;
   entityName: string;
   action: ActivityAction;
@@ -116,10 +117,16 @@ export type ActivityEvent = {
 
 export type InvestmentStatus = 'active' | 'settled';
 
+export type InvestmentType = {
+  id: string;
+  name: string;
+};
+
 export type Investment = {
   id: string;
   name: string;
   investmentType: string;
+  investmentTypeId: string;
   notes: string;
   fundingAccountId: string;
   capitalAccountId: string;
@@ -134,7 +141,7 @@ export type Investment = {
 
 export type InvestmentDraft = {
   name: string;
-  investmentType: string;
+  investmentTypeId: string;
   notes: string;
   fundingAccountId: string;
   principalAmount: number;
@@ -149,6 +156,7 @@ export type FinanceData = {
   budgets: Budget[];
   recurringEntries: RecurringEntry[];
   investments: Investment[];
+  investmentTypes: InvestmentType[];
 };
 
 export type CategoryTotal = { name: string; total: number; share: number };

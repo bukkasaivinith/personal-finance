@@ -25,9 +25,10 @@ function valueLabel(value: string): string {
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(dateFromKey(value));
 }
 
-export function DatePicker({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+export function DatePicker({ label, value, onChange, disabled = false }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean }) {
   const selected = dateFromKey(value || todayKey());
   const [open, setOpen] = useState(false);
+  const [openAbove, setOpenAbove] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(new Date(selected.getFullYear(), selected.getMonth(), 1, 12));
   const root = useRef<HTMLDivElement>(null);
   const today = dateFromKey(todayKey());
@@ -56,6 +57,27 @@ export function DatePicker({ label, value, onChange }: { label: string; value: s
     };
   }, []);
 
+  useEffect(() => {
+    if (!open || !root.current) return;
+    const positionPopover = () => {
+      const bounds = root.current?.getBoundingClientRect();
+      if (!bounds) return;
+      // A calendar is roughly 340px tall. Flip it above the field when the
+      // remaining viewport space cannot show it in full (for example, in a
+      // long edit modal near the bottom of the page).
+      const roomBelow = window.innerHeight - bounds.bottom;
+      const roomAbove = bounds.top;
+      setOpenAbove(roomBelow < 350 && roomAbove > roomBelow);
+    };
+    positionPopover();
+    window.addEventListener('resize', positionPopover);
+    window.addEventListener('scroll', positionPopover, true);
+    return () => {
+      window.removeEventListener('resize', positionPopover);
+      window.removeEventListener('scroll', positionPopover, true);
+    };
+  }, [open]);
+
   const firstVisibleDay = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1 - visibleMonth.getDay(), 12);
   const days = Array.from({ length: 42 }, (_, index) => new Date(firstVisibleDay.getFullYear(), firstVisibleDay.getMonth(), firstVisibleDay.getDate() + index, 12));
 
@@ -76,13 +98,14 @@ export function DatePicker({ label, value, onChange }: { label: string; value: s
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
         <span>{valueLabel(value)}</span>
         <CalendarDays size={17} strokeWidth={1.8} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="date-picker-popover" role="dialog" aria-label={`${label} calendar`}>
+        <div className={`date-picker-popover ${openAbove ? 'opens-above' : ''}`} role="dialog" aria-label={`${label} calendar`}>
           <div className="calendar-header">
             <button type="button" className="calendar-nav" aria-label="Previous month" onClick={() => moveMonth(-1)}>
               <ChevronLeft size={17} />
