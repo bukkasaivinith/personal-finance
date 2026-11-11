@@ -82,6 +82,7 @@ type InvestmentRow = {
   final_amount: number | string | null;
   profit_amount: number | string | null;
   settled_on: string | null;
+  accounting_mode: 'capital_pool' | 'return_to_funding';
 };
 type ActivityRow = {
   id: string;
@@ -135,7 +136,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
       .order('next_date', { ascending: true }),
     supabase
       .from('investments')
-      .select('id, name, investment_type, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on')
+      .select('id, name, investment_type, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode')
       .order('invested_on', { ascending: false }),
   ]);
 
@@ -261,6 +262,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     finalAmount: row.final_amount === null ? null : Number(row.final_amount),
     profitAmount: row.profit_amount === null ? null : Number(row.profit_amount),
     settledOn: row.settled_on,
+    accountingMode: row.accounting_mode,
   }));
 
   return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments };
@@ -405,12 +407,11 @@ export async function updateTransaction(id: string, draft: TransactionDraft): Pr
 }
 
 export async function createInvestment(input: InvestmentDraft): Promise<string> {
-  const { data, error } = await supabase.rpc('create_investment', {
+  const { data, error } = await supabase.rpc('record_investment', {
     p_name: input.name,
     p_investment_type: input.investmentType,
     p_notes: input.notes || null,
     p_funding_account_id: input.fundingAccountId,
-    p_capital_account_id: input.capitalAccountId,
     p_principal_amount: input.principalAmount,
     p_invested_on: input.investedOn,
   });

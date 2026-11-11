@@ -129,6 +129,7 @@ export type Investment = {
   finalAmount: number | null;
   profitAmount: number | null;
   settledOn: string | null;
+  accountingMode: 'capital_pool' | 'return_to_funding';
 };
 
 export type InvestmentDraft = {
@@ -136,7 +137,6 @@ export type InvestmentDraft = {
   investmentType: string;
   notes: string;
   fundingAccountId: string;
-  capitalAccountId: string;
   principalAmount: number;
   investedOn: string;
 };
