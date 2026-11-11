@@ -3,7 +3,7 @@ import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'l
 import { DatePicker } from '@/components/date-picker';
 import { signOut } from '@/lib/auth-api';
 import { createFinanceActions } from '@/lib/finance-actions';
-import { categoriesFor, currentTimeKey, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
+import { categoriesFor, currentTimeKey, isInvestmentManagedTransactionType, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
 import { useFinanceData } from '@/lib/use-finance-data';
 import './mobile-app.css';
 
@@ -30,7 +30,7 @@ export function MobileApp() {
   const [saving, setSaving] = useState(false);
 
   const types = useMemo(
-    () => finance.data?.transactionTypes.filter((type) => type.isActive && type.kind === kind) ?? [],
+    () => finance.data?.transactionTypes.filter((type) => type.isActive && type.kind === kind && !isInvestmentManagedTransactionType(type)) ?? [],
     [finance.data, kind],
   );
   const accounts = useMemo(() => finance.data?.accounts.filter((account) => account.isActive) ?? [], [finance.data]);

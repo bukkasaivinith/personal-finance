@@ -7,6 +7,12 @@ export type ItemStatus = {
 
 export type TransactionTypeOption = ItemStatus & { id: string; name: string; kind: TransactionKind };
 
+/** Investment accounting types are created and maintained by the Investments workflow. */
+export function isInvestmentManagedTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
+  const name = type.name.trim().toLocaleLowerCase('en-US');
+  return name === 'investment capital' || name === 'investment return';
+}
+
 export type CategoryOption = ItemStatus & {
   id: string;
   name: string;

@@ -5,6 +5,7 @@ import { ModalShell } from '@/components/ui';
 import {
   categoriesFor,
   currentTimeKey,
+  isInvestmentManagedTransactionType,
   parseAmount,
   todayKey,
   type Account,
@@ -134,7 +135,8 @@ export function AddTransactionModal({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const selectedType = transactionTypes.find((option) => option.id === typeId);
+  const selectableTransactionTypes = transactionTypes.filter((option) => !isInvestmentManagedTransactionType(option));
+  const selectedType = selectableTransactionTypes.find((option) => option.id === typeId);
   const isTransfer = selectedType?.kind === 'transfer';
   const compatibleCategories = selectedType ? categoriesFor(categories, selectedType.id) : [];
   const activeCategoryId = compatibleCategories.some((option) => option.id === categoryId) ? categoryId : '';
@@ -199,7 +201,7 @@ export function AddTransactionModal({
         <div className="form-grid">
           <TypePicker
             value={typeId}
-            options={transactionTypes}
+            options={selectableTransactionTypes}
             onChange={setTypeId}
             onCreate={onCreateTransactionType}
           onUpdate={onUpdateTransactionType}
@@ -260,7 +262,7 @@ export function AddTransactionModal({
             </>
           ) : (
             <p className="modal-description full-field">
-              {transactionTypes.length === 0
+              {selectableTransactionTypes.length === 0
                 ? 'Create a transaction type first. Its categories and accounts will appear here.'
                 : 'Choose a transaction type to see its categories and accounts.'}
             </p>
