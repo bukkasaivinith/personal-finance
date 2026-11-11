@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { openFinanceWorkspace } from '@/lib/workspace-api';
+import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession } from '@/lib/session-api';
 
 export const PASSWORD_MIN_LENGTH = 12;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -33,7 +34,16 @@ async function recordAuthenticatedActivity(action: 'signed_in' | 'signed_out'): 
 export async function createAccount(email: string, password: string): Promise<boolean> {
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (!error) {
-    if (data.session) await recordAuthenticatedActivity('signed_in');
+    if (data.session) {
+      try {
+        await activateCurrentSingleDeviceSession();
+        await supabase.auth.signOut({ scope: 'others' });
+        await recordAuthenticatedActivity('signed_in');
+      } catch (caught) {
+        await supabase.auth.signOut({ scope: 'local' });
+        throw caught;
+      }
+    }
     return Boolean(data.session);
   }
   if (error.status === 429) throw new AuthEmailRateLimitError();
@@ -44,7 +54,19 @@ export async function createAccount(email: string, password: string): Promise<bo
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (!error) {
-    await recordAuthenticatedActivity('signed_in');
+    try {
+      await activateCurrentSingleDeviceSession();
+      // Supabase revokes every older refresh token while the database guard
+      // immediately blocks old access tokens from finance data.
+      // If this best-effort Auth request is temporarily unavailable, the RLS
+      // session gate still makes the newly activated session the only one
+      // allowed to access the finance workspace.
+      await supabase.auth.signOut({ scope: 'others' });
+      await recordAuthenticatedActivity('signed_in');
+    } catch (caught) {
+      await supabase.auth.signOut({ scope: 'local' });
+      throw caught;
+    }
     return;
   }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
@@ -65,7 +87,11 @@ export async function updatePassword(password: string): Promise<void> {
 
 export async function signOut(): Promise<void> {
   await recordAuthenticatedActivity('signed_out');
-  await supabase.auth.signOut({ scope: 'local' });
+  try {
+    await endCurrentSingleDeviceSession();
+  } finally {
+    await supabase.auth.signOut({ scope: 'local' });
+  }
 }
 
 export async function claimWorkspace(): Promise<void> {

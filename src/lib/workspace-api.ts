@@ -41,6 +41,15 @@ export type AdminUser = {
   deletedAt: string | null;
 };
 
+export type AdminUserSession = {
+  userId: string;
+  startedAt: string;
+  lastActivityAt: string;
+  expiresAt: string;
+  isActive: boolean;
+  deviceLabel: string | null;
+};
+
 function fail(error: { message: string }): never {
   throw new Error(error.message);
 }
@@ -152,6 +161,31 @@ export async function loadAdminUsers(): Promise<AdminUser[]> {
 
 export async function setAdminUserSuspended(userId: string, suspended: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_platform_user_suspension', { p_user_id: userId, p_suspended: suspended });
+  if (error) fail(error);
+}
+
+export async function loadAdminUserSessions(): Promise<AdminUserSession[]> {
+  const { data, error } = await supabase.rpc('list_platform_user_sessions');
+  if (error) fail(error);
+  return asRows<{
+    user_id: string;
+    session_started_at: string;
+    last_activity_at: string;
+    expires_at: string;
+    is_active: boolean;
+    device_label: string | null;
+  }>(data).map((row) => ({
+    userId: row.user_id,
+    startedAt: row.session_started_at,
+    lastActivityAt: row.last_activity_at,
+    expiresAt: row.expires_at,
+    isActive: row.is_active,
+    deviceLabel: row.device_label,
+  }));
+}
+
+export async function terminateAdminUserSession(userId: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_terminate_user_session', { p_user_id: userId });
   if (error) fail(error);
 }
 

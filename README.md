@@ -61,6 +61,19 @@ Do not deploy the new frontend before this migration has succeeded, because it r
 
 If that migration has already been run, apply newer migrations in filename order as they are added. The current follow-ups are [20261111110000_fix_workspace_validation_triggers.sql](supabase/migrations/20261111110000_fix_workspace_validation_triggers.sql), [20261111130000_add_detailed_activity_log.sql](supabase/migrations/20261111130000_add_detailed_activity_log.sql), [20261111150000_add_investments.sql](supabase/migrations/20261111150000_add_investments.sql), and [20261111170000_return_investments_to_funding_account.sql](supabase/migrations/20261111170000_return_investments_to_funding_account.sql). They repair validation, add richer audit details, and introduce investment tracking; none deletes finance data.
 
+### Single-device session protection
+
+Apply [20261112120000_single_device_sessions.sql](supabase/migrations/20261112120000_single_device_sessions.sql) before deploying the matching frontend. It creates one hashed active-session record per user, adds a restrictive RLS session check to every finance/workspace table, and provides the administrator session-status and sign-out controls.
+
+For the strongest Supabase Auth behavior, if this project is on a Pro plan or higher, also enable **Authentication → Sessions → Single session per user** in Supabase. The app-level guard protects finance data immediately on every plan; the Supabase setting additionally removes old Auth refresh sessions at the platform level.
+
+After the migration is applied, test with two different browsers:
+
+1. Sign in with the same account in browser A, then browser B.
+2. Browser A must be returned to sign-in within 15 seconds or when it regains focus, with the replacement message.
+3. Before that visual redirect, browser A must already be unable to read or write finance data because the RLS session policy rejects it.
+4. In **Settings → Platform administration**, verify the session timestamps, then use **Sign out** to revoke a test user's finance session.
+
 ## Security note
 
 The latest security migration replaces the earlier shared policies with authenticated, owner-only row-level security. Never add a `VITE_SUPABASE_SERVICE_ROLE_KEY`; browser code uses only the publishable/anon key. Legacy data is intentionally claimable once because old rows had no owner; make sure the intended owner signs in first after the migration.

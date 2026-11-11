@@ -7,12 +7,15 @@ import {
   deleteCurrentFinanceAccount,
   deletePlatformUser,
   loadAdminUsers,
+  loadAdminUserSessions,
   loadWorkspaceSharing,
   markWorkspaceNotificationsRead,
   revokeWorkspaceMember,
   setAdminUserSuspended,
+  terminateAdminUserSession,
   updateWorkspaceMember,
   type AdminUser,
+  type AdminUserSession,
   type WorkspaceInvitation,
   type WorkspaceMember,
   type WorkspaceNotification,
@@ -96,13 +99,17 @@ function WorkspaceSharing({ ownerId, accounts, onChange }: { ownerId: string; ac
 
 function AdminUsers({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [sessions, setSessions] = useState<AdminUserSession[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const refresh = useCallback(async () => { setLoading(true); try { setUsers(await loadAdminUsers()); setError(''); } catch (caught) { setError(errorMessage(caught)); } finally { setLoading(false); } }, []);
+  const refresh = useCallback(async () => { setLoading(true); try { const [nextUsers, nextSessions] = await Promise.all([loadAdminUsers(), loadAdminUserSessions()]); setUsers(nextUsers); setSessions(nextSessions); setError(''); } catch (caught) { setError(errorMessage(caught)); } finally { setLoading(false); } }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const toggle = async (user: AdminUser) => { try { await setAdminUserSuspended(user.id, !user.isSuspended); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
   const remove = async (user: AdminUser) => { if (!window.confirm(`Permanently delete ${user.email} and their finance workspace?`)) return; try { await deletePlatformUser(user.id); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
-  return <section className="surface-card workspace-settings-card admin-users-card"><div className="card-title-row"><div><h3><ShieldCheck size={16} /> Platform administration</h3><p>Manage account access only. Financial amounts and transactions are never displayed here.</p></div></div>{error ? <p className="form-error">{error}</p> : null}{loading ? <p className="card-note">Loading users…</p> : <div className="workspace-invite-list">{users.map((user) => <article className="workspace-invite-row" key={user.id}><div><b>{user.email}</b><small>{user.deletedAt ? 'Deleted' : user.isSuspended ? 'Suspended' : 'Active'} · Joined {new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }).format(new Date(user.createdAt))}</small></div>{user.id === currentUserId ? <span className="managed-entry">Administrator</span> : <div className="workspace-admin-actions"><button className="ghost-button" type="button" onClick={() => void toggle(user)}>{user.isSuspended ? 'Reactivate' : 'Suspend'}</button><button className="ghost-button danger" type="button" onClick={() => void remove(user)} disabled={Boolean(user.deletedAt)}><Trash2 size={14} /> Delete</button></div>}</article>)}</div>}</section>;
+  const sessionByUserId = new Map(sessions.map((session) => [session.userId, session]));
+  const terminate = async (user: AdminUser) => { if (!window.confirm(`Sign ${user.email} out from their active device?`)) return; try { await terminateAdminUserSession(user.id); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
+  const formatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+  return <section className="surface-card workspace-settings-card admin-users-card"><div className="card-title-row"><div><h3><ShieldCheck size={16} /> Platform administration</h3><p>Manage account access and active sessions only. Financial amounts and transactions are never displayed here.</p></div></div>{error ? <p className="form-error">{error}</p> : null}{loading ? <p className="card-note">Loading users…</p> : <div className="workspace-invite-list">{users.map((user) => { const session = sessionByUserId.get(user.id); return <article className="workspace-invite-row" key={user.id}><div><b>{user.email}</b><small>{user.deletedAt ? 'Deleted' : user.isSuspended ? 'Suspended' : 'Active'} · Joined {new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }).format(new Date(user.createdAt))}{session ? ` · ${session.isActive ? 'Signed in' : 'No active session'}` : ' · No active session'}</small>{session ? <small>Last login {formatter.format(new Date(session.startedAt))} · Last activity {formatter.format(new Date(session.lastActivityAt))} · Expires {formatter.format(new Date(session.expiresAt))}{session.deviceLabel ? ` · ${session.deviceLabel}` : ''}</small> : null}</div>{user.id === currentUserId ? <span className="managed-entry">Administrator</span> : <div className="workspace-admin-actions">{session?.isActive ? <button className="ghost-button danger" type="button" onClick={() => void terminate(user)}>Sign out</button> : null}<button className="ghost-button" type="button" onClick={() => void toggle(user)}>{user.isSuspended ? 'Reactivate' : 'Suspend'}</button><button className="ghost-button danger" type="button" onClick={() => void remove(user)} disabled={Boolean(user.deletedAt)}><Trash2 size={14} /> Delete</button></div>}</article>; })}</div>}</section>;
 }
 
 export function WorkspaceSettings({ ownerId, isOwner, isPlatformAdmin, currentUserId, accounts, onWorkspaceChanged, onDeleteOwnAccount }: { ownerId: string; isOwner: boolean; isPlatformAdmin: boolean; currentUserId: string; accounts: Account[]; onWorkspaceChanged: () => Promise<void>; onDeleteOwnAccount: () => Promise<void> }) {
