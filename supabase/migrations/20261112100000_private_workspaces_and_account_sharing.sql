@@ -331,6 +331,7 @@ CREATE POLICY workspace_write_links ON public.category_transaction_types
 DROP POLICY IF EXISTS workspace_select_transactions ON public.transactions;
 DROP POLICY IF EXISTS workspace_write_transactions ON public.transactions;
 DROP POLICY IF EXISTS workspace_update_transactions ON public.transactions;
+DROP POLICY IF EXISTS workspace_insert_transactions ON public.transactions;
 CREATE POLICY workspace_select_transactions ON public.transactions
   FOR SELECT TO authenticated
   USING (user_id = auth.uid() AND public.is_finance_user_active(auth.uid()));
@@ -461,7 +462,7 @@ AS $$
   JOIN public.profiles owner_profile ON owner_profile.id = member.owner_id
   WHERE member.member_id = auth.uid() AND member.revoked_at IS NULL
     AND owner_profile.deleted_at IS NULL AND owner_profile.is_suspended = false
-  ORDER BY role DESC, owner_email;
+  ORDER BY 3 DESC, 2;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_workspace_transactions(p_owner_id uuid)
