@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Bell, ShieldCheck, Trash2, UserMinus, UserPlus, Users } from 'lucide-react';
+import { Bell, LogOut, Search, ShieldCheck, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import type { Account } from '@/lib/finance';
 import {
   cancelWorkspaceInvitation,
@@ -100,16 +100,71 @@ function WorkspaceSharing({ ownerId, accounts, onChange }: { ownerId: string; ac
 function AdminUsers({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [sessions, setSessions] = useState<AdminUserSession[]>([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended' | 'deleted'>('all');
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const refresh = useCallback(async () => { setLoading(true); try { const [nextUsers, nextSessions] = await Promise.all([loadAdminUsers(), loadAdminUserSessions()]); setUsers(nextUsers); setSessions(nextSessions); setError(''); } catch (caught) { setError(errorMessage(caught)); } finally { setLoading(false); } }, []);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [nextUsers, nextSessions] = await Promise.all([loadAdminUsers(), loadAdminUserSessions()]);
+      setUsers(nextUsers); setSessions(nextSessions); setError('');
+    } catch (caught) { setError(errorMessage(caught)); } finally { setLoading(false); }
+  }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-  const toggle = async (user: AdminUser) => { try { await setAdminUserSuspended(user.id, !user.isSuspended); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
-  const remove = async (user: AdminUser) => { if (!window.confirm(`Permanently delete ${user.email} and their finance workspace?`)) return; try { await deletePlatformUser(user.id); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
-  const sessionByUserId = new Map(sessions.map((session) => [session.userId, session]));
-  const terminate = async (user: AdminUser) => { if (!window.confirm(`Sign ${user.email} out from their active device?`)) return; try { await terminateAdminUserSession(user.id); await refresh(); } catch (caught) { setError(errorMessage(caught)); } };
-  const formatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
-  return <section className="surface-card workspace-settings-card admin-users-card"><div className="card-title-row"><div><h3><ShieldCheck size={16} /> Platform administration</h3><p>Manage account access and active sessions only. Financial amounts and transactions are never displayed here.</p></div></div>{error ? <p className="form-error">{error}</p> : null}{loading ? <p className="card-note">Loading users…</p> : <div className="workspace-invite-list">{users.map((user) => { const session = sessionByUserId.get(user.id); return <article className="workspace-invite-row" key={user.id}><div><b>{user.email}</b><small>{user.deletedAt ? 'Deleted' : user.isSuspended ? 'Suspended' : 'Active'} · Joined {new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }).format(new Date(user.createdAt))}{session ? ` · ${session.isActive ? 'Signed in' : 'No active session'}` : ' · No active session'}</small>{session ? <small>Last login {formatter.format(new Date(session.startedAt))} · Last activity {formatter.format(new Date(session.lastActivityAt))} · Expires {formatter.format(new Date(session.expiresAt))}{session.deviceLabel ? ` · ${session.deviceLabel}` : ''}</small> : null}</div>{user.id === currentUserId ? <span className="managed-entry">Administrator</span> : <div className="workspace-admin-actions">{session?.isActive ? <button className="ghost-button danger" type="button" onClick={() => void terminate(user)}>Sign out</button> : null}<button className="ghost-button" type="button" onClick={() => void toggle(user)}>{user.isSuspended ? 'Reactivate' : 'Suspend'}</button><button className="ghost-button danger" type="button" onClick={() => void remove(user)} disabled={Boolean(user.deletedAt)}><Trash2 size={14} /> Delete</button></div>}</article>; })}</div>}</section>;
+
+  const sessionByUserId = useMemo(() => new Map(sessions.map((session) => [session.userId, session])), [sessions]);
+  const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
+  const selectedSession = selectedUser ? sessionByUserId.get(selectedUser.id) : undefined;
+  const formatter = useMemo(() => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }), []);
+  const dateFormatter = useMemo(() => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }), []);
+  const statusOf = (user: AdminUser) => user.deletedAt ? 'deleted' : user.isSuspended ? 'suspended' : 'active';
+  const visibleUsers = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase();
+    return users.filter((user) => (statusFilter === 'all' || statusOf(user) === statusFilter) && (!term || user.email.toLocaleLowerCase().includes(term)));
+  }, [query, statusFilter, users]);
+  const liveUsers = users.filter((user) => !user.deletedAt);
+  const activeCount = liveUsers.filter((user) => !user.isSuspended).length;
+  const suspendedCount = liveUsers.filter((user) => user.isSuspended).length;
+  const now = new Date();
+  const joinedThisMonth = liveUsers.filter((user) => { const created = new Date(user.createdAt); return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth(); }).length;
+
+  const toggle = async (user: AdminUser) => {
+    try { await setAdminUserSuspended(user.id, !user.isSuspended); await refresh(); } catch (caught) { setError(errorMessage(caught)); }
+  };
+  const remove = async (user: AdminUser) => {
+    if (!window.confirm(`Permanently delete ${user.email} and their finance workspace?`)) return;
+    try { await deletePlatformUser(user.id); setSelectedUserId(''); await refresh(); } catch (caught) { setError(errorMessage(caught)); }
+  };
+  const terminate = async (user: AdminUser) => {
+    if (!window.confirm(`Sign ${user.email} out from their active device?`)) return;
+    try { await terminateAdminUserSession(user.id); await refresh(); } catch (caught) { setError(errorMessage(caught)); }
+  };
+
+  return <section className="admin-workspace" aria-label="Platform administration">
+    <div className="admin-workspace-topline"><span>Workspace / <b>Administration</b></span><span className="admin-secure-chip"><i /> Admin session secured</span></div>
+    <div className="admin-workspace-heading">
+      <div><div className="eyebrow">Workspace administration</div><h2>User management</h2><p>Manage account access and sessions without accessing anyone’s private financial data.</p></div>
+      <button className="secondary-button admin-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh users'}</button>
+    </div>
+    <div className="admin-stat-grid">
+      <article><span>Total accounts</span><strong>{String(liveUsers.length).padStart(2, '0')}</strong><small>Registered platform users</small></article>
+      <article><span>Active accounts</span><strong>{String(activeCount).padStart(2, '0')}</strong><small>Currently permitted access</small></article>
+      <article><span>Suspended accounts</span><strong>{String(suspendedCount).padStart(2, '0')}</strong><small>Access temporarily blocked</small></article>
+      <article><span>Joined this month</span><strong>{String(joinedThisMonth).padStart(2, '0')}</strong><small>New platform accounts</small></article>
+    </div>
+    <section className="surface-card admin-users-panel">
+      <div className="admin-users-panel-heading"><div><h3>Platform users</h3><p>Account identity, account access and active-session status only.</p></div><div className="admin-user-tools"><label className="admin-user-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search email address" aria-label="Search users" /></label><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filter users by account status"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="deleted">Deleted</option></select></div></div>
+      {error ? <p className="form-error admin-panel-error">{error}</p> : null}
+      {loading ? <p className="card-note admin-panel-loading">Loading users…</p> : <div className="admin-users-table-scroll"><table><thead><tr><th>User</th><th>Account status</th><th>Joined</th><th>Last sign-in</th><th>Active session</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{visibleUsers.length ? visibleUsers.map((user) => { const session = sessionByUserId.get(user.id); const status = statusOf(user); const initials = user.email.split('@')[0].split(/[._-]/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'U'; return <tr key={user.id}><td><div className="admin-user-identity"><span>{initials}</span><div><b>{user.email}</b><small>{user.id === currentUserId ? 'Platform administrator' : 'Platform user'}</small></div></div></td><td><span className={`admin-status ${status}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : 'Deleted'}</span></td><td>{dateFormatter.format(new Date(user.createdAt))}</td><td>{session ? formatter.format(new Date(session.startedAt)) : '—'}</td><td><span className={session?.isActive ? 'admin-session active' : 'admin-session'}>{session?.isActive ? 'Signed in' : 'No active session'}</span></td><td className="admin-manage-cell"><button className="text-button" type="button" onClick={() => setSelectedUserId(user.id)}>Manage →</button></td></tr>; }) : <tr><td className="admin-table-empty" colSpan={6}>No users match this search.</td></tr>}</tbody></table></div>}
+    </section>
+    <aside className={`admin-user-drawer ${selectedUser ? 'open' : ''}`} role="dialog" aria-modal="true" aria-label="User account controls" aria-hidden={!selectedUser}>
+      {selectedUser ? <><div className="admin-drawer-heading"><span className="eyebrow">Account overview</span><button className="icon-button" type="button" aria-label="Close user management" onClick={() => setSelectedUserId('')}><X size={18} /></button></div><div className="admin-drawer-profile"><span>{selectedUser.email.slice(0, 2).toUpperCase()}</span><div><h3>{selectedUser.email}</h3><p>{selectedUser.id === currentUserId ? 'Platform administrator' : 'Platform user'}</p></div></div><p className="admin-drawer-label">Account information</p><div className="admin-drawer-details"><div><span>Account status</span><b>{statusOf(selectedUser) === 'active' ? 'Active' : statusOf(selectedUser) === 'suspended' ? 'Suspended' : 'Deleted'}</b></div><div><span>Joined on</span><b>{dateFormatter.format(new Date(selectedUser.createdAt))}</b></div><div><span>Last sign-in</span><b>{selectedSession ? formatter.format(new Date(selectedSession.startedAt)) : 'No sign-in recorded'}</b></div><div><span>Session activity</span><b>{selectedSession?.isActive ? `Active · ${selectedSession.deviceLabel ?? 'Device not recorded'}` : 'No active session'}</b></div></div><p className="admin-drawer-label">Administrator controls</p><div className="admin-access-note"><ShieldCheck size={16} /><div><b>Platform access only</b><p>These controls affect sign-in access only. They never reveal or change the user’s transactions, balances, investments, or other finance records.</p></div></div>{selectedUser.id === currentUserId ? <p className="admin-self-note">You cannot change your own administrator access from this screen.</p> : <div className="admin-drawer-actions">{selectedSession?.isActive ? <button className="secondary-button" type="button" onClick={() => void terminate(selectedUser)}><LogOut size={14} /> Sign out active device</button> : null}<button className="secondary-button" type="button" onClick={() => void toggle(selectedUser)}>{selectedUser.isSuspended ? 'Reactivate account' : 'Suspend account'}</button><button className="ghost-button danger" type="button" disabled={Boolean(selectedUser.deletedAt)} onClick={() => void remove(selectedUser)}><Trash2 size={14} /> Delete platform account</button></div>}</> : null}
+    </aside>
+    {selectedUser ? <button className="admin-user-overlay" type="button" aria-label="Close user management" onClick={() => setSelectedUserId('')} /> : null}
+    <div className="admin-privacy-note"><ShieldCheck size={18} /><div><b>Financial data is private — including from administrators</b><p>This area is limited to platform account administration. It does not show balances, transactions, budgets, categories, reports, investments, or other personal finance records. Admin actions affect sign-in access only.</p></div></div>
+  </section>;
 }
 
 export function WorkspaceSettings({ ownerId, isOwner, isPlatformAdmin, currentUserId, accounts, onWorkspaceChanged, onDeleteOwnAccount }: { ownerId: string; isOwner: boolean; isPlatformAdmin: boolean; currentUserId: string; accounts: Account[]; onWorkspaceChanged: () => Promise<void>; onDeleteOwnAccount: () => Promise<void> }) {
