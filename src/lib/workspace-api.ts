@@ -50,6 +50,16 @@ export type AdminUserSession = {
   deviceLabel: string | null;
 };
 
+export type AdminUserUsage = {
+  userId: string;
+  transactionCount: number;
+  accountCount: number;
+  categoryCount: number;
+  budgetCount: number;
+  recurringEntryCount: number;
+  investmentCount: number;
+};
+
 export type AdminActivityEvent = {
   id: string;
   actorEmail: string;
@@ -190,6 +200,28 @@ export async function loadAdminUserSessions(): Promise<AdminUserSession[]> {
     expiresAt: row.expires_at,
     isActive: row.is_active,
     deviceLabel: row.device_label,
+  }));
+}
+
+export async function loadAdminUserUsage(): Promise<AdminUserUsage[]> {
+  const { data, error } = await supabase.rpc('list_platform_user_usage');
+  if (error) fail(error);
+  return asRows<{
+    user_id: string;
+    transaction_count: number | string;
+    account_count: number | string;
+    category_count: number | string;
+    budget_count: number | string;
+    recurring_entry_count: number | string;
+    investment_count: number | string;
+  }>(data).map((row) => ({
+    userId: row.user_id,
+    transactionCount: Number(row.transaction_count),
+    accountCount: Number(row.account_count),
+    categoryCount: Number(row.category_count),
+    budgetCount: Number(row.budget_count),
+    recurringEntryCount: Number(row.recurring_entry_count),
+    investmentCount: Number(row.investment_count),
   }));
 }
 

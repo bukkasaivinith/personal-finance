@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Bell, LogOut, Search, ShieldCheck, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { AdminUserManagement } from '@/components/admin-user-management';
 import type { Account } from '@/lib/finance';
 import {
   cancelWorkspaceInvitation,
@@ -192,6 +193,6 @@ function AdminUsers({ currentUserId }: { currentUserId: string }) {
 export function WorkspaceSettings({ ownerId, isOwner, isPlatformAdmin, currentUserId, accounts, onWorkspaceChanged, onDeleteOwnAccount, adminOnly = false }: { ownerId: string; isOwner: boolean; isPlatformAdmin: boolean; currentUserId: string; accounts: Account[]; onWorkspaceChanged: () => Promise<void>; onDeleteOwnAccount: () => Promise<void>; adminOnly?: boolean }) {
   const [deleting, setDeleting] = useState(false);
   const deleteAccount = async () => { if (!window.confirm('Permanently delete your account? If you own this workspace, every workspace record and all shared access will be deleted. This cannot be undone.')) return; setDeleting(true); try { await deleteCurrentFinanceAccount(); await onDeleteOwnAccount(); } finally { setDeleting(false); } };
-  if (adminOnly) return <AdminUsers currentUserId={currentUserId} />;
+  if (adminOnly) return <AdminUserManagement currentUserId={currentUserId} />;
   return <>{isOwner ? <WorkspaceSharing ownerId={ownerId} accounts={accounts} onChange={onWorkspaceChanged} /> : <section className="surface-card settings-card"><div className="card-title-row"><div><h3><Users size={16} /> Shared workspace</h3><p>You can access only the selected accounts that this workspace owner has shared with you.</p></div></div></section>}{isPlatformAdmin ? <AdminUsers currentUserId={currentUserId} /> : null}<section className="surface-card workspace-danger-card"><div><h3>Delete my account</h3><p>{isOwner ? 'This permanently deletes your workspace, all financial data, invitations and shared access.' : 'This permanently deletes your private data and removes your shared-workspace access.'}</p></div><button className="primary-button danger" type="button" disabled={deleting} onClick={() => void deleteAccount()}>{deleting ? 'Deleting…' : <><Trash2 size={15} /> Delete account</>}</button></section></>;
 }
