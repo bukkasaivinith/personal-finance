@@ -50,6 +50,15 @@ export type AdminUserSession = {
   deviceLabel: string | null;
 };
 
+export type AdminActivityEvent = {
+  id: string;
+  actorEmail: string;
+  targetEmail: string;
+  action: 'account_suspended' | 'account_reactivated' | 'session_terminated' | 'account_deleted';
+  details: Record<string, unknown>;
+  occurredAt: string;
+};
+
 function fail(error: { message: string }): never {
   throw new Error(error.message);
 }
@@ -187,6 +196,29 @@ export async function loadAdminUserSessions(): Promise<AdminUserSession[]> {
 export async function terminateAdminUserSession(userId: string): Promise<void> {
   const { error } = await supabase.rpc('admin_terminate_user_session', { p_user_id: userId });
   if (error) fail(error);
+}
+
+export async function loadAdminActivity(limit = 30): Promise<AdminActivityEvent[]> {
+  const { data, error } = await supabase.rpc('list_platform_admin_activity', {
+    p_limit: Math.min(Math.max(Math.trunc(limit), 1), 100),
+    p_offset: 0,
+  });
+  if (error) fail(error);
+  return asRows<{
+    id: string;
+    actor_email: string | null;
+    target_email: string;
+    action: AdminActivityEvent['action'];
+    details: Record<string, unknown> | null;
+    occurred_at: string;
+  }>(data).map((row) => ({
+    id: row.id,
+    actorEmail: row.actor_email || 'Administrator',
+    targetEmail: row.target_email,
+    action: row.action,
+    details: row.details ?? {},
+    occurredAt: row.occurred_at,
+  }));
 }
 
 export async function deletePlatformUser(userId: string): Promise<void> {
