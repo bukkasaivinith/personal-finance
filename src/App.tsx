@@ -5,6 +5,7 @@ import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/compon
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
 import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
 import { InvestmentsView } from '@/components/investments-view';
+import { AthleteHub } from '@/components/athlete-hub';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
 import { WorkspaceSettings } from '@/components/workspace-settings';
@@ -318,6 +319,8 @@ export default function App() {
         ) : <SharedWorkspaceNotice title="Recurring" />;
       case 'investments':
         return isWorkspaceOwner ? <InvestmentsView investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} /> : <SharedWorkspaceNotice title="Investments" />;
+      case 'athlete':
+        return <AthleteHub onNotify={showToast} />;
       case 'settings':
         return <SettingsView onExport={exportCsv} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={activeWorkspace && currentUserId ? <WorkspaceSettings ownerId={activeWorkspace.ownerId} isOwner={Boolean(isWorkspaceOwner)} isPlatformAdmin={workspaceAccess.isPlatformAdmin} currentUserId={currentUserId} accounts={accounts} onWorkspaceChanged={async () => { await workspaceAccess.refresh(); await finance.refresh(); }} onDeleteOwnAccount={async () => { await supabase.auth.signOut({ scope: 'local' }); }} /> : undefined} />;
     }

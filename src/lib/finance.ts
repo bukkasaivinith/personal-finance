@@ -151,6 +151,13 @@ export type Investment = {
   profitAmount: number | null;
   settledOn: string | null;
   accountingMode: 'capital_pool' | 'return_to_funding';
+  currentEstimatedValue: number | null;
+  valueUpdatedOn: string | null;
+  targetAmount: number | null;
+  maturityDate: string | null;
+  withdrawnCapital: number;
+  withdrawnProfit: number;
+  withdrawnTotal: number;
 };
 
 export type InvestmentDraft = {

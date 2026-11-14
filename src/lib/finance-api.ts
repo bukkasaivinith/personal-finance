@@ -87,7 +87,12 @@ type InvestmentRow = {
   profit_amount: number | string | null;
   settled_on: string | null;
   accounting_mode: 'capital_pool' | 'return_to_funding';
+  current_estimated_value: number | string | null;
+  value_updated_on: string | null;
+  target_amount: number | string | null;
+  maturity_date: string | null;
 };
+type InvestmentWithdrawalRow = { investment_id: string; amount_received: number | string; capital_return: number | string; profit_amount: number | string };
 type InvestmentTypeRow = { id: string; name: string };
 type ActivityRow = {
   id: string;
@@ -115,7 +120,7 @@ function statusOf(row: StatusRow) {
 }
 
 export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
@@ -141,13 +146,14 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
       .order('next_date', { ascending: true }),
     supabase
       .from('investments')
-      .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode')
+      .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode, current_estimated_value, value_updated_on, target_amount, maturity_date')
       .eq('user_id', workspaceOwnerId)
       .order('invested_on', { ascending: false }),
     supabase.from('investment_types').select('id, name').eq('user_id', workspaceOwnerId).order('name', { ascending: true }),
+    supabase.from('investment_withdrawals').select('investment_id, amount_received, capital_return, profit_amount').eq('user_id', workspaceOwnerId),
   ]);
 
-  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult]) {
+  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -160,6 +166,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
   const recurringRows = (recurringResult.data ?? []) as RecurringEntryRow[];
   const investmentRows = (investmentResult.data ?? []) as InvestmentRow[];
   const investmentTypeRows = (investmentTypeResult.data ?? []) as InvestmentTypeRow[];
+  const withdrawalRows = (withdrawalResult.data ?? []) as InvestmentWithdrawalRow[];
 
   const transactionTypes: TransactionTypeOption[] = typeRows.map((row) => ({
     id: row.id,
@@ -259,6 +266,12 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     lastProcessedDate: lastProcessedByEntry.get(row.id) ?? null,
   }));
 
+  const withdrawalsByInvestment = new Map<string, { capital: number; profit: number; total: number }>();
+  withdrawalRows.forEach((row) => {
+    const current = withdrawalsByInvestment.get(row.investment_id) ?? { capital: 0, profit: 0, total: 0 };
+    current.capital += Number(row.capital_return); current.profit += Number(row.profit_amount); current.total += Number(row.amount_received);
+    withdrawalsByInvestment.set(row.investment_id, current);
+  });
   const investments: Investment[] = investmentRows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -274,6 +287,13 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     profitAmount: row.profit_amount === null ? null : Number(row.profit_amount),
     settledOn: row.settled_on,
     accountingMode: row.accounting_mode,
+    currentEstimatedValue: row.current_estimated_value === null ? null : Number(row.current_estimated_value),
+    valueUpdatedOn: row.value_updated_on,
+    targetAmount: row.target_amount === null ? null : Number(row.target_amount),
+    maturityDate: row.maturity_date,
+    withdrawnCapital: withdrawalsByInvestment.get(row.id)?.capital ?? 0,
+    withdrawnProfit: withdrawalsByInvestment.get(row.id)?.profit ?? 0,
+    withdrawnTotal: withdrawalsByInvestment.get(row.id)?.total ?? 0,
   }));
   const investmentTypes: InvestmentType[] = investmentTypeRows.map((row) => ({ id: row.id, name: row.name }));
 
@@ -479,6 +499,22 @@ export async function settleInvestment(input: { id: string; finalAmount: number;
     p_final_amount: input.finalAmount,
     p_settled_on: input.settledOn,
   });
+  if (error) failWith(error);
+}
+
+export async function updateInvestmentTracking(input: { id: string; currentEstimatedValue: number; valuedOn: string; targetAmount: number | null; maturityDate: string | null }): Promise<void> {
+  const { error } = await supabase.rpc('update_investment_tracking', {
+    p_investment_id: input.id,
+    p_current_estimated_value: input.currentEstimatedValue,
+    p_valued_on: input.valuedOn,
+    p_target_amount: input.targetAmount,
+    p_maturity_date: input.maturityDate,
+  });
+  if (error) failWith(error);
+}
+
+export async function recordInvestmentWithdrawal(input: { id: string; amountReceived: number; withdrawnOn: string }): Promise<void> {
+  const { error } = await supabase.rpc('record_investment_withdrawal', { p_investment_id: input.id, p_amount_received: input.amountReceived, p_withdrawn_on: input.withdrawnOn });
   if (error) failWith(error);
 }
 

@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Activity,
   BarChart3,
   CalendarDays,
   ChartNoAxesCombined,
@@ -20,6 +21,7 @@ export type View =
   | 'goals'
   | 'recurring'
   | 'investments'
+  | 'athlete'
   | 'setup'
   | 'settings';
 
@@ -46,6 +48,7 @@ export const manageNavigation: NavItem[] = [
   { id: 'setup', label: 'Types & categories', icon: Tags },
   { id: 'recurring', label: 'Recurring', icon: CalendarDays },
   { id: 'investments', label: 'Investments', icon: ChartNoAxesCombined },
+  { id: 'athlete', label: 'Athlete Hub', icon: Activity },
 ];
 
 export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
@@ -57,6 +60,7 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   goals: { title: 'Savings goals', eyebrow: 'Track what you are saving toward' },
   recurring: { title: 'Recurring', eyebrow: 'Repeating income and bills' },
   investments: { title: 'Investments', eyebrow: 'Capital, returns and reinvestment' },
+  athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },
   settings: { title: 'Settings', eyebrow: 'Preferences and data' },
 };
