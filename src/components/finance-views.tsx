@@ -252,6 +252,7 @@ export function OverviewView({
   flows,
   position,
   monthLabel,
+  userName,
   onAddAccount,
   onAddTransaction,
   onNavigate,
@@ -262,6 +263,7 @@ export function OverviewView({
   flows: MonthlyFlow[];
   position: { assets: number; owed: number; net: number };
   monthLabel: string;
+  userName?: string;
   onAddAccount?: () => void;
   onAddTransaction?: () => void;
   onNavigate: (view: View) => void;
@@ -269,7 +271,7 @@ export function OverviewView({
   return (
     <>
       <SectionHeading
-        title="Monthly overview"
+        title={userName ? `${userName}'s overview` : 'Monthly overview'}
         description={`Your summary for ${monthLabel}.`}
         action={
           <button className="text-button" type="button" onClick={() => onNavigate('analytics')}>

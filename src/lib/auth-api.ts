@@ -3,6 +3,14 @@ import { openFinanceWorkspace } from '@/lib/workspace-api';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession } from '@/lib/session-api';
 
 export const PASSWORD_MIN_LENGTH = 12;
+export const PROFILE_NAME_MAX_LENGTH = 80;
+
+export type CurrentFinanceProfile = {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+};
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class AuthEmailRateLimitError extends Error {
@@ -14,6 +22,16 @@ export class AuthEmailRateLimitError extends Error {
 
 export function isValidEmail(value: string): boolean {
   return value.length <= 254 && EMAIL_PATTERN.test(value);
+}
+
+export function isValidProfileName(value: string): boolean {
+  const name = value.trim();
+  return name.length > 0
+    && name.length <= PROFILE_NAME_MAX_LENGTH
+    && [...name].every((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint >= 32 && codePoint !== 127;
+    });
 }
 
 async function recordAuthenticatedActivity(action: 'signed_in' | 'signed_out'): Promise<void> {
@@ -31,8 +49,12 @@ async function recordAuthenticatedActivity(action: 'signed_in' | 'signed_out'): 
   }
 }
 
-export async function createAccount(email: string, password: string): Promise<boolean> {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+export async function createAccount(email: string, password: string, firstName: string, lastName: string): Promise<boolean> {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { first_name: firstName.trim(), last_name: lastName.trim() } },
+  });
   if (!error) {
     if (data.session) {
       try {
@@ -49,6 +71,29 @@ export async function createAccount(email: string, password: string): Promise<bo
   if (error.status === 429) throw new AuthEmailRateLimitError();
   if (error.message.toLowerCase().includes('password')) throw new Error('Choose a stronger password with at least 12 characters.');
   throw new Error('We could not create that account. Please check your details and try again.');
+}
+
+export async function loadCurrentFinanceProfile(): Promise<CurrentFinanceProfile> {
+  const { data, error } = await supabase.rpc('get_current_finance_profile');
+  if (error) throw new Error(error.message);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') throw new Error('We could not load your profile.');
+  const profile = row as { id?: string; email?: string; first_name?: string | null; last_name?: string | null };
+  if (!profile.id || !profile.email) throw new Error('We could not load your profile.');
+  return {
+    id: profile.id,
+    email: profile.email,
+    firstName: profile.first_name?.trim() || null,
+    lastName: profile.last_name?.trim() || null,
+  };
+}
+
+export async function saveCurrentFinanceProfileName(firstName: string, lastName: string): Promise<void> {
+  const { error } = await supabase.rpc('set_current_finance_profile_name', {
+    p_first_name: firstName.trim(),
+    p_last_name: lastName.trim(),
+  });
+  if (error) throw new Error(error.message);
 }
 
 export async function signIn(email: string, password: string): Promise<void> {

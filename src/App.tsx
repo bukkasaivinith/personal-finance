@@ -8,6 +8,7 @@ import { InvestmentsView } from '@/components/investments-view';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
 import { WorkspaceSettings } from '@/components/workspace-settings';
+import { useCurrentFinanceProfile } from '@/lib/current-finance-profile';
 import { createFinanceActions } from '@/lib/finance-actions';
 import {
   formatMonth,
@@ -83,6 +84,8 @@ function NavigationGroup({
 }
 
 export default function App() {
+  const profile = useCurrentFinanceProfile();
+  const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
   const workspaceAccess = useWorkspaceAccess();
   const [activeOwnerId, setActiveOwnerId] = useState<string | null>(null);
@@ -243,6 +246,7 @@ export default function App() {
             flows={flows}
             position={position}
             monthLabel={monthLabel}
+            userName={profile?.firstName ?? undefined}
             onAddAccount={isWorkspaceOwner ? () => setModal('account') : undefined}
             onAddTransaction={canEditTransactions ? () => setModal('transaction') : undefined}
             onNavigate={navigate}
@@ -325,7 +329,7 @@ export default function App() {
               <IndianRupee size={19} strokeWidth={2} />
             </span>
             <div className="brand-text">
-              <strong>Personal Financing</strong>
+              <strong title={displayName}>{displayName}</strong>
               <small>Personal finance</small>
             </div>
           </div>
