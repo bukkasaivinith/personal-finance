@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
+import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, Users, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
@@ -31,6 +31,7 @@ import { supabase } from '@/lib/supabase';
 type ModalKind = 'transaction' | 'account';
 
 const monthOptions = recentMonthKeys(6);
+const adminNavigation: NavItem[] = [{ id: 'settings', label: 'User management', icon: Users }];
 
 const emptyFinance: FinanceData = {
   transactionTypes: [],
@@ -90,7 +91,8 @@ export default function App() {
   const workspaceAccess = useWorkspaceAccess();
   const [activeOwnerId, setActiveOwnerId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState('');
-  const finance = useFinanceData(activeOwnerId);
+  const isAdminOnly = workspaceAccess.isPlatformAdmin;
+  const finance = useFinanceData(isAdminOnly ? null : activeOwnerId);
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
@@ -125,6 +127,7 @@ export default function App() {
   }, [workspaceAccess.workspaces]);
 
   useEffect(() => { setRecurringChecked(false); }, [activeOwnerId]);
+  useEffect(() => { if (isAdminOnly) { setActiveView('settings'); setMobileMenuOpen(false); } }, [isAdminOnly]);
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
   const usableTypes = useMemo(() => transactionTypes.filter(isUsable), [transactionTypes]);
@@ -321,7 +324,7 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isAdminOnly ? 'admin-only-shell' : ''}`}>
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-visible' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
@@ -336,17 +339,16 @@ export default function App() {
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}>
             <X size={18} />
           </button>
-          <NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={navigate} />
-          <NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={navigate} />
+          {isAdminOnly ? <NavigationGroup label="Administration" items={adminNavigation} activeView={activeView} onSelect={navigate} /> : <><NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={navigate} /><NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={navigate} /></>}
         </div>
         <div className="sidebar-bottom">
-          <button
+          {!isAdminOnly ? <button
             className={`side-link ${activeView === 'settings' ? 'active' : ''}`}
             type="button"
             onClick={() => navigate('settings')}
           >
             <Settings size={17} /> Settings
-          </button>
+          </button> : null}
           <button className="side-link" type="button" onClick={() => void signOut()}>
             <LogOut size={17} /> Sign out
           </button>
@@ -364,9 +366,9 @@ export default function App() {
             <Menu size={18} />
           </button>
           <div>
-            <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
-            <h1>{pageCopy[activeView].title}</h1>
-            {workspaceAccess.workspaces.length > 1 ? (
+            <div className="eyebrow">{isAdminOnly ? 'Platform administration' : pageCopy[activeView].eyebrow}</div>
+            <h1>{isAdminOnly ? 'User management' : pageCopy[activeView].title}</h1>
+            {!isAdminOnly && workspaceAccess.workspaces.length > 1 ? (
               <label className="workspace-switcher">
                 <span>Workspace</span>
                 <select value={activeOwnerId ?? ''} onChange={(event) => { setActiveOwnerId(event.target.value); setRecurringChecked(false); }}>
@@ -375,7 +377,7 @@ export default function App() {
               </label>
             ) : null}
           </div>
-          {activeView !== 'transactions' && canEditTransactions ? (
+          {!isAdminOnly && activeView !== 'transactions' && canEditTransactions ? (
             <div className="top-actions">
               <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
                 <span className="header-action-icon" aria-hidden="true">
@@ -387,7 +389,9 @@ export default function App() {
           ) : null}
         </header>
 
-        {finance.data ? (
+        {isAdminOnly ? (
+          <WorkspaceSettings ownerId="" isOwner={false} isPlatformAdmin currentUserId={currentUserId} accounts={[]} onWorkspaceChanged={workspaceAccess.refresh} onDeleteOwnAccount={async () => { await supabase.auth.signOut({ scope: 'local' }); }} adminOnly />
+        ) : finance.data ? (
           renderView()
         ) : (
           <div className="surface-card">
@@ -408,7 +412,7 @@ export default function App() {
       </main>
 
       <nav className="mobile-nav" aria-label="Primary">
-        {[workspaceNavigation[0], workspaceNavigation[1], workspaceNavigation[2], workspaceNavigation[4]].map((item) => (
+        {isAdminOnly ? <><button type="button" className="active" onClick={() => navigate('settings')}><Users size={18} />User management</button><button type="button" onClick={() => void signOut()}><LogOut size={18} />Sign out</button></> : <>{[workspaceNavigation[0], workspaceNavigation[1], workspaceNavigation[2], workspaceNavigation[4]].map((item) => (
           <button
             key={item.id}
             type="button"
@@ -423,6 +427,7 @@ export default function App() {
           <MoreHorizontal size={18} />
           More
         </button>
+        </>}
       </nav>
 
       {modal === 'transaction' ? (
