@@ -40,6 +40,13 @@ export type PlannedWorkout = {
 
 export type PlannedWorkoutDraft = Omit<PlannedWorkout, 'id' | 'status'>;
 
+export type VoiceActivityRoute = {
+  destination: 'activity' | 'plan';
+  date: string;
+  activity: Partial<AthleteActivityDraft>;
+  plan: Partial<PlannedWorkoutDraft>;
+};
+
 export type RecoveryScore = {
   id: string;
   recoveryDate: string;
@@ -194,5 +201,113 @@ export function parseActivityText(text: string, unit: DistanceUnit): Partial<Ath
     elevationMeters,
     cadence,
     notes: text.trim(),
+  };
+}
+
+function offsetDate(referenceDate: Date, days: number): string {
+  const date = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate() + days, 12);
+  return localDateKey(date);
+}
+
+function monthOffset(referenceDate: Date, months: number): string {
+  const date = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + months, referenceDate.getDate(), 12);
+  return localDateKey(date);
+}
+
+function dateKeyFromParts(year: number, monthIndex: number, day: number): string | null {
+  const date = new Date(year, monthIndex, day, 12);
+  if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
+  return localDateKey(date);
+}
+
+function includesFutureCue(text: string): boolean {
+  return /\b(?:tomorrow|next|plan(?:ned)?|schedule(?:d)?|will|going to|intend to)\b|రేపు|ఎల్లుండి|చేస్తాను|ప్లాన్|कल\s*(?:दौड|रन|करूंगा)|करूंगा|करूँगा/.test(text);
+}
+
+function includesPastCue(text: string): boolean {
+  return /\b(?:yesterday|ago|ran|run was|completed|finished|did)\b|నిన్న|మొన్న|చేశాను|పూర్తి చేశాను|बीते कल|पहले|किया|दौड़ा/.test(text);
+}
+
+/**
+ * Resolves the useful date phrases that people commonly speak while logging a run.
+ * If speech recognition cannot confidently find a date, it keeps today so the
+ * confirmation form can ask the athlete to choose the exact day before saving.
+ */
+export function parseSpokenDate(text: string, referenceDate = new Date()): string {
+  const normalized = text.toLowerCase().replace(/[–—]/g, '-');
+  const futureCue = includesFutureCue(normalized);
+  const pastCue = includesPastCue(normalized);
+
+  if (/\b(?:day after tomorrow)\b|ఎల్లుండి|परसों/.test(normalized)) return offsetDate(referenceDate, 2);
+  if (/\b(?:tomorrow)\b|రేపు|कल/.test(normalized)) return offsetDate(referenceDate, 1);
+  if (/\b(?:yesterday)\b|నిన్న/.test(normalized)) return offsetDate(referenceDate, -1);
+  if (/\b(?:two days ago)\b|మొన్న/.test(normalized)) return offsetDate(referenceDate, -2);
+  if (/\b(?:today)\b|నేడు|ఈరోజు|आज/.test(normalized)) return localDateKey(referenceDate);
+
+  const inDays = normalized.match(/\b(?:in|after)\s+(\d+)\s+days?\b/);
+  if (inDays) return offsetDate(referenceDate, Number(inDays[1]));
+  const daysAgo = normalized.match(/\b(\d+)\s+days?\s+(?:ago|before)\b/);
+  if (daysAgo) return offsetDate(referenceDate, -Number(daysAgo[1]));
+  if (/\bnext week\b/.test(normalized)) return offsetDate(referenceDate, 7);
+  if (/\bnext month\b/.test(normalized)) return monthOffset(referenceDate, 1);
+
+  const numeric = normalized.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const month = Number(numeric[2]) - 1;
+    const suppliedYear = numeric[3] ? Number(numeric[3]) : null;
+    const year = suppliedYear === null ? referenceDate.getFullYear() : suppliedYear < 100 ? 2000 + suppliedYear : suppliedYear;
+    const result = dateKeyFromParts(year, month, day);
+    if (result) return result;
+  }
+
+  const monthNames: Record<string, number> = {
+    jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+    may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8,
+    sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
+  };
+  const namedDate = normalized.match(/\b(?:on\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)(?:\s+(\d{2,4}))?\b/);
+  if (namedDate) {
+    const day = Number(namedDate[1]);
+    const month = monthNames[namedDate[2]];
+    const suppliedYear = namedDate[3] ? Number(namedDate[3]) : null;
+    let year = suppliedYear === null ? referenceDate.getFullYear() : suppliedYear < 100 ? 2000 + suppliedYear : suppliedYear;
+    let result = dateKeyFromParts(year, month, day);
+    if (result && suppliedYear === null && result < localDateKey(referenceDate) && futureCue && !pastCue) {
+      year += 1;
+      result = dateKeyFromParts(year, month, day);
+    }
+    if (result) return result;
+  }
+
+  const weekDays: Record<string, number> = { sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2, wednesday: 3, wed: 3, thursday: 4, thu: 4, thur: 4, thurs: 4, friday: 5, fri: 5, saturday: 6, sat: 6 };
+  const weekday = normalized.match(/\b(next\s+)?(sunday|sun|monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat)\b/);
+  if (weekday) {
+    const target = weekDays[weekday[2]];
+    let days = (target - referenceDate.getDay() + 7) % 7;
+    if (weekday[1] && days === 0) days = 7;
+    return offsetDate(referenceDate, days);
+  }
+
+  return futureCue && !pastCue ? offsetDate(referenceDate, 1) : localDateKey(referenceDate);
+}
+
+export function routeVoiceActivity(text: string, unit: DistanceUnit, referenceDate = new Date()): VoiceActivityRoute {
+  const parsed = parseActivityText(text, unit);
+  const date = parseSpokenDate(text, referenceDate);
+  const destination = date > localDateKey(referenceDate) ? 'plan' : 'activity';
+  const kind = parsed.kind ?? 'run';
+  const distanceLabel = parsed.distanceMeters ? ` ${formatDistance(parsed.distanceMeters, unit)}` : '';
+  return {
+    destination,
+    date,
+    activity: { ...parsed, activityDate: date, source: 'voice', notes: text.trim() },
+    plan: {
+      title: `Planned${distanceLabel} ${kind === 'treadmill' ? 'treadmill run' : kind}`.replace(/\s+/g, ' ').trim(),
+      workoutDate: date,
+      kind,
+      targetDistanceMeters: parsed.distanceMeters ?? null,
+      notes: text.trim(),
+    },
   };
 }
