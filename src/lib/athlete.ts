@@ -40,11 +40,15 @@ export type PlannedWorkout = {
 
 export type PlannedWorkoutDraft = Omit<PlannedWorkout, 'id' | 'status'>;
 
-export type VoiceActivityRoute = {
-  destination: 'activity' | 'plan';
+export type VoiceAthleteRoute = {
+  destination: 'activity' | 'plan' | 'recovery' | 'race' | 'gym' | 'goal';
   date: string;
   activity: Partial<AthleteActivityDraft>;
   plan: Partial<PlannedWorkoutDraft>;
+  recovery: Partial<Omit<RecoveryScore, 'id'>>;
+  race: Partial<Omit<Race, 'id'>>;
+  gym: Partial<GymSessionDraft>;
+  goal: Partial<AthleteGoalDraft>;
 };
 
 export type RecoveryScore = {
@@ -292,22 +296,87 @@ export function parseSpokenDate(text: string, referenceDate = new Date()): strin
   return futureCue && !pastCue ? offsetDate(referenceDate, 1) : localDateKey(referenceDate);
 }
 
-export function routeVoiceActivity(text: string, unit: DistanceUnit, referenceDate = new Date()): VoiceActivityRoute {
+function lastDayOfMonth(referenceDate: Date, monthOffsetValue = 0): string {
+  const date = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + monthOffsetValue + 1, 0, 12);
+  return localDateKey(date);
+}
+
+function detectedRecoveryScore(text: string): number | undefined {
+  const matched = text.match(/(?:recovery|readiness|score|रिकवरी|రికవరీ)\D{0,12}(\d{1,3})/)
+    ?? text.match(/\b(\d{1,3})\s*(?:\/|out of)\s*100\b/);
+  const score = matched?.[1] ? Number(matched[1]) : Number.NaN;
+  return Number.isInteger(score) && score >= 1 && score <= 100 ? score : undefined;
+}
+
+function detectedGymExercises(text: string): GymExercise[] {
+  const exerciseNames = [
+    ['squat', 'Squat'], ['deadlift', 'Deadlift'], ['lunge', 'Lunge'], ['bench', 'Bench press'],
+    ['pushup', 'Push-up'], ['push-up', 'Push-up'], ['plank', 'Plank'], ['calf raise', 'Calf raise'],
+  ] as const;
+  const sets = Number(text.match(/(\d+)\s*sets?/)?.[1] ?? 0);
+  const reps = Number(text.match(/(\d+)\s*reps?/)?.[1] ?? 0);
+  return exerciseNames.filter(([needle]) => text.includes(needle)).slice(0, 3).map(([, exercise]) => ({ exercise, sets, reps, weight: null }));
+}
+
+function voicePlanTitle(kind: AthleteActivityKind, distanceMeters: number | null | undefined, unit: DistanceUnit): string {
+  const distance = distanceMeters ? ` ${formatDistance(distanceMeters, unit)}` : '';
+  const label = kind === 'treadmill' ? 'treadmill run' : kind;
+  return `Planned${distance} ${label}`.replace(/\s+/g, ' ').trim();
+}
+
+export function routeVoiceAthleteRecord(text: string, unit: DistanceUnit, referenceDate = new Date()): VoiceAthleteRoute {
   const parsed = parseActivityText(text, unit);
   const date = parseSpokenDate(text, referenceDate);
-  const destination = date > localDateKey(referenceDate) ? 'plan' : 'activity';
+  const normalized = text.toLowerCase();
   const kind = parsed.kind ?? 'run';
-  const distanceLabel = parsed.distanceMeters ? ` ${formatDistance(parsed.distanceMeters, unit)}` : '';
+  const today = localDateKey(referenceDate);
+  const isFuture = date > today;
+  const isRecovery = /\b(?:recovery|readiness)\b|రికవరీ|रिकवरी/.test(normalized);
+  const isGym = /\b(?:gym|strength|squat|deadlift|lunge|bench|push-?up|plank|weights?)\b|జిమ్|जिम/.test(normalized);
+  const isGoal = /\b(?:goal|target|aim|challenge)\b|లక్ష్యం|लक्ष्य/.test(normalized);
+  const isRace = kind === 'race';
+  const goalEndsOn = /\bthis month\b/.test(normalized) ? lastDayOfMonth(referenceDate) : /\bnext month\b/.test(normalized) ? lastDayOfMonth(referenceDate, 1) : date > today ? date : offsetDate(referenceDate, 30);
+  const score = detectedRecoveryScore(normalized);
+  const exercises = detectedGymExercises(normalized);
+  const title = voicePlanTitle(kind, parsed.distanceMeters, unit);
+  let destination: VoiceAthleteRoute['destination'] = isFuture ? 'plan' : 'activity';
+  if (isRecovery) destination = 'recovery';
+  else if (isGym) destination = 'gym';
+  else if (isGoal) destination = 'goal';
+  else if (isFuture && isRace) destination = 'race';
+
   return {
     destination,
     date,
     activity: { ...parsed, activityDate: date, source: 'voice', notes: text.trim() },
     plan: {
-      title: `Planned${distanceLabel} ${kind === 'treadmill' ? 'treadmill run' : kind}`.replace(/\s+/g, ' ').trim(),
+      title,
       workoutDate: date,
       kind,
       targetDistanceMeters: parsed.distanceMeters ?? null,
       notes: text.trim(),
+    },
+    recovery: { recoveryDate: date, score, notes: text.trim(), source: 'manual' },
+    race: {
+      name: parsed.distanceMeters ? `${formatDistance(parsed.distanceMeters, unit)} race` : 'Upcoming race',
+      raceDate: date,
+      distanceMeters: parsed.distanceMeters ?? null,
+      location: '',
+      finishSeconds: parsed.durationSeconds ?? null,
+      notes: text.trim(),
+    },
+    gym: {
+      sessionDate: date,
+      title: exercises[0]?.exercise ? `${exercises[0].exercise} strength` : 'Strength session',
+      durationMinutes: parsed.durationSeconds ? Math.round(parsed.durationSeconds / 60) : null,
+      exercises,
+      notes: text.trim(),
+    },
+    goal: {
+      title: parsed.distanceMeters ? `Run ${formatDistance(parsed.distanceMeters, unit)} goal` : 'Running goal',
+      targetDistanceMeters: parsed.distanceMeters ?? undefined,
+      startsOn: today,
+      endsOn: goalEndsOn,
     },
   };
 }
