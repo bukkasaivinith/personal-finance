@@ -209,6 +209,7 @@ function ActivityModal({
 }) {
   const entry = editor.entry;
   const draft = editor.draft;
+  const source: AthleteActivitySource = entry?.source ?? draft?.source ?? 'manual';
   const distance = entry?.distanceMeters ? String((entry.distanceMeters / (settings.distanceUnit === 'mi' ? 1609.344 : 1000)).toFixed(2)) : draft?.distanceMeters ? String((draft.distanceMeters / (settings.distanceUnit === 'mi' ? 1609.344 : 1000)).toFixed(2)) : '';
   const [kind, setKind] = useState<AthleteActivityKind>(entry?.kind ?? draft?.kind ?? 'run');
   const [activityDate, setActivityDate] = useState(entry?.activityDate ?? draft?.activityDate ?? localDateKey());
@@ -222,9 +223,9 @@ function ActivityModal({
   const [cadence, setCadence] = useState(entry?.cadence?.toString() ?? draft?.cadence?.toString() ?? '');
   const [effort, setEffort] = useState(entry?.effort?.toString() ?? draft?.effort?.toString() ?? '');
   const [notes, setNotes] = useState(entry?.notes ?? draft?.notes ?? '');
+  const [notesReviewed, setNotesReviewed] = useState(source !== 'image');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const source: AthleteActivitySource = entry?.source ?? draft?.source ?? 'manual';
   const distanceMeters = parseOptionalNumber(distanceValue);
   const durationSeconds = (parseOptionalNumber(hours) ?? 0) * 3600 + (parseOptionalNumber(minutes) ?? 0) * 60 + (parseOptionalNumber(seconds) ?? 0);
   const pace = formatPace(distanceMeters === null ? null : metersFromDistance(distanceMeters, settings.distanceUnit), durationSeconds || null, settings.distanceUnit);
@@ -234,6 +235,7 @@ function ActivityModal({
     if (!activityDate) { setError('Choose the activity date.'); return; }
     if (distanceMeters !== null && distanceMeters < 0) { setError('Distance cannot be negative.'); return; }
     if (durationSeconds < 0) { setError('Duration cannot be negative.'); return; }
+    if (source === 'image' && !notesReviewed) { setError('Review the screenshot notes, then confirm that you checked them.'); return; }
     setSaving(true); setError('');
     try {
       await onSave({
@@ -266,7 +268,8 @@ function ActivityModal({
         <label>Elevation (m)<input type="number" min="0" value={elevation} onChange={(event) => setElevation(event.target.value)} placeholder="Optional" /></label>
         <label>Cadence (spm)<input type="number" min="1" max="400" value={cadence} onChange={(event) => setCadence(event.target.value)} placeholder="Optional" /></label>
         <label>Effort · 1–10<input type="number" min="1" max="10" value={effort} onChange={(event) => setEffort(event.target.value)} placeholder="Optional" /></label>
-        <label className="full-field">Notes (optional)<input value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
+        <label className="full-field screenshot-note-field">{source === 'image' ? 'Screenshot notes — review or clear' : 'Notes (optional)'}<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
+        {source === 'image' ? <label className="full-field screenshot-note-review"><input type="checkbox" checked={notesReviewed} onChange={(event) => setNotesReviewed(event.target.checked)} /><span>I checked the screenshot notes. I can correct or clear this text before saving.</span></label> : null}
       </div>
       {error ? <p className="form-error">{error}</p> : null}
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : entry ? 'Save activity' : 'Save activity'}</button></div>
