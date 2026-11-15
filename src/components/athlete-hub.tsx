@@ -17,7 +17,6 @@ import {
   Target,
   Trash2,
   Trophy,
-  Upload,
 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
 import { EmptyPanel, Metric, ModalShell, ProgressRow, SectionHeading } from '@/components/ui';
@@ -328,7 +327,7 @@ function GoalModal({ settings, initial, onClose, onSave }: { settings: AthleteSe
   return <SimpleModal title="Create running goal" onClose={onClose}><form className="modal-form" onSubmit={submit}>{initial ? <p className="form-hint">We made this goal from your spoken note. Fill any missing detail before saving.</p> : <p className="modal-description">Your progress is based on logged activity during the goal period.</p>}<div className="form-grid"><label className="full-field">Goal title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} placeholder="e.g. Run 100 km this month" /></label><label>Target distance ({settings.distanceUnit})<input type="number" min="0.01" step="0.01" value={distance} onChange={(event) => setDistance(event.target.value)} placeholder="e.g. 100" /></label><div><DatePicker label="Start date" value={startsOn} onChange={setStartsOn} /></div><div className="full-field"><DatePicker label="End date" value={endsOn} onChange={setEndsOn} min={startsOn} /></div></div>{error ? <p className="form-error">{error}</p> : null}<div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save goal'}</button></div></form></SimpleModal>;
 }
 
-function AthleteSettingsModal({ settings, onClose, onSave, onExport, onDelete }: { settings: AthleteSettings; onClose: () => void; onSave: (settings: AthleteSettings) => Promise<void>; onExport: () => void; onDelete: () => Promise<void> }) {
+function AthleteSettingsModal({ settings, onClose, onSave, onDelete }: { settings: AthleteSettings; onClose: () => void; onSave: (settings: AthleteSettings) => Promise<void>; onDelete: () => Promise<void> }) {
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(settings.distanceUnit);
   const [weightUnit, setWeightUnit] = useState<AthleteSettings['weightUnit']>(settings.weightUnit);
   const [saving, setSaving] = useState(false);
@@ -341,7 +340,6 @@ function AthleteSettingsModal({ settings, onClose, onSave, onExport, onDelete }:
   return <SimpleModal title="Athlete Hub settings" onClose={onClose}><form className="modal-form athlete-settings-modal" onSubmit={save}>
     <p className="modal-description">Your Athlete Hub is private and stays separate from your finance workspace.</p>
     <section className="athlete-settings-section"><h3>Units</h3><div className="form-grid"><label>Distance unit<select value={distanceUnit} onChange={(event) => setDistanceUnit(event.target.value as DistanceUnit)}><option value="km">Kilometres</option><option value="mi">Miles</option></select></label><label>Weight unit<select value={weightUnit} onChange={(event) => setWeightUnit(event.target.value as AthleteSettings['weightUnit'])}><option value="kg">Kilograms</option><option value="lb">Pounds</option></select></label></div></section>
-    <section className="athlete-settings-section"><h3>Private data</h3><p>Download a private JSON copy of your activities, plans, races, recovery, strength sessions and goals.</p><button type="button" className="secondary-button" onClick={onExport}><Upload size={14} /> Export private data</button></section>
     <section className="athlete-settings-section athlete-settings-danger"><h3>Delete Athlete Hub data</h3><p>This permanently removes every Athlete Hub record, but never changes your finance workspace.</p><button type="button" className="ghost-button danger" onClick={() => void onDelete()}><Trash2 size={14} /> Delete all Athlete Hub data</button></section>
     {error ? <p className="form-error">{error}</p> : null}
     <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>
@@ -490,11 +488,6 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     await refresh();
     onNotify('Athlete Hub settings updated.');
   };
-  const exportData = () => {
-    if (!data) return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = `athlete-hub-${localDateKey()}.json`; link.click(); URL.revokeObjectURL(url); onNotify('Private Athlete Hub export downloaded.');
-  };
   const deleteAll = async () => {
     if (!window.confirm('Delete every Athlete Hub activity, goal, plan, recovery score, race and gym entry? This cannot be undone.')) return;
     try { await deleteAllAthleteData(); await refresh(); onNotify('All Athlete Hub data was deleted.'); } catch (caught) { onNotify(errorMessage(caught)); }
@@ -565,6 +558,6 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     {showRace ? <RaceModal settings={settings} initial={voiceRaceDraft} onClose={() => { setShowRace(false); setVoiceRaceDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setVoiceRaceDraft(null); if (advanceScreenshotDraft()) return; onNotify('Race added.'); }} /> : null}
     {showGym ? <GymModal settings={settings} initial={voiceGymDraft} onClose={() => { setShowGym(false); setVoiceGymDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setVoiceGymDraft(null); if (advanceScreenshotDraft()) return; onNotify('Strength session saved.'); }} /> : null}
     {showGoal ? <GoalModal settings={settings} initial={voiceGoalDraft} onClose={() => { setShowGoal(false); setVoiceGoalDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setVoiceGoalDraft(null); if (advanceScreenshotDraft()) return; onNotify('Running goal saved.'); }} /> : null}
-    {showSettings ? <AthleteSettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} onExport={exportData} onDelete={deleteAll} /> : null}
+    {showSettings ? <AthleteSettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} onDelete={deleteAll} /> : null}
   </div>;
 }
