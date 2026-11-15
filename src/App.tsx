@@ -380,7 +380,7 @@ export default function App() {
               </label>
             ) : null}
           </div>
-          {!isAdminOnly && activeView !== 'transactions' && canEditTransactions ? (
+          {!isAdminOnly && activeView !== 'transactions' && activeView !== 'athlete' && canEditTransactions ? (
             <div className="top-actions">
               <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
                 <span className="header-action-icon" aria-hidden="true">

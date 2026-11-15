@@ -58,6 +58,7 @@ import { useAthleteData } from '@/lib/use-athlete-data';
 
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft> };
+type ScreenshotDraft = { fileName: string; draft: Partial<AthleteActivityDraft> };
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -209,6 +210,45 @@ function ActivityModal({
   </ModalShell>;
 }
 
+function ScreenshotUploadModal({
+  reading,
+  onClose,
+  onFiles,
+}: {
+  reading: boolean;
+  onClose: () => void;
+  onFiles: (files: File[]) => Promise<void>;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const selectFiles = (files: FileList | File[]) => {
+    const next = Array.from(files);
+    if (next.length) void onFiles(next);
+  };
+  return <ModalShell eyebrow="Athlete Hub" title="Read fitness screenshots" labelId="athlete-screenshot-import" onClose={reading ? () => undefined : onClose}>
+    <div className="screenshot-import">
+      <p className="modal-description">Add several running, Samsung Health, WHOOP, treadmill, race, or gym screenshots. They are read in your browser and shown as separate drafts for your approval.</p>
+      <button
+        className={`screenshot-dropzone ${dragging ? 'dragging' : ''}`}
+        type="button"
+        disabled={reading}
+        onClick={() => input.current?.click()}
+        onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+        onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+        onDragLeave={(event) => { event.preventDefault(); setDragging(false); }}
+        onDrop={(event) => { event.preventDefault(); setDragging(false); selectFiles(event.dataTransfer.files); }}
+      >
+        <span><FileImage size={22} /></span>
+        <b>{reading ? 'Reading screenshots…' : 'Drop screenshots here'}</b>
+        <small>{reading ? 'This may take a moment for each image.' : 'or click to choose multiple images · PNG, JPG, or WebP · 10 MB each'}</small>
+      </button>
+      <input ref={input} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { const files = event.target.files; if (files) selectFiles(files); event.currentTarget.value = ''; }} />
+      <div className="screenshot-import-note"><Sparkles size={14} /><span>No image is uploaded to your finance records. Review every activity before it is saved.</span></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={reading} onClick={onClose}>Cancel</button></div>
+    </div>
+  </ModalShell>;
+}
+
 function SimpleModal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return <ModalShell eyebrow="Athlete Hub" title={title} labelId={`athlete-${title.toLowerCase().replace(/\s+/g, '-')}`} onClose={onClose}>{children}</ModalShell>;
 }
@@ -269,10 +309,10 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [showRace, setShowRace] = useState(false);
   const [showGym, setShowGym] = useState(false);
   const [showGoal, setShowGoal] = useState(false);
-  const [voiceLanguage, setVoiceLanguage] = useState('en-IN');
   const [listening, setListening] = useState(false);
   const [readingImage, setReadingImage] = useState(false);
-  const imageInput = useRef<HTMLInputElement>(null);
+  const [screenshotImportOpen, setScreenshotImportOpen] = useState(false);
+  const [screenshotDrafts, setScreenshotDrafts] = useState<ScreenshotDraft[]>([]);
 
   const settings = data?.settings;
   const bounds = periodBounds(period, customStart, customEnd);
@@ -298,6 +338,13 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const saveActivity = async (draft: AthleteActivityDraft, id?: string) => {
     await saveAthleteActivity(draft, id);
     await refresh();
+    if (!id && screenshotDrafts.length) {
+      const remaining = screenshotDrafts.slice(1);
+      setScreenshotDrafts(remaining);
+      setActivityEditor(remaining[0] ? { draft: remaining[0].draft } : null);
+      onNotify(remaining.length ? `${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.` : 'All screenshot activity drafts were saved.');
+      return;
+    }
     setActivityEditor(null);
     onNotify(id ? 'Activity updated.' : 'Activity logged. Your Athlete Hub has been updated.');
   };
@@ -326,7 +373,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     const SpeechCtor = (window as SpeechWindow).SpeechRecognition ?? (window as SpeechWindow).webkitSpeechRecognition;
     if (!SpeechCtor) { onNotify('Voice entry is not available in this browser. Use quick entry instead.'); return; }
     const recognition = new SpeechCtor();
-    recognition.lang = voiceLanguage; recognition.continuous = false; recognition.interimResults = false;
+    recognition.lang = navigator.language || 'en-IN'; recognition.continuous = false; recognition.interimResults = false;
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join(' ').trim();
       setListening(false);
@@ -337,27 +384,39 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     recognition.onend = () => setListening(false);
     setListening(true); recognition.start();
   };
-  const readScreenshot = async (file: File) => {
-    if (file.size > 10 * 1024 * 1024) { onNotify('Choose an image under 10 MB.'); return; }
+  const closeActivityEditor = () => {
+    if (screenshotDrafts.length) { setScreenshotDrafts([]); onNotify('Remaining screenshot drafts were discarded. No unconfirmed activity was saved.'); }
+    setActivityEditor(null);
+  };
+  const readScreenshots = async (files: File[]) => {
+    const accepted = files.filter((file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type) && file.size <= 10 * 1024 * 1024);
+    if (!accepted.length) { onNotify('Choose PNG, JPG, or WebP screenshots under 10 MB each.'); return; }
+    const skipped = files.length - accepted.length;
     setReadingImage(true);
     try {
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng');
-      const result = await worker.recognize(file);
+      const drafts: ScreenshotDraft[] = [];
+      for (const file of accepted) {
+        const result = await worker.recognize(file);
+        const text = result.data.text.trim();
+        if (text) drafts.push({ fileName: file.name, draft: { ...parseActivityText(text, settings?.distanceUnit ?? 'km'), activityDate: localDateKey(), source: 'image', notes: text } });
+      }
       await worker.terminate();
-      const text = result.data.text.trim();
-      if (!text) { onNotify('No readable activity details were found. You can enter it manually.'); return; }
-      setActivityEditor({ draft: { ...parseActivityText(text, settings?.distanceUnit ?? 'km'), activityDate: localDateKey(), source: 'image', notes: text } });
-    } catch (caught) { onNotify(errorMessage(caught)); } finally { setReadingImage(false); if (imageInput.current) imageInput.current.value = ''; }
+      if (!drafts.length) { onNotify('No readable activity details were found. You can enter them manually.'); return; }
+      setScreenshotDrafts(drafts);
+      setActivityEditor({ draft: drafts[0].draft });
+      setScreenshotImportOpen(false);
+      onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready to review.${skipped ? ` ${skipped} file${skipped === 1 ? '' : 's'} skipped.` : ''}`);
+    } catch (caught) { onNotify(errorMessage(caught)); } finally { setReadingImage(false); }
   };
 
   if (loading || !data || !settings) return <div className="surface-card"><EmptyPanel icon={<Activity size={20} />} title={error ? 'Athlete Hub could not load' : 'Loading Athlete Hub'} description={error || 'Your private training records are loading.'} action={error ? <button type="button" className="secondary-button" onClick={() => void refresh()}>Try again</button> : undefined} /></div>;
 
   return <div className="athlete-hub">
-    <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><select className="compact-select athlete-unit-select" value={settings.distanceUnit} aria-label="Distance unit" onChange={(event) => void saveSettings({ ...settings, distanceUnit: event.target.value as DistanceUnit })}><option value="km">Kilometres</option><option value="mi">Miles</option></select><select className="compact-select athlete-unit-select" value={settings.weightUnit} aria-label="Weight unit" onChange={(event) => void saveSettings({ ...settings, weightUnit: event.target.value as AthleteSettings['weightUnit'] })}><option value="kg">Kilograms</option><option value="lb">Pounds</option></select><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => imageInput.current?.click()}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshot'}</button><button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Add activity</button></>} />
-    <input className="sr-only" ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />
+    <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><select className="compact-select athlete-unit-select" value={settings.distanceUnit} aria-label="Distance unit" onChange={(event) => void saveSettings({ ...settings, distanceUnit: event.target.value as DistanceUnit })}><option value="km">Kilometres</option><option value="mi">Miles</option></select><select className="compact-select athlete-unit-select" value={settings.weightUnit} aria-label="Weight unit" onChange={(event) => void saveSettings({ ...settings, weightUnit: event.target.value as AthleteSettings['weightUnit'] })}><option value="kg">Kilograms</option><option value="lb">Pounds</option></select><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => setScreenshotImportOpen(true)}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshots'}</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
 
-    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div><div className="athlete-voice-controls"><select className="compact-select" value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value)} aria-label="Voice language"><option value="en-IN">English</option><option value="te-IN">తెలుగు</option><option value="hi-IN">हिन्दी</option></select><button type="button" className={`secondary-button ${listening ? 'recording' : ''}`} onClick={startVoice} disabled={listening}><Mic size={15} />{listening ? 'Listening…' : 'Speak activity'}</button></div></div>
+    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div><div className="athlete-voice-controls"><span className="athlete-voice-hint">Uses your device language</span><button type="button" className={`secondary-button ${listening ? 'recording' : ''}`} onClick={startVoice} disabled={listening}><Mic size={15} />{listening ? 'Listening…' : 'Speak activity'}</button></div></div>
     <div className="metrics-grid athlete-metrics"><Metric label="Running distance" value={formatDistance(runningDistance, settings.distanceUnit)} foot={`${runningActivities.length} run${runningActivities.length === 1 ? '' : 's'} in this view`} icon={<Footprints size={16} />} /><Metric label="All movement" value={formatDistance(allDistance, settings.distanceUnit)} foot="Running, walking and cycling combined" icon={<Activity size={16} />} /><Metric label="Average pace" value={averagePace} foot={totalSeconds ? `${formatDuration(totalSeconds)} running time` : 'Add duration to calculate'} icon={<Sparkles size={16} />} /><Metric label="Energy logged" value={new Intl.NumberFormat('en-IN').format(totalCalories)} foot="Calories recorded in this view" icon={<HeartPulse size={16} />} /></div>
     <div className="content-grid athlete-overview-grid"><section className="surface-card athlete-today-card"><div className="card-title-row"><div><h3>Today’s readiness</h3><p>Recovery and your next useful action.</p></div><button type="button" className="text-button" onClick={() => setShowScore(true)}><Plus size={14} /> Log score</button></div><div className="athlete-readiness"><div className={`athlete-recovery-ring ${recovery ? recoveryTone(recovery.score) : 'empty'}`}><b>{recovery?.score ?? '—'}</b><span>{recovery ? 'Recovery' : 'No score'}</span></div><div><strong>{recovery ? recovery.score >= 85 ? 'Ready to push' : recovery.score >= 67 ? 'Solid training day' : recovery.score >= 34 ? 'Keep it controlled' : 'Prioritise recovery' : 'Check in with yourself'}</strong><p>{recovery?.notes || 'Add your own 1–100 recovery score in seconds.'}</p></div></div>{nextRace ? <div className="athlete-race-banner"><Flag size={15} /><span><b>{nextRace.name}</b>{nextRace.distanceMeters ? ` · ${formatDistance(nextRace.distanceMeters, settings.distanceUnit)}` : ''}</span><strong>{Math.max(0, daysBetween(localDateKey(), nextRace.raceDate))} days</strong><button className="ghost-button danger" aria-label={`Delete ${nextRace.name}`} type="button" onClick={() => void deleteRecord('race', nextRace.id, nextRace.name)}><Trash2 size={13} /></button></div> : <button className="athlete-add-race" type="button" onClick={() => setShowRace(true)}><Flag size={15} /> Add a race countdown</button>}</section><section className="surface-card athlete-plan-card"><div className="card-title-row"><div><h3>Coming up</h3><p>Planned sessions and races stay in sight.</p></div><button type="button" className="text-button" onClick={() => setShowPlan(true)}><Plus size={14} /> Plan</button></div>{planned.length ? <div className="athlete-upcoming-list">{planned.map((workout) => <div key={workout.id}><span className="athlete-date-chip">{formatAthleteDate(workout.workoutDate)}</span><p><b>{workout.title}</b><small>{workout.targetDistanceMeters ? formatDistance(workout.targetDistanceMeters, settings.distanceUnit) : activityKinds.find((item) => item.value === workout.kind)?.label}</small></p><button className="ghost-button danger" aria-label={`Delete ${workout.title}`} type="button" onClick={() => void deleteRecord('planned_workout', workout.id, workout.title)}><Trash2 size={13} /></button></div>)}</div> : <div className="athlete-empty-inline"><CalendarDays size={16} /><span>No planned workouts. Add the next one when you are ready.</span></div>}</section></div>
     <div className="content-grid athlete-training-grid"><AthleteCalendar data={data} month={calendarMonth} onChangeMonth={(amount) => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1, 12))} /><section className="surface-card athlete-pr-card"><div className="card-title-row"><div><h3>Personal records</h3><p>Best pace for your standard distances.</p></div><Trophy size={18} /></div><div className="athlete-pr-list">{personalRecords.map((record) => <div key={record.label}><span>{record.label}</span><b>{record.activity ? formatPace(record.activity.distanceMeters, record.activity.durationSeconds, settings.distanceUnit) : '—'}</b><small>{record.activity ? formatAthleteDate(record.activity.activityDate) : 'Log a run to unlock'}</small></div>)}</div><button className="text-button" type="button" onClick={() => setShowGoal(true)}><Target size={14} /> Create distance goal</button></section></div>
@@ -365,7 +424,8 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Training timeline</h3><p>Your most recent recorded movement. Speech and screenshots always require confirmation before appearing here.</p></div><button type="button" className="text-button" onClick={() => setActivityEditor({})}><Plus size={14} /> Log activity</button></div>{activities.length ? <div className="athlete-activity-list">{activities.slice(0, 12).map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     <section className="surface-card athlete-data-card"><div><h3>Your private data</h3><p>Athlete Hub is separate from your finance workspace. Images and voice drafts are not stored; only the activity you confirm is saved.</p></div><div><button type="button" className="secondary-button" onClick={exportData}><Upload size={14} /> Export</button><button type="button" className="ghost-button danger" onClick={() => void deleteAll()}><Trash2 size={14} /> Delete all data</button></div></section>
 
-    {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={() => setActivityEditor(null)} onSave={saveActivity} /> : null}
+    {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
+    {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
     {showScore ? <ScoreModal onClose={() => setShowScore(false)} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); onNotify('Recovery score saved.'); }} /> : null}
     {showPlan ? <PlanModal settings={settings} onClose={() => setShowPlan(false)} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); onNotify('Workout planned.'); }} /> : null}
     {showRace ? <RaceModal settings={settings} onClose={() => setShowRace(false)} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); onNotify('Race added.'); }} /> : null}
