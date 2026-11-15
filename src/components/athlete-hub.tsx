@@ -471,7 +471,10 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const saveActivity = async (draft: AthleteActivityDraft, id?: string) => {
     await saveAthleteActivity(draft, id);
     await refresh();
-    if (!id && advanceScreenshotDraft()) return;
+    if (!id && screenshotDrafts.length) {
+      setActivityEditor(null);
+      if (advanceScreenshotDraft()) return;
+    }
     setActivityEditor(null);
     onNotify(id ? 'Activity updated.' : 'Activity logged. Your Athlete Hub has been updated.');
   };
