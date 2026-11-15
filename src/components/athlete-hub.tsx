@@ -61,6 +61,7 @@ import { useAthleteData } from '@/lib/use-athlete-data';
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft> };
 type ScreenshotDraft = { fileName: string; route: VoiceAthleteRoute };
+type PendingRecognition = { route: VoiceAthleteRoute; source: 'voice' | 'image' };
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -347,6 +348,30 @@ function AthleteSettingsModal({ settings, onClose, onSave, onExport, onDelete }:
   </form></SimpleModal>;
 }
 
+function RecognitionConfirmationModal({ pending, settings, onClose, onAddInfo }: { pending: PendingRecognition; settings: AthleteSettings; onClose: () => void; onAddInfo: () => void }) {
+  const { route, source } = pending;
+  const kindLabel = route.destination === 'activity' ? 'Activity' : route.destination === 'plan' ? 'Future workout' : route.destination === 'recovery' ? 'Recovery check-in' : route.destination === 'race' ? 'Upcoming race' : route.destination === 'gym' ? 'Strength session' : 'Running goal';
+  const details = route.destination === 'activity' ? [
+    ['Date', formatAthleteDate(route.date)], ['Type', route.activity.kind ?? 'Run'], ['Distance', formatDistance(route.activity.distanceMeters ?? null, settings.distanceUnit)], ['Duration', formatDuration(route.activity.durationSeconds ?? null)],
+  ] : route.destination === 'plan' ? [
+    ['Date', formatAthleteDate(route.date)], ['Type', route.plan.kind ?? 'Run'], ['Target', formatDistance(route.plan.targetDistanceMeters ?? null, settings.distanceUnit)],
+  ] : route.destination === 'recovery' ? [
+    ['Date', formatAthleteDate(route.date)], ['Score', route.recovery.score ? `${route.recovery.score} / 100` : 'Not detected'],
+  ] : route.destination === 'race' ? [
+    ['Date', formatAthleteDate(route.date)], ['Name', route.race.name ?? 'Upcoming race'], ['Distance', formatDistance(route.race.distanceMeters ?? null, settings.distanceUnit)],
+  ] : route.destination === 'gym' ? [
+    ['Date', formatAthleteDate(route.date)], ['Session', route.gym.title ?? 'Strength session'], ['Duration', route.gym.durationMinutes ? `${route.gym.durationMinutes} min` : 'Not detected'],
+  ] : [
+    ['Goal', route.goal.title ?? 'Running goal'], ['Target', formatDistance(route.goal.targetDistanceMeters ?? null, settings.distanceUnit)], ['End date', route.goal.endsOn ? formatAthleteDate(route.goal.endsOn) : 'Not detected'],
+  ];
+  return <SimpleModal title="Confirm understood details" onClose={onClose}><div className="recognition-confirmation">
+    <p className="modal-description">{source === 'voice' ? 'Your spoken note' : 'Your screenshot'} looks like a <b>{kindLabel.toLowerCase()}</b>. This is only a draft; nothing has been saved.</p>
+    <div className="recognition-summary"><strong>{kindLabel}</strong>{details.map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
+    <p className="form-hint">Choose Add info to open the complete form, edit anything that is wrong or missing, then save it.</p>
+    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Discard</button><button type="button" className="primary-button" onClick={onAddInfo}><Plus size={15} /> Add info</button></div>
+  </div></SimpleModal>;
+}
+
 function AthleteCalendar({ data, month, onChangeMonth }: { data: AthleteHubData; month: Date; onChangeMonth: (amount: number) => void }) {
   const events = useMemo(() => {
     const map = new Map<string, Array<{ label: string; detail: string; tone: string }>>();
@@ -383,6 +408,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [readingImage, setReadingImage] = useState(false);
   const [screenshotImportOpen, setScreenshotImportOpen] = useState(false);
   const [screenshotDrafts, setScreenshotDrafts] = useState<ScreenshotDraft[]>([]);
+  const [pendingRecognition, setPendingRecognition] = useState<PendingRecognition | null>(null);
 
   const settings = data?.settings;
   const bounds = periodBounds(period, customStart, customEnd);
@@ -405,15 +431,17 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     });
   }, [activities]);
 
-  const reviewRecognizedRecord = (route: VoiceAthleteRoute, source: 'voice' | 'image') => {
-    const sourceLabel = source === 'voice' ? 'Voice note' : 'Screenshot';
-    if (route.destination === 'recovery') { setVoiceRecoveryDraft(route.recovery); setShowScore(true); onNotify(`${sourceLabel} detected a recovery check-in. Review it before saving.`); return; }
-    if (route.destination === 'gym') { setVoiceGymDraft(route.gym); setShowGym(true); onNotify(`${sourceLabel} detected a strength session. Review it before saving.`); return; }
-    if (route.destination === 'goal') { setVoiceGoalDraft(route.goal); setShowGoal(true); onNotify(`${sourceLabel} detected a running goal. Fill any missing detail before saving.`); return; }
-    if (route.destination === 'race') { setVoiceRaceDraft(route.race); setShowRace(true); onNotify(`${sourceLabel} detected an upcoming race. Review it before saving.`); return; }
-    if (route.destination === 'plan') { setVoicePlanDraft(route.plan); setShowPlan(true); onNotify(`${sourceLabel} detected a future workout for ${formatAthleteDate(route.date)}. Review it before saving.`); return; }
+  const openRecognizedRecord = ({ route, source }: PendingRecognition) => {
+    if (route.destination === 'recovery') { setVoiceRecoveryDraft(route.recovery); setShowScore(true); return; }
+    if (route.destination === 'gym') { setVoiceGymDraft(route.gym); setShowGym(true); return; }
+    if (route.destination === 'goal') { setVoiceGoalDraft(route.goal); setShowGoal(true); return; }
+    if (route.destination === 'race') { setVoiceRaceDraft(route.race); setShowRace(true); return; }
+    if (route.destination === 'plan') { setVoicePlanDraft(route.plan); setShowPlan(true); return; }
     setActivityEditor({ draft: { ...route.activity, source: source === 'image' ? 'image' : 'voice' } });
-    onNotify(route.date < localDateKey() ? `${sourceLabel} detected a past activity for ${formatAthleteDate(route.date)}. Review it before saving.` : `${sourceLabel} activity draft ready to review.`);
+  };
+  const reviewRecognizedRecord = (route: VoiceAthleteRoute, source: PendingRecognition['source']) => {
+    setPendingRecognition({ route, source });
+    onNotify(`${source === 'voice' ? 'Voice' : 'Screenshot'} details are ready for confirmation.`);
   };
   const advanceScreenshotDraft = () => {
     if (!screenshotDrafts.length) return false;
@@ -427,6 +455,19 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     if (!screenshotDrafts.length) return;
     setScreenshotDrafts([]);
     onNotify('Remaining screenshot drafts were discarded. No unconfirmed record was saved.');
+  };
+  const discardPendingRecognition = () => {
+    if (!pendingRecognition) return;
+    if (pendingRecognition.source === 'image' && screenshotDrafts.length) {
+      const remaining = screenshotDrafts.slice(1);
+      setScreenshotDrafts(remaining);
+      setPendingRecognition(null);
+      if (remaining[0]) reviewRecognizedRecord(remaining[0].route, 'image');
+      else onNotify('Screenshot draft discarded.');
+      return;
+    }
+    setPendingRecognition(null);
+    onNotify('Recognized details discarded.');
   };
 
   const saveActivity = async (draft: AthleteActivityDraft, id?: string) => {
@@ -517,6 +558,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <div className="content-grid athlete-bottom-grid"><section className="surface-card athlete-goals-card"><div className="card-title-row"><div><h3>Distance goals</h3><p>Progress updates from your completed activity log.</p></div><button type="button" className="text-button" onClick={() => setShowGoal(true)}><Plus size={14} /> Goal</button></div>{data.goals.filter((goal) => goal.isActive).length ? <div className="athlete-goal-list">{data.goals.filter((goal) => goal.isActive).map((goal) => { const covered = activities.filter((activity) => inRange(activity.activityDate, goal.startsOn, goal.endsOn)).reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0); return <div className="athlete-goal-row" key={goal.id}><ProgressRow label={goal.title} detail={<>{formatDistance(covered, settings.distanceUnit)} of <b>{formatDistance(goal.targetDistanceMeters, settings.distanceUnit)}</b> · ends {formatAthleteDate(goal.endsOn)}</>} progress={covered / goal.targetDistanceMeters * 100} /><button className="ghost-button danger" type="button" aria-label={`Delete ${goal.title}`} onClick={() => void deleteRecord('goal', goal.id, goal.title)}><Trash2 size={13} /></button></div>; })}</div> : <div className="athlete-empty-inline"><Target size={16} /><span>Create a running-distance goal for clear momentum.</span></div>}</section><section className="surface-card athlete-strength-card"><div className="card-title-row"><div><h3>Strength for runners</h3><p>Minimal gym logging that supports your training.</p></div><button type="button" className="text-button" onClick={() => setShowGym(true)}><Plus size={14} /> Log strength</button></div>{data.gymSessions.length ? <div className="athlete-strength-summary"><Dumbbell size={19} /><div><b>{data.gymSessions[0].title}</b><small>{formatAthleteDate(data.gymSessions[0].sessionDate)}{data.gymSessions[0].durationMinutes ? ` · ${data.gymSessions[0].durationMinutes} min` : ''}</small></div><button className="ghost-button danger" type="button" aria-label={`Delete ${data.gymSessions[0].title}`} onClick={() => void deleteRecord('gym_session', data.gymSessions[0].id, data.gymSessions[0].title)}><Trash2 size={13} /></button></div> : <div className="athlete-empty-inline"><Dumbbell size={16} /><span>Log simple strength sessions when they help your running.</span></div>}</section></div>
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Training timeline</h3><p>Your most recent recorded movement. Speech and screenshots always require confirmation before appearing here.</p></div><button type="button" className="text-button" onClick={() => setActivityEditor({})}><Plus size={14} /> Log activity</button></div>{activities.length ? <div className="athlete-activity-list">{activities.slice(0, 12).map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
+    {pendingRecognition ? <RecognitionConfirmationModal pending={pendingRecognition} settings={settings} onClose={discardPendingRecognition} onAddInfo={() => { const next = pendingRecognition; setPendingRecognition(null); openRecognizedRecord(next); }} /> : null}
     {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
     {showScore ? <ScoreModal initial={voiceRecoveryDraft} onClose={() => { setShowScore(false); setVoiceRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setVoiceRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
     {showPlan ? <PlanModal settings={settings} initial={voicePlanDraft} onClose={() => { setShowPlan(false); setVoicePlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setVoicePlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}
