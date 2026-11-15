@@ -41,7 +41,6 @@ import {
   formatPace,
   localDateKey,
   metersFromDistance,
-  parseActivityText,
   routeVoiceAthleteRecord,
   recoveryTone,
   type AthleteActivity,
@@ -55,19 +54,21 @@ import {
   type GymSessionDraft,
   type PlannedWorkoutDraft,
   type Race,
+  type VoiceAthleteRoute,
 } from '@/lib/athlete';
 import { useAthleteData } from '@/lib/use-athlete-data';
 
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft> };
-type ScreenshotDraft = { fileName: string; draft: Partial<AthleteActivityDraft> };
+type ScreenshotDraft = { fileName: string; route: VoiceAthleteRoute };
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
+  maxAlternatives: number;
   start: () => void;
   abort: () => void;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string; confidence?: number }>> }) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
 };
@@ -85,6 +86,43 @@ const activityKinds: Array<{ value: AthleteActivityKind; label: string }> = [
 ];
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const emptyActivities: AthleteActivity[] = [];
+
+function recognitionQuality(text: string): number {
+  const normalized = text.toLowerCase();
+  const usefulSignals = [
+    /\b\d+(?:[.,]\d+)?\s*(?:km|mi)\b/, /(?:duration|moving time|elapsed time|time)\b/,
+    /(?:heart rate|\bhr\b|bpm)\b/, /(?:calories|\bkcal\b|\bcal\b)/,
+    /(?:elevation|gain)\b/, /(?:cadence|spm)\b/, /\b\d{1,2}:\d{2}(?::\d{2})?\b/,
+  ].filter((pattern) => pattern.test(normalized)).length;
+  const unreadableCharacters = (text.match(/[�]/g) ?? []).length;
+  return usefulSignals * 30 + Math.min(text.trim().length, 180) / 12 - unreadableCharacters * 20;
+}
+
+function bestRecognizedText(original: string, enhanced: string | null): string {
+  if (!enhanced?.trim()) return original.trim();
+  return recognitionQuality(enhanced) > recognitionQuality(original) ? enhanced.trim() : original.trim();
+}
+
+async function enhancedScreenshot(file: File): Promise<Blob | null> {
+  try {
+    const image = await createImageBitmap(file);
+    const largestSide = Math.max(image.width, image.height);
+    const scale = Math.min(2, Math.max(.75, 2400 / largestSide));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) { image.close(); return null; }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.filter = 'grayscale(1) contrast(1.55) brightness(1.08)';
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.close();
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  } catch {
+    return null;
+  }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -229,7 +267,7 @@ function ScreenshotUploadModal({
   };
   return <ModalShell eyebrow="Athlete Hub" title="Read fitness screenshots" labelId="athlete-screenshot-import" onClose={reading ? () => undefined : onClose}>
     <div className="screenshot-import">
-      <p className="modal-description">Add several running, Samsung Health, WHOOP, treadmill, race, or gym screenshots. They are read in your browser and shown as separate drafts for your approval.</p>
+      <p className="modal-description">Add several running, Samsung Health, WHOOP, treadmill, race, or gym screenshots. Each is read locally in its original and enhanced form, then routed into the matching review form for your approval.</p>
       <button
         className={`screenshot-dropzone ${dragging ? 'dragging' : ''}`}
         type="button"
@@ -367,16 +405,34 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     });
   }, [activities]);
 
+  const reviewRecognizedRecord = (route: VoiceAthleteRoute, source: 'voice' | 'image') => {
+    const sourceLabel = source === 'voice' ? 'Voice note' : 'Screenshot';
+    if (route.destination === 'recovery') { setVoiceRecoveryDraft(route.recovery); setShowScore(true); onNotify(`${sourceLabel} detected a recovery check-in. Review it before saving.`); return; }
+    if (route.destination === 'gym') { setVoiceGymDraft(route.gym); setShowGym(true); onNotify(`${sourceLabel} detected a strength session. Review it before saving.`); return; }
+    if (route.destination === 'goal') { setVoiceGoalDraft(route.goal); setShowGoal(true); onNotify(`${sourceLabel} detected a running goal. Fill any missing detail before saving.`); return; }
+    if (route.destination === 'race') { setVoiceRaceDraft(route.race); setShowRace(true); onNotify(`${sourceLabel} detected an upcoming race. Review it before saving.`); return; }
+    if (route.destination === 'plan') { setVoicePlanDraft(route.plan); setShowPlan(true); onNotify(`${sourceLabel} detected a future workout for ${formatAthleteDate(route.date)}. Review it before saving.`); return; }
+    setActivityEditor({ draft: { ...route.activity, source: source === 'image' ? 'image' : 'voice' } });
+    onNotify(route.date < localDateKey() ? `${sourceLabel} detected a past activity for ${formatAthleteDate(route.date)}. Review it before saving.` : `${sourceLabel} activity draft ready to review.`);
+  };
+  const advanceScreenshotDraft = () => {
+    if (!screenshotDrafts.length) return false;
+    const remaining = screenshotDrafts.slice(1);
+    setScreenshotDrafts(remaining);
+    if (remaining[0]) { reviewRecognizedRecord(remaining[0].route, 'image'); onNotify(`${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.`); }
+    else onNotify('All screenshot drafts were saved.');
+    return true;
+  };
+  const discardScreenshotDrafts = () => {
+    if (!screenshotDrafts.length) return;
+    setScreenshotDrafts([]);
+    onNotify('Remaining screenshot drafts were discarded. No unconfirmed record was saved.');
+  };
+
   const saveActivity = async (draft: AthleteActivityDraft, id?: string) => {
     await saveAthleteActivity(draft, id);
     await refresh();
-    if (!id && screenshotDrafts.length) {
-      const remaining = screenshotDrafts.slice(1);
-      setScreenshotDrafts(remaining);
-      setActivityEditor(remaining[0] ? { draft: remaining[0].draft } : null);
-      onNotify(remaining.length ? `${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.` : 'All screenshot activity drafts were saved.');
-      return;
-    }
+    if (!id && advanceScreenshotDraft()) return;
     setActivityEditor(null);
     onNotify(id ? 'Activity updated.' : 'Activity logged. Your Athlete Hub has been updated.');
   };
@@ -407,51 +463,20 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     const SpeechCtor = (window as SpeechWindow).SpeechRecognition ?? (window as SpeechWindow).webkitSpeechRecognition;
     if (!SpeechCtor) { onNotify('Voice entry is not available in this browser. Use quick entry instead.'); return; }
     const recognition = new SpeechCtor();
-    recognition.lang = navigator.language || 'en-IN'; recognition.continuous = false; recognition.interimResults = false;
+    recognition.lang = navigator.language || 'en-IN'; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 3;
     recognition.onresult = (event) => {
-      const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join(' ').trim();
+      const alternatives = Array.from(event.results).flatMap((result) => Array.from(result).map((option) => ({ transcript: option.transcript?.trim() ?? '', confidence: option.confidence ?? 0 })));
+      const transcript = alternatives.sort((first, second) => (second.confidence * 100 + recognitionQuality(second.transcript)) - (first.confidence * 100 + recognitionQuality(first.transcript)))[0]?.transcript ?? '';
       setListening(false);
       if (!transcript) { onNotify('We did not hear an activity. Please try again.'); return; }
-      const route = routeVoiceAthleteRecord(transcript, settings?.distanceUnit ?? 'km');
-      if (route.destination === 'recovery') {
-        setVoiceRecoveryDraft(route.recovery);
-        setShowScore(true);
-        onNotify(`Recovery check-in detected for ${formatAthleteDate(route.date)}. Review it before saving.`);
-        return;
-      }
-      if (route.destination === 'gym') {
-        setVoiceGymDraft(route.gym);
-        setShowGym(true);
-        onNotify(`Strength session detected for ${formatAthleteDate(route.date)}. Review it before saving.`);
-        return;
-      }
-      if (route.destination === 'goal') {
-        setVoiceGoalDraft(route.goal);
-        setShowGoal(true);
-        onNotify('Running goal detected. Fill any missing detail and review it before saving.');
-        return;
-      }
-      if (route.destination === 'race') {
-        setVoiceRaceDraft(route.race);
-        setShowRace(true);
-        onNotify(`Upcoming race detected for ${formatAthleteDate(route.date)}. Review it before saving.`);
-        return;
-      }
-      if (route.destination === 'plan') {
-        setVoicePlanDraft(route.plan);
-        setShowPlan(true);
-        onNotify(`Future activity detected for ${formatAthleteDate(route.date)}. Review the plan before saving.`);
-        return;
-      }
-      setActivityEditor({ draft: route.activity });
-      onNotify(route.date < localDateKey() ? `Past activity detected for ${formatAthleteDate(route.date)}. Review it before saving.` : 'Voice activity draft ready to review.');
+      reviewRecognizedRecord(routeVoiceAthleteRecord(transcript, settings?.distanceUnit ?? 'km'), 'voice');
     };
     recognition.onerror = () => { setListening(false); onNotify('Voice capture stopped. Please try again or use quick entry.'); };
     recognition.onend = () => setListening(false);
     setListening(true); recognition.start();
   };
   const closeActivityEditor = () => {
-    if (screenshotDrafts.length) { setScreenshotDrafts([]); onNotify('Remaining screenshot drafts were discarded. No unconfirmed activity was saved.'); }
+    discardScreenshotDrafts();
     setActivityEditor(null);
   };
   const readScreenshots = async (files: File[]) => {
@@ -460,18 +485,21 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     const skipped = files.length - accepted.length;
     setReadingImage(true);
     try {
-      const { createWorker } = await import('tesseract.js');
+      const { createWorker, PSM } = await import('tesseract.js');
       const worker = await createWorker('eng');
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, preserve_interword_spaces: '1', user_defined_dpi: '300' });
       const drafts: ScreenshotDraft[] = [];
       for (const file of accepted) {
-        const result = await worker.recognize(file);
-        const text = result.data.text.trim();
-        if (text) drafts.push({ fileName: file.name, draft: { ...parseActivityText(text, settings?.distanceUnit ?? 'km'), activityDate: localDateKey(), source: 'image', notes: text } });
+        const original = await worker.recognize(file, { rotateAuto: true });
+        const enhanced = await enhancedScreenshot(file);
+        const improved = enhanced ? await worker.recognize(enhanced, { rotateAuto: true }) : null;
+        const text = bestRecognizedText(original.data.text, improved?.data.text ?? null);
+        if (text) drafts.push({ fileName: file.name, route: routeVoiceAthleteRecord(text, settings?.distanceUnit ?? 'km') });
       }
       await worker.terminate();
       if (!drafts.length) { onNotify('No readable activity details were found. You can enter them manually.'); return; }
       setScreenshotDrafts(drafts);
-      setActivityEditor({ draft: drafts[0].draft });
+      reviewRecognizedRecord(drafts[0].route, 'image');
       setScreenshotImportOpen(false);
       onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready to review.${skipped ? ` ${skipped} file${skipped === 1 ? '' : 's'} skipped.` : ''}`);
     } catch (caught) { onNotify(errorMessage(caught)); } finally { setReadingImage(false); }
@@ -490,11 +518,11 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Training timeline</h3><p>Your most recent recorded movement. Speech and screenshots always require confirmation before appearing here.</p></div><button type="button" className="text-button" onClick={() => setActivityEditor({})}><Plus size={14} /> Log activity</button></div>{activities.length ? <div className="athlete-activity-list">{activities.slice(0, 12).map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
     {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
-    {showScore ? <ScoreModal initial={voiceRecoveryDraft} onClose={() => { setShowScore(false); setVoiceRecoveryDraft(null); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setVoiceRecoveryDraft(null); onNotify('Recovery score saved.'); }} /> : null}
-    {showPlan ? <PlanModal settings={settings} initial={voicePlanDraft} onClose={() => { setShowPlan(false); setVoicePlanDraft(null); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setVoicePlanDraft(null); onNotify('Workout planned.'); }} /> : null}
-    {showRace ? <RaceModal settings={settings} initial={voiceRaceDraft} onClose={() => { setShowRace(false); setVoiceRaceDraft(null); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setVoiceRaceDraft(null); onNotify('Race added.'); }} /> : null}
-    {showGym ? <GymModal settings={settings} initial={voiceGymDraft} onClose={() => { setShowGym(false); setVoiceGymDraft(null); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setVoiceGymDraft(null); onNotify('Strength session saved.'); }} /> : null}
-    {showGoal ? <GoalModal settings={settings} initial={voiceGoalDraft} onClose={() => { setShowGoal(false); setVoiceGoalDraft(null); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setVoiceGoalDraft(null); onNotify('Running goal saved.'); }} /> : null}
+    {showScore ? <ScoreModal initial={voiceRecoveryDraft} onClose={() => { setShowScore(false); setVoiceRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setVoiceRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
+    {showPlan ? <PlanModal settings={settings} initial={voicePlanDraft} onClose={() => { setShowPlan(false); setVoicePlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setVoicePlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}
+    {showRace ? <RaceModal settings={settings} initial={voiceRaceDraft} onClose={() => { setShowRace(false); setVoiceRaceDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setVoiceRaceDraft(null); if (advanceScreenshotDraft()) return; onNotify('Race added.'); }} /> : null}
+    {showGym ? <GymModal settings={settings} initial={voiceGymDraft} onClose={() => { setShowGym(false); setVoiceGymDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setVoiceGymDraft(null); if (advanceScreenshotDraft()) return; onNotify('Strength session saved.'); }} /> : null}
+    {showGoal ? <GoalModal settings={settings} initial={voiceGoalDraft} onClose={() => { setShowGoal(false); setVoiceGoalDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setVoiceGoalDraft(null); if (advanceScreenshotDraft()) return; onNotify('Running goal saved.'); }} /> : null}
     {showSettings ? <AthleteSettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} onExport={exportData} onDelete={deleteAll} /> : null}
   </div>;
 }

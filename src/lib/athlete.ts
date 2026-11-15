@@ -181,21 +181,23 @@ export function parseActivityText(text: string, unit: DistanceUnit): Partial<Ath
   const kind: AthleteActivityKind = hasRace ? 'race' : hasTreadmill ? 'treadmill' : hasCycle ? 'cycle' : hasWalk ? 'walk' : 'run';
   const distanceValue = numberFrom(normalized, /(\d+(?:[.,]\d+)?)\s*(?:km|kilomet(?:er|re)s?|mi|miles?|కి\.?మీ|కిలోమీట(?:ర్|ర్లు)?|किमी|किलोमीटर)/);
   const usesMiles = /\bmi(?:les)?\b|मील|మైలు/.test(normalized);
-  const time = normalized.match(/(?:in|time|duration)?\s*(\d{1,2})\s*(?:h|hr|hours?)\s*(?:(\d{1,2})\s*(?:m|min|minutes?))?/)
-    ?? normalized.match(/(?:in|time|duration)?\s*(\d{1,3})\s*(?:m|min|minutes?)\b/);
+  const time = normalized.match(/(?:in|time|duration|moving time|elapsed time)\D{0,14}(\d{1,2})\s*(?:h|hr|hours?)\s*(?:(\d{1,2})\s*(?:m|min|minutes?))?/)
+    ?? normalized.match(/(?:in|time|duration|moving time|elapsed time)\D{0,14}(\d{1,3})\s*(?:m|min|minutes?)\b/);
   let durationSeconds: number | null = null;
   if (time) {
     const first = Number(time[1]);
     const second = time[2] ? Number(time[2]) : 0;
     durationSeconds = time[2] ? first * 3600 + second * 60 : normalized.includes('hour') || /\bhr\b|\bh\b/.test(time[0]) ? first * 3600 : first * 60;
   } else {
-    const clock = normalized.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+    const clocks = Array.from(normalized.matchAll(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/g));
+    const clock = clocks.find((match) => !/^\s*\/(?:km|mi)\b/.test(normalized.slice((match.index ?? 0) + match[0].length))) ?? null;
     if (clock) durationSeconds = clock[3] ? Number(clock[1]) * 3600 + Number(clock[2]) * 60 + Number(clock[3]) : Number(clock[1]) * 60 + Number(clock[2]);
   }
-  const averageHeartRate = numberFrom(normalized, /(?:avg(?:erage)?\s*)?(?:heart\s*rate|hr)\D{0,12}(\d{2,3})\s*(?:bpm)?/);
-  const calories = numberFrom(normalized, /(\d{2,5})\s*(?:kcal|calories|cal)\b/);
-  const elevationMeters = numberFrom(normalized, /(?:elevation|elev|gain)\D{0,12}(\d+(?:[.,]\d+)?)\s*(?:m|meters?|metres?)/);
-  const cadence = numberFrom(normalized, /(?:cadence|spm)\D{0,12}(\d{2,3})/);
+  const averageHeartRate = numberFrom(normalized, /(?:avg(?:erage)?\s*)?(?:heart\s*rate|hr)\D{0,24}(\d{2,3})\s*(?:bpm)?/);
+  const calories = numberFrom(normalized, /(?:calories|energy|kcal|cal)\D{0,18}(\d{2,5})\b/)
+    ?? numberFrom(normalized, /(\d{2,5})\s*(?:kcal|calories|cal)\b/);
+  const elevationMeters = numberFrom(normalized, /(?:elevation|elev|gain)\D{0,24}(\d+(?:[.,]\d+)?)\s*(?:m|meters?|metres?)/);
+  const cadence = numberFrom(normalized, /(?:cadence|spm)\D{0,24}(\d{2,3})/);
   return {
     kind,
     distanceMeters: distanceValue === null ? undefined : metersFromDistance(distanceValue, usesMiles ? 'mi' : unit),
