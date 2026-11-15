@@ -172,32 +172,62 @@ function numberFrom(text: string, expression: RegExp): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function normalizeAthleteInput(text: string): string {
+  const unicodeDigits: Array<[string, string]> = [
+    ['०१२३४५६७८९', '0123456789'],
+    ['౦౧౨౩౪౫౬౭౮౯', '0123456789'],
+  ];
+  let normalized = text.replace(/\u00a0/g, ' ').replace(/[–—]/g, '-');
+  for (const [source, replacement] of unicodeDigits) {
+    normalized = normalized.replace(new RegExp(`[${source}]`, 'g'), (digit) => replacement[source.indexOf(digit)]);
+  }
+  const units: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100 };
+  normalized = normalized.replace(/\b(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[-\s]+(?:one|two|three|four|five|six|seven|eight|nine))?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|hundred)\b/gi, (words) => {
+    const parts = words.toLowerCase().split(/[\s-]+/);
+    if (!parts.every((part) => part in units)) return words;
+    let result = 0;
+    for (const part of parts) result = part === 'hundred' ? Math.max(1, result) * 100 : result + units[part];
+    return String(result);
+  });
+  return normalized.toLowerCase().replace(/\bk\s*[mnr]\b/g, 'km').replace(/\bkms\b/g, 'km').replace(/\s+/g, ' ').trim();
+}
+
+function clockSeconds(value: string): number | null {
+  const parts = value.split(':').map(Number);
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isInteger(part) || part < 0)) return null;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return parts[0] * 60 + parts[1];
+}
+
 export function parseActivityText(text: string, unit: DistanceUnit): Partial<AthleteActivityDraft> {
-  const normalized = text.toLowerCase().replace(/[–—]/g, '-');
+  const normalized = normalizeAthleteInput(text);
   const hasWalk = /\bwalk|walking\b|నడక|चलना|वॉक/.test(normalized);
   const hasCycle = /\bcycle|cycling|bike|biking\b|సైకిల్|साइकिल/.test(normalized);
   const hasTreadmill = /\btreadmill\b|ట్రెడ్‌మిల్|ट्रेडमिल/.test(normalized);
   const hasRace = /\brace|marathon|half marathon\b|రేసు|మ్యారథాన్|रेस|मैराथन/.test(normalized);
   const kind: AthleteActivityKind = hasRace ? 'race' : hasTreadmill ? 'treadmill' : hasCycle ? 'cycle' : hasWalk ? 'walk' : 'run';
-  const distanceValue = numberFrom(normalized, /(\d+(?:[.,]\d+)?)\s*(?:km|kilomet(?:er|re)s?|mi|miles?|కి\.?మీ|కిలోమీట(?:ర్|ర్లు)?|किमी|किलोमीटर)/);
+  const distanceValue = numberFrom(normalized, /(\d+(?:[.,]\d+)?)\s*(?:k\.?m\.?|kilomet(?:er|re)s?|mi|miles?|కి\.?మీ|కిమీ|కిలోమీట(?:ర్|ర్లు)?|कि\.?मी|किमी|किलोमीटर)/);
   const usesMiles = /\bmi(?:les)?\b|मील|మైలు/.test(normalized);
-  const time = normalized.match(/(?:in|time|duration|moving time|elapsed time)\D{0,14}(\d{1,2})\s*(?:h|hr|hours?)\s*(?:(\d{1,2})\s*(?:m|min|minutes?))?/)
-    ?? normalized.match(/(?:in|time|duration|moving time|elapsed time)\D{0,14}(\d{1,3})\s*(?:m|min|minutes?)\b/);
+  const time = normalized.match(/(?:in|time|duration|moving time|elapsed time|running time|समय|अवधि|సమయం|వ్యవధి)\D{0,18}(\d{1,2})\s*(?:h|hr|hours?)\s*(?:(\d{1,2})\s*(?:m|min|minutes?))?/)
+    ?? normalized.match(/(?:in|time|duration|moving time|elapsed time|running time|समय|अवधि|సమయం|వ్యవధి)\D{0,18}(\d{1,3})\s*(?:m|min|minutes?)\b/);
   let durationSeconds: number | null = null;
   if (time) {
     const first = Number(time[1]);
     const second = time[2] ? Number(time[2]) : 0;
     durationSeconds = time[2] ? first * 3600 + second * 60 : normalized.includes('hour') || /\bhr\b|\bh\b/.test(time[0]) ? first * 3600 : first * 60;
   } else {
-    const clocks = Array.from(normalized.matchAll(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/g));
-    const clock = clocks.find((match) => !/^\s*\/(?:km|mi)\b/.test(normalized.slice((match.index ?? 0) + match[0].length))) ?? null;
-    if (clock) durationSeconds = clock[3] ? Number(clock[1]) * 3600 + Number(clock[2]) * 60 + Number(clock[3]) : Number(clock[1]) * 60 + Number(clock[2]);
+    const labelledClock = normalized.match(/(?:time|duration|moving time|elapsed time|running time|समय|अवधि|సమయం|వ్యవధి)\D{0,22}(\d{1,2}:\d{2}(?::\d{2})?)/)?.[1];
+    const clocks = Array.from(normalized.matchAll(/\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g)).map((match) => match[1]);
+    const clock = labelledClock ?? clocks.find((value) => value.split(':').length === 3) ?? clocks[clocks.length - 1] ?? null;
+    if (clock) durationSeconds = clockSeconds(clock);
   }
-  const averageHeartRate = numberFrom(normalized, /(?:avg(?:erage)?\s*)?(?:heart\s*rate|hr)\D{0,24}(\d{2,3})\s*(?:bpm)?/);
-  const calories = numberFrom(normalized, /(?:calories|energy|kcal|cal)\D{0,18}(\d{2,5})\b/)
+  const averageHeartRate = numberFrom(normalized, /(?:avg(?:erage)?\s*)?(?:heart\s*rate|hr|bpm)\D{0,24}(\d{2,3})\s*(?:bpm)?/)
+    ?? numberFrom(normalized, /(\d{2,3})\s*(?:bpm)\b/);
+  const calories = numberFrom(normalized, /(?:active\s*)?(?:calories|energy|kcal|cal)\D{0,18}(\d{2,5})\b/)
     ?? numberFrom(normalized, /(\d{2,5})\s*(?:kcal|calories|cal)\b/);
-  const elevationMeters = numberFrom(normalized, /(?:elevation|elev|gain)\D{0,24}(\d+(?:[.,]\d+)?)\s*(?:m|meters?|metres?)/);
-  const cadence = numberFrom(normalized, /(?:cadence|spm)\D{0,24}(\d{2,3})/);
+  const elevationMeters = numberFrom(normalized, /(?:elevation|elev|gain|altitude)\D{0,24}(\d+(?:[.,]\d+)?)\s*(?:m|meters?|metres?)/);
+  const cadence = numberFrom(normalized, /(?:cadence|spm|steps?\s*(?:per|\/)\s*min(?:ute)?)\D{0,24}(\d{2,3})/)
+    ?? numberFrom(normalized, /(\d{2,3})\s*(?:spm)\b/);
   return {
     kind,
     distanceMeters: distanceValue === null ? undefined : metersFromDistance(distanceValue, usesMiles ? 'mi' : unit),

@@ -61,14 +61,18 @@ type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft> };
 type ScreenshotDraft = { fileName: string; route: VoiceAthleteRoute };
 type PendingRecognition = { route: VoiceAthleteRoute; source: 'voice' | 'image' };
+type SpeechAlternative = { transcript: string; confidence?: number };
+type SpeechResultLike = ArrayLike<SpeechAlternative> & { isFinal?: boolean };
+type SpeechRecognitionEventLike = { resultIndex?: number; results: ArrayLike<SpeechResultLike> };
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
   start: () => void;
+  stop: () => void;
   abort: () => void;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string; confidence?: number }>> }) => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
 };
@@ -98,9 +102,29 @@ function recognitionQuality(text: string): number {
   return usefulSignals * 30 + Math.min(text.trim().length, 180) / 12 - unreadableCharacters * 20;
 }
 
-function bestRecognizedText(original: string, enhanced: string | null): string {
-  if (!enhanced?.trim()) return original.trim();
-  return recognitionQuality(enhanced) > recognitionQuality(original) ? enhanced.trim() : original.trim();
+function activityMetricCount(route: VoiceAthleteRoute): number {
+  return [route.activity.distanceMeters, route.activity.durationSeconds, route.activity.averageHeartRate, route.activity.calories, route.activity.elevationMeters, route.activity.cadence].filter((value) => value !== null && value !== undefined).length;
+}
+
+function mostCompleteScreenshotRoute(texts: string[], unit: DistanceUnit): VoiceAthleteRoute | null {
+  const candidates = texts.filter((text) => text.trim()).map((text) => ({ text: text.trim(), route: routeVoiceAthleteRecord(text, unit) }));
+  if (!candidates.length) return null;
+  candidates.sort((first, second) => activityMetricCount(second.route) - activityMetricCount(first.route) || recognitionQuality(second.text) - recognitionQuality(first.text));
+  const primary = candidates[0];
+  const pickMetric = <Key extends keyof VoiceAthleteRoute['activity']>(key: Key) => candidates.map((candidate) => candidate.route.activity[key]).find((value) => value !== null && value !== undefined) ?? primary.route.activity[key];
+  return {
+    ...primary.route,
+    activity: {
+      ...primary.route.activity,
+      distanceMeters: pickMetric('distanceMeters'),
+      durationSeconds: pickMetric('durationSeconds'),
+      averageHeartRate: pickMetric('averageHeartRate'),
+      calories: pickMetric('calories'),
+      elevationMeters: pickMetric('elevationMeters'),
+      cadence: pickMetric('cadence'),
+      notes: primary.text,
+    },
+  };
 }
 
 async function enhancedScreenshot(file: File): Promise<Blob | null> {
@@ -384,6 +408,26 @@ function AthleteCalendar({ data, month, onChangeMonth }: { data: AthleteHubData;
   return <section className="surface-card athlete-calendar-card"><div className="card-title-row"><div><h3>Training calendar</h3><p>Runs, plans and races, together in one monthly view.</p></div><div className="athlete-calendar-controls"><button className="calendar-nav" type="button" onClick={() => onChangeMonth(-1)} aria-label="Previous month"><ChevronLeft size={17} /></button><strong>{monthLabel(month)}</strong><button className="calendar-nav" type="button" onClick={() => onChangeMonth(1)} aria-label="Next month"><ChevronRight size={17} /></button></div></div><div className="athlete-calendar-grid athlete-calendar-head">{weekDays.map((day) => <span key={day}>{day}</span>)}</div><div className="athlete-calendar-grid athlete-calendar-days">{dates.map((date) => { const key = dayKey(date); const inMonth = date.getMonth() === month.getMonth(); const items = events.get(key) ?? []; return <div className={`athlete-calendar-cell ${inMonth ? '' : 'outside'} ${key === today ? 'today' : ''}`} key={key}><b>{date.getDate()}</b>{items.slice(0, 2).map((item, index) => <span className={`athlete-calendar-event ${item.tone}`} key={`${item.label}-${index}`} title={`${item.label} · ${item.detail}`}><i>{item.label}</i><em>{item.detail}</em></span>)}{items.length > 2 ? <small>+{items.length - 2} more</small> : null}</div>; })}</div></section>;
 }
 
+function AthleteTimelinePage({ data, onBack, onAdd, onEdit, onDelete }: { data: AthleteHubData; onBack: () => void; onAdd: () => void; onEdit: (activity: AthleteActivity) => void; onDelete: (activity: AthleteActivity) => void }) {
+  const [kind, setKind] = useState<'all' | AthleteActivityKind>('all');
+  const [range, setRange] = useState<'all' | '30' | 'year'>('all');
+  const [query, setQuery] = useState('');
+  const cutoff = range === '30' ? addDays(localDateKey(), -29) : range === 'year' ? `${localDateKey().slice(0, 4)}-01-01` : '0000-01-01';
+  const timeline = useMemo(() => data.activities.filter((activity) => {
+    const matchesKind = kind === 'all' || activity.kind === kind;
+    const searchable = `${activity.kind} ${activity.notes} ${activity.source}`.toLowerCase();
+    return matchesKind && activity.activityDate >= cutoff && (!query.trim() || searchable.includes(query.trim().toLowerCase()));
+  }).sort((first, second) => second.activityDate.localeCompare(first.activityDate) || second.createdAt.localeCompare(first.createdAt)), [cutoff, data.activities, kind, query]);
+  const totalDistance = timeline.reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0);
+  const totalDuration = timeline.reduce((sum, activity) => sum + (activity.durationSeconds ?? 0), 0);
+  return <div className="athlete-hub athlete-timeline-page">
+    <SectionHeading title="Training timeline" description="Every confirmed activity, ordered from newest to oldest." action={<><button type="button" className="secondary-button" onClick={onBack}>← Athlete Hub</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={onAdd}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
+    <section className="surface-card athlete-timeline-toolbar"><label>Search<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Notes, activity or source" /></label><label>Activity<select value={kind} onChange={(event) => setKind(event.target.value as 'all' | AthleteActivityKind)}><option value="all">All activities</option>{activityKinds.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Period<select value={range} onChange={(event) => setRange(event.target.value as 'all' | '30' | 'year')}><option value="all">All time</option><option value="30">Last 30 days</option><option value="year">This year</option></select></label></section>
+    <div className="metrics-grid athlete-metrics"><Metric label="Activities" value={new Intl.NumberFormat('en-IN').format(timeline.length)} foot="Matching your current filters" icon={<Activity size={16} />} /><Metric label="Distance" value={formatDistance(totalDistance, data.settings.distanceUnit)} foot="Across the visible timeline" icon={<Footprints size={16} />} /><Metric label="Moving time" value={formatDuration(totalDuration || null)} foot="From activities with duration" icon={<CalendarDays size={16} />} /></div>
+    <section className="surface-card athlete-full-timeline"><div className="card-title-row"><div><h3>Activity history</h3><p>Dates, effort and all recorded metrics remain visible together.</p></div><span className="athlete-timeline-count">{timeline.length} record{timeline.length === 1 ? '' : 's'}</span></div>{timeline.length ? <div className="athlete-full-timeline-list">{timeline.map((activity) => <article key={activity.id}><div className="athlete-timeline-date"><b>{formatAthleteDate(activity.activityDate)}</b><small>{activity.source === 'image' ? 'Screenshot import' : activity.source === 'voice' ? 'Voice entry' : activity.source === 'manual' ? 'Manual entry' : activity.source.replace('_', ' ')}</small></div><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div className="athlete-timeline-main"><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><div className="athlete-timeline-metrics"><span>{formatDistance(activity.distanceMeters, data.settings.distanceUnit)}</span><span>{formatDuration(activity.durationSeconds)}</span><span>{formatPace(activity.distanceMeters, activity.durationSeconds, data.settings.distanceUnit)}</span>{activity.averageHeartRate ? <span>{activity.averageHeartRate} bpm</span> : null}{activity.calories ? <span>{activity.calories} cal</span> : null}{activity.elevationMeters ? <span>+{activity.elevationMeters} m</span> : null}{activity.cadence ? <span>{activity.cadence} spm</span> : null}</div>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><button className="ghost-button" type="button" onClick={() => onEdit(activity)}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => onDelete(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="No activities found" description="Try another filter, or add a new training activity." action={<button type="button" className="primary-button" onClick={onAdd}><Plus size={15} /> Add activity</button>} />}</section>
+  </div>;
+}
+
 export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }) {
   const { data, loading, error, refresh } = useAthleteData(true);
   const [period, setPeriod] = useState<Period>('month');
@@ -402,7 +446,9 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [showGoal, setShowGoal] = useState(false);
   const [voiceGoalDraft, setVoiceGoalDraft] = useState<Partial<AthleteGoalDraft> | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [athletePage, setAthletePage] = useState<'dashboard' | 'timeline'>('dashboard');
   const [listening, setListening] = useState(false);
+  const voiceRecognition = useRef<SpeechRecognitionLike | null>(null);
   const [readingImage, setReadingImage] = useState(false);
   const [screenshotImportOpen, setScreenshotImportOpen] = useState(false);
   const [screenshotDrafts, setScreenshotDrafts] = useState<ScreenshotDraft[]>([]);
@@ -411,6 +457,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const settings = data?.settings;
   const bounds = periodBounds(period, customStart, customEnd);
   const activities = data?.activities ?? emptyActivities;
+  const recentActivities = useMemo(() => [...activities].sort((first, second) => second.activityDate.localeCompare(first.activityDate) || second.createdAt.localeCompare(first.createdAt)).slice(0, 3), [activities]);
   const rangeActivities = useMemo(() => activities.filter((activity) => inRange(activity.activityDate, bounds.start, bounds.end)), [activities, bounds.end, bounds.start]);
   const runningActivities = useMemo(() => rangeActivities.filter((activity) => ['run', 'treadmill', 'race'].includes(activity.kind)), [rangeActivities]);
   const runningDistance = runningActivities.reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0);
@@ -500,17 +547,17 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     const SpeechCtor = (window as SpeechWindow).SpeechRecognition ?? (window as SpeechWindow).webkitSpeechRecognition;
     if (!SpeechCtor) { onNotify('Voice entry is not available in this browser. Use quick entry instead.'); return; }
     const recognition = new SpeechCtor();
-    recognition.lang = navigator.language || 'en-IN'; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 3;
+    let transcript = '';
+    let hadError = false;
+    recognition.lang = navigator.languages?.[0] || navigator.language || 'en-IN'; recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5;
     recognition.onresult = (event) => {
-      const alternatives = Array.from(event.results).flatMap((result) => Array.from(result).map((option) => ({ transcript: option.transcript?.trim() ?? '', confidence: option.confidence ?? 0 })));
-      const transcript = alternatives.sort((first, second) => (second.confidence * 100 + recognitionQuality(second.transcript)) - (first.confidence * 100 + recognitionQuality(first.transcript)))[0]?.transcript ?? '';
-      setListening(false);
-      if (!transcript) { onNotify('We did not hear an activity. Please try again.'); return; }
-      reviewRecognizedRecord(routeVoiceAthleteRecord(transcript, settings?.distanceUnit ?? 'km'), 'voice');
+      transcript = Array.from(event.results).filter((result) => result.isFinal ?? true).map((result) => Array.from(result).map((option) => ({ transcript: option.transcript?.trim() ?? '', confidence: option.confidence ?? 0 })).sort((first, second) => (second.confidence * 100 + recognitionQuality(second.transcript)) - (first.confidence * 100 + recognitionQuality(first.transcript)))[0]?.transcript ?? '').filter(Boolean).join(' ').trim();
     };
-    recognition.onerror = () => { setListening(false); onNotify('Voice capture stopped. Please try again or use quick entry.'); };
-    recognition.onend = () => setListening(false);
-    setListening(true); recognition.start();
+    recognition.onerror = () => { hadError = true; setListening(false); voiceRecognition.current = null; onNotify('Voice capture stopped. Please try again or use quick entry.'); };
+    recognition.onend = () => { setListening(false); voiceRecognition.current = null; if (hadError) return; if (!transcript) { onNotify('We did not hear enough detail. Try again and include distance, time, or effort.'); return; } reviewRecognizedRecord(routeVoiceAthleteRecord(transcript, settings?.distanceUnit ?? 'km'), 'voice'); };
+    voiceRecognition.current = recognition;
+    setListening(true);
+    recognition.start();
   };
   const closeActivityEditor = () => {
     discardScreenshotDrafts();
@@ -524,14 +571,21 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     try {
       const { createWorker, PSM } = await import('tesseract.js');
       const worker = await createWorker('eng');
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, preserve_interword_spaces: '1', user_defined_dpi: '300' });
       const drafts: ScreenshotDraft[] = [];
       for (const file of accepted) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1', user_defined_dpi: '300' });
         const original = await worker.recognize(file, { rotateAuto: true });
         const enhanced = await enhancedScreenshot(file);
-        const improved = enhanced ? await worker.recognize(enhanced, { rotateAuto: true }) : null;
-        const text = bestRecognizedText(original.data.text, improved?.data.text ?? null);
-        if (text) drafts.push({ fileName: file.name, route: routeVoiceAthleteRecord(text, settings?.distanceUnit ?? 'km') });
+        const readings = [original.data.text];
+        if (enhanced) {
+          await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1', user_defined_dpi: '300' });
+          const enhancedAuto = await worker.recognize(enhanced, { rotateAuto: true });
+          await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, preserve_interword_spaces: '1', user_defined_dpi: '300' });
+          const enhancedSparse = await worker.recognize(enhanced, { rotateAuto: true });
+          readings.push(enhancedAuto.data.text, enhancedSparse.data.text);
+        }
+        const route = mostCompleteScreenshotRoute(readings, settings?.distanceUnit ?? 'km');
+        if (route) drafts.push({ fileName: file.name, route });
       }
       await worker.terminate();
       if (!drafts.length) { onNotify('No readable activity details were found. You can enter them manually.'); return; }
@@ -544,15 +598,17 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
 
   if (loading || !data || !settings) return <div className="surface-card"><EmptyPanel icon={<Activity size={20} />} title={error ? 'Athlete Hub could not load' : 'Loading Athlete Hub'} description={error || 'Your private training records are loading.'} action={error ? <button type="button" className="secondary-button" onClick={() => void refresh()}>Try again</button> : undefined} /></div>;
 
+  if (athletePage === 'timeline') return <><AthleteTimelinePage data={data} onBack={() => setAthletePage('dashboard')} onAdd={() => setActivityEditor({})} onEdit={(activity) => setActivityEditor({ entry: activity })} onDelete={(activity) => void deleteActivity(activity)} />{activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}</>;
+
   return <div className="athlete-hub">
     <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><button className="secondary-button" type="button" onClick={() => setShowSettings(true)}><Settings size={15} /> Settings</button><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => setScreenshotImportOpen(true)}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshots'}</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
 
-    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div><div className="athlete-voice-controls"><span className="athlete-voice-hint">Speak an activity, plan, recovery, race, strength session, or goal</span><button type="button" className={`secondary-button ${listening ? 'recording' : ''}`} onClick={startVoice} disabled={listening}><Mic size={15} />{listening ? 'Listening…' : 'Speak activity'}</button></div></div>
+    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div><div className="athlete-voice-controls"><span className="athlete-voice-hint">Speak naturally in your device language, then stop when you are done. Review every detail before saving.</span><button type="button" className={`secondary-button ${listening ? 'recording' : ''}`} onClick={() => listening ? voiceRecognition.current?.stop() : startVoice()}><Mic size={15} />{listening ? 'Stop & review' : 'Speak activity'}</button></div></div>
     <div className="metrics-grid athlete-metrics"><Metric label="Running distance" value={formatDistance(runningDistance, settings.distanceUnit)} foot={`${runningActivities.length} run${runningActivities.length === 1 ? '' : 's'} in this view`} icon={<Footprints size={16} />} /><Metric label="All movement" value={formatDistance(allDistance, settings.distanceUnit)} foot="Running, walking and cycling combined" icon={<Activity size={16} />} /><Metric label="Average pace" value={averagePace} foot={totalSeconds ? `${formatDuration(totalSeconds)} running time` : 'Add duration to calculate'} icon={<Sparkles size={16} />} /><Metric label="Energy logged" value={new Intl.NumberFormat('en-IN').format(totalCalories)} foot="Calories recorded in this view" icon={<HeartPulse size={16} />} /></div>
     <div className="content-grid athlete-overview-grid"><section className="surface-card athlete-today-card"><div className="card-title-row"><div><h3>Today’s readiness</h3><p>Recovery and your next useful action.</p></div><button type="button" className="text-button" onClick={() => setShowScore(true)}><Plus size={14} /> Log score</button></div><div className="athlete-readiness"><div className={`athlete-recovery-ring ${recovery ? recoveryTone(recovery.score) : 'empty'}`}><b>{recovery?.score ?? '—'}</b><span>{recovery ? 'Recovery' : 'No score'}</span></div><div><strong>{recovery ? recovery.score >= 85 ? 'Ready to push' : recovery.score >= 67 ? 'Solid training day' : recovery.score >= 34 ? 'Keep it controlled' : 'Prioritise recovery' : 'Check in with yourself'}</strong><p>{recovery?.notes || 'Add your own 1–100 recovery score in seconds.'}</p></div></div>{nextRace ? <div className="athlete-race-banner"><Flag size={15} /><span><b>{nextRace.name}</b>{nextRace.distanceMeters ? ` · ${formatDistance(nextRace.distanceMeters, settings.distanceUnit)}` : ''}</span><strong>{Math.max(0, daysBetween(localDateKey(), nextRace.raceDate))} days</strong><button className="ghost-button danger" aria-label={`Delete ${nextRace.name}`} type="button" onClick={() => void deleteRecord('race', nextRace.id, nextRace.name)}><Trash2 size={13} /></button></div> : <button className="athlete-add-race" type="button" onClick={() => setShowRace(true)}><Flag size={15} /> Add a race countdown</button>}</section><section className="surface-card athlete-plan-card"><div className="card-title-row"><div><h3>Coming up</h3><p>Planned sessions and races stay in sight.</p></div><button type="button" className="text-button" onClick={() => setShowPlan(true)}><Plus size={14} /> Plan</button></div>{planned.length ? <div className="athlete-upcoming-list">{planned.map((workout) => <div key={workout.id}><span className="athlete-date-chip">{formatAthleteDate(workout.workoutDate)}</span><p><b>{workout.title}</b><small>{workout.targetDistanceMeters ? formatDistance(workout.targetDistanceMeters, settings.distanceUnit) : activityKinds.find((item) => item.value === workout.kind)?.label}</small></p><button className="ghost-button danger" aria-label={`Delete ${workout.title}`} type="button" onClick={() => void deleteRecord('planned_workout', workout.id, workout.title)}><Trash2 size={13} /></button></div>)}</div> : <div className="athlete-empty-inline"><CalendarDays size={16} /><span>No planned workouts. Add the next one when you are ready.</span></div>}</section></div>
     <div className="content-grid athlete-training-grid"><AthleteCalendar data={data} month={calendarMonth} onChangeMonth={(amount) => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1, 12))} /><section className="surface-card athlete-pr-card"><div className="card-title-row"><div><h3>Personal records</h3><p>Best pace for your standard distances.</p></div><Trophy size={18} /></div><div className="athlete-pr-list">{personalRecords.map((record) => <div key={record.label}><span>{record.label}</span><b>{record.activity ? formatPace(record.activity.distanceMeters, record.activity.durationSeconds, settings.distanceUnit) : '—'}</b><small>{record.activity ? formatAthleteDate(record.activity.activityDate) : 'Log a run to unlock'}</small></div>)}</div><button className="text-button" type="button" onClick={() => setShowGoal(true)}><Target size={14} /> Create distance goal</button></section></div>
     <div className="content-grid athlete-bottom-grid"><section className="surface-card athlete-goals-card"><div className="card-title-row"><div><h3>Distance goals</h3><p>Progress updates from your completed activity log.</p></div><button type="button" className="text-button" onClick={() => setShowGoal(true)}><Plus size={14} /> Goal</button></div>{data.goals.filter((goal) => goal.isActive).length ? <div className="athlete-goal-list">{data.goals.filter((goal) => goal.isActive).map((goal) => { const covered = activities.filter((activity) => inRange(activity.activityDate, goal.startsOn, goal.endsOn)).reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0); return <div className="athlete-goal-row" key={goal.id}><ProgressRow label={goal.title} detail={<>{formatDistance(covered, settings.distanceUnit)} of <b>{formatDistance(goal.targetDistanceMeters, settings.distanceUnit)}</b> · ends {formatAthleteDate(goal.endsOn)}</>} progress={covered / goal.targetDistanceMeters * 100} /><button className="ghost-button danger" type="button" aria-label={`Delete ${goal.title}`} onClick={() => void deleteRecord('goal', goal.id, goal.title)}><Trash2 size={13} /></button></div>; })}</div> : <div className="athlete-empty-inline"><Target size={16} /><span>Create a running-distance goal for clear momentum.</span></div>}</section><section className="surface-card athlete-strength-card"><div className="card-title-row"><div><h3>Strength for runners</h3><p>Minimal gym logging that supports your training.</p></div><button type="button" className="text-button" onClick={() => setShowGym(true)}><Plus size={14} /> Log strength</button></div>{data.gymSessions.length ? <div className="athlete-strength-summary"><Dumbbell size={19} /><div><b>{data.gymSessions[0].title}</b><small>{formatAthleteDate(data.gymSessions[0].sessionDate)}{data.gymSessions[0].durationMinutes ? ` · ${data.gymSessions[0].durationMinutes} min` : ''}</small></div><button className="ghost-button danger" type="button" aria-label={`Delete ${data.gymSessions[0].title}`} onClick={() => void deleteRecord('gym_session', data.gymSessions[0].id, data.gymSessions[0].title)}><Trash2 size={13} /></button></div> : <div className="athlete-empty-inline"><Dumbbell size={16} /><span>Log simple strength sessions when they help your running.</span></div>}</section></div>
-    <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Training timeline</h3><p>Your most recent recorded movement. Speech and screenshots always require confirmation before appearing here.</p></div><button type="button" className="text-button" onClick={() => setActivityEditor({})}><Plus size={14} /> Log activity</button></div>{activities.length ? <div className="athlete-activity-list">{activities.slice(0, 12).map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
+    <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
     {pendingRecognition ? <RecognitionConfirmationModal pending={pendingRecognition} settings={settings} onClose={discardPendingRecognition} onAddInfo={() => { const next = pendingRecognition; setPendingRecognition(null); openRecognizedRecord(next); }} /> : null}
     {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
