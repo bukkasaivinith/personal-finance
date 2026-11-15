@@ -149,6 +149,7 @@ async function enhancedScreenshot(file: File): Promise<Blob | null> {
 }
 
 function errorMessage(error: unknown): string {
+  if (typeof error === 'string' && error.trim()) return error;
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }
 
@@ -279,10 +280,14 @@ function ActivityModal({
 
 function ScreenshotUploadModal({
   reading,
+  progress,
+  error,
   onClose,
   onFiles,
 }: {
   reading: boolean;
+  progress: string;
+  error: string;
   onClose: () => void;
   onFiles: (files: File[]) => Promise<void>;
 }) {
@@ -310,7 +315,9 @@ function ScreenshotUploadModal({
         <small>{reading ? 'This may take a moment for each image.' : 'or click to choose multiple images · PNG, JPG, or WebP · 10 MB each'}</small>
       </button>
       <input ref={input} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { const files = event.target.files; if (files) selectFiles(files); event.currentTarget.value = ''; }} />
-      <div className="screenshot-import-note"><Sparkles size={14} /><span>No image is uploaded to your finance records. Review every activity before it is saved.</span></div>
+      {reading ? <p className="screenshot-reader-status" role="status">{progress || 'Starting the local image reader…'}</p> : null}
+      {error ? <p className="form-error screenshot-reader-error" role="alert">{error}</p> : null}
+      <div className="screenshot-import-note"><Sparkles size={14} /><span>The reader runs from this app. Review every extracted activity before it is saved.</span></div>
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={reading} onClick={onClose}>Cancel</button></div>
     </div>
   </ModalShell>;
@@ -453,6 +460,8 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [listening, setListening] = useState(false);
   const voiceRecognition = useRef<SpeechRecognitionLike | null>(null);
   const [readingImage, setReadingImage] = useState(false);
+  const [screenshotProgress, setScreenshotProgress] = useState('');
+  const [screenshotReaderError, setScreenshotReaderError] = useState('');
   const [screenshotImportOpen, setScreenshotImportOpen] = useState(false);
   const [screenshotDrafts, setScreenshotDrafts] = useState<ScreenshotDraft[]>([]);
   const [pendingRecognition, setPendingRecognition] = useState<PendingRecognition | null>(null);
@@ -570,33 +579,56 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     const accepted = files.filter((file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type) && file.size <= 10 * 1024 * 1024);
     if (!accepted.length) { onNotify('Choose PNG, JPG, or WebP screenshots under 10 MB each.'); return; }
     const skipped = files.length - accepted.length;
+    setScreenshotReaderError('');
+    setScreenshotProgress('Preparing the local image reader…');
     setReadingImage(true);
     try {
-      const { createWorker, PSM } = await import('tesseract.js');
-      const worker = await createWorker('eng');
-      const drafts: ScreenshotDraft[] = [];
-      for (const file of accepted) {
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1', user_defined_dpi: '300' });
-        const original = await worker.recognize(file, { rotateAuto: true });
-        const enhanced = await enhancedScreenshot(file);
-        const readings = [original.data.text];
-        if (enhanced) {
+      const { createWorker, OEM, PSM } = await import('tesseract.js');
+      const assetRoot = `${import.meta.env.BASE_URL.replace(/\/?$/, '/') }athlete-ocr/`;
+      const worker = await createWorker('eng', OEM.LSTM_ONLY, {
+        workerPath: `${assetRoot}worker.min.js`,
+        corePath: `${assetRoot}tesseract-core-lstm.wasm.js`,
+        langPath: assetRoot,
+        workerBlobURL: false,
+        logger: (message) => setScreenshotProgress(`${message.status}${message.progress > 0 ? ` · ${Math.round(message.progress * 100)}%` : ''}`),
+      });
+      try {
+        const drafts: ScreenshotDraft[] = [];
+        for (const [index, file] of accepted.entries()) {
+          setScreenshotProgress(`Reading screenshot ${index + 1} of ${accepted.length}…`);
           await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1', user_defined_dpi: '300' });
-          const enhancedAuto = await worker.recognize(enhanced, { rotateAuto: true });
-          await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, preserve_interword_spaces: '1', user_defined_dpi: '300' });
-          const enhancedSparse = await worker.recognize(enhanced, { rotateAuto: true });
-          readings.push(enhancedAuto.data.text, enhancedSparse.data.text);
+          const original = await worker.recognize(file, { rotateAuto: true });
+          const enhanced = await enhancedScreenshot(file);
+          const readings = [original.data.text];
+          if (enhanced) {
+            await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1', user_defined_dpi: '300' });
+            const enhancedAuto = await worker.recognize(enhanced, { rotateAuto: true });
+            await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, preserve_interword_spaces: '1', user_defined_dpi: '300' });
+            const enhancedSparse = await worker.recognize(enhanced, { rotateAuto: true });
+            readings.push(enhancedAuto.data.text, enhancedSparse.data.text);
+          }
+          const route = mostCompleteScreenshotRoute(readings, settings?.distanceUnit ?? 'km');
+          if (route) drafts.push({ fileName: file.name, route });
         }
-        const route = mostCompleteScreenshotRoute(readings, settings?.distanceUnit ?? 'km');
-        if (route) drafts.push({ fileName: file.name, route });
+        if (!drafts.length) {
+          const message = 'No readable activity details were found. Use a clear PNG, JPG, or WebP screenshot that includes the metrics.';
+          setScreenshotReaderError(message);
+          onNotify(message);
+          return;
+        }
+        setScreenshotDrafts(drafts);
+        reviewRecognizedRecord(drafts[0].route, 'image');
+        setScreenshotImportOpen(false);
+        onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready to review.${skipped ? ` ${skipped} file${skipped === 1 ? '' : 's'} skipped.` : ''}`);
+      } finally {
+        await worker.terminate().catch(() => undefined);
       }
-      await worker.terminate();
-      if (!drafts.length) { onNotify('No readable activity details were found. You can enter them manually.'); return; }
-      setScreenshotDrafts(drafts);
-      reviewRecognizedRecord(drafts[0].route, 'image');
-      setScreenshotImportOpen(false);
-      onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready to review.${skipped ? ` ${skipped} file${skipped === 1 ? '' : 's'} skipped.` : ''}`);
-    } catch (caught) { onNotify(errorMessage(caught)); } finally { setReadingImage(false); }
+    } catch (caught) {
+      const detail = errorMessage(caught);
+      const message = `The screenshot reader could not start. ${detail}`;
+      setScreenshotReaderError(message);
+      onNotify(message);
+    } finally { setReadingImage(false); setScreenshotProgress(''); }
   };
 
   if (loading || !data || !settings) return <div className="surface-card"><EmptyPanel icon={<Activity size={20} />} title={error ? 'Athlete Hub could not load' : 'Loading Athlete Hub'} description={error || 'Your private training records are loading.'} action={error ? <button type="button" className="secondary-button" onClick={() => void refresh()}>Try again</button> : undefined} /></div>;
@@ -612,7 +644,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <div className="content-grid athlete-training-grid"><AthleteCalendar data={data} month={calendarMonth} onChangeMonth={(amount) => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1, 12))} /><section className="surface-card athlete-pr-card"><div className="card-title-row"><div><h3>Personal records</h3><p>Best pace for your standard distances.</p></div><Trophy size={18} /></div><div className="athlete-pr-list">{personalRecords.map((record) => <div key={record.label}><span>{record.label}</span><b>{record.activity ? formatPace(record.activity.distanceMeters, record.activity.durationSeconds, settings.distanceUnit) : '—'}</b><small>{record.activity ? formatAthleteDate(record.activity.activityDate) : 'Log a run to unlock'}</small></div>)}</div><button className="text-button" type="button" onClick={() => setShowGoal(true)}><Target size={14} /> Create distance goal</button></section></div>
     <div className="content-grid athlete-bottom-grid"><section className="surface-card athlete-goals-card"><div className="card-title-row"><div><h3>Distance goals</h3><p>Progress updates from your completed activity log.</p></div><button type="button" className="text-button" onClick={() => setShowGoal(true)}><Plus size={14} /> Goal</button></div>{data.goals.filter((goal) => goal.isActive).length ? <div className="athlete-goal-list">{data.goals.filter((goal) => goal.isActive).map((goal) => { const covered = activities.filter((activity) => inRange(activity.activityDate, goal.startsOn, goal.endsOn)).reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0); return <div className="athlete-goal-row" key={goal.id}><ProgressRow label={goal.title} detail={<>{formatDistance(covered, settings.distanceUnit)} of <b>{formatDistance(goal.targetDistanceMeters, settings.distanceUnit)}</b> · ends {formatAthleteDate(goal.endsOn)}</>} progress={covered / goal.targetDistanceMeters * 100} /><button className="ghost-button danger" type="button" aria-label={`Delete ${goal.title}`} onClick={() => void deleteRecord('goal', goal.id, goal.title)}><Trash2 size={13} /></button></div>; })}</div> : <div className="athlete-empty-inline"><Target size={16} /><span>Create a running-distance goal for clear momentum.</span></div>}</section><section className="surface-card athlete-strength-card"><div className="card-title-row"><div><h3>Strength for runners</h3><p>Minimal gym logging that supports your training.</p></div><button type="button" className="text-button" onClick={() => setShowGym(true)}><Plus size={14} /> Log strength</button></div>{data.gymSessions.length ? <div className="athlete-strength-summary"><Dumbbell size={19} /><div><b>{data.gymSessions[0].title}</b><small>{formatAthleteDate(data.gymSessions[0].sessionDate)}{data.gymSessions[0].durationMinutes ? ` · ${data.gymSessions[0].durationMinutes} min` : ''}</small></div><button className="ghost-button danger" type="button" aria-label={`Delete ${data.gymSessions[0].title}`} onClick={() => void deleteRecord('gym_session', data.gymSessions[0].id, data.gymSessions[0].title)}><Trash2 size={13} /></button></div> : <div className="athlete-empty-inline"><Dumbbell size={16} /><span>Log simple strength sessions when they help your running.</span></div>}</section></div>
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
-    {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
+    {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} progress={screenshotProgress} error={screenshotReaderError} onClose={() => setScreenshotImportOpen(false)} onFiles={readScreenshots} /> : null}
     {pendingRecognition ? <RecognitionConfirmationModal pending={pendingRecognition} settings={settings} onClose={discardPendingRecognition} onAddInfo={() => { const next = pendingRecognition; setPendingRecognition(null); openRecognizedRecord(next); }} /> : null}
     {activityEditor ? <ActivityModal settings={settings} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
     {showScore ? <ScoreModal initial={voiceRecoveryDraft} onClose={() => { setShowScore(false); setVoiceRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setVoiceRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
