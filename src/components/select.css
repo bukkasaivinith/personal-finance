@@ -1,0 +1,38 @@
+/* Shared menus inherit the site's typography, palette and control sizes. */
+.ui-select { display: inline-flex; max-width: 100%; min-width: 0; position: relative; vertical-align: middle; }
+.ui-select-trigger { align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; color: var(--ink); display: flex; font: inherit; font-size: 12px; gap: 10px; justify-content: space-between; line-height: 1.5; min-height: 36px; min-width: 0; padding: 9px 12px; text-align: left; transition: border-color .16s, box-shadow .16s; width: 100%; }
+.ui-select .ui-select-trigger { background-image: none; padding-right: 12px; }
+.ui-select-trigger:hover:not(:disabled) { border-color: #bdcbbf; }
+.ui-select-trigger:focus-visible, .ui-select-trigger[aria-expanded="true"] { border-color: #7c9a83; box-shadow: 0 0 0 3px var(--green-soft); outline: none; }
+.ui-select-trigger:disabled { cursor: not-allowed; opacity: .55; }
+.ui-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-chevron { color: var(--green); flex: 0 0 auto; transition: transform .16s; }
+.ui-select-trigger[aria-expanded="true"] .ui-select-chevron { transform: rotate(180deg); }
+.ui-select-menu { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(32, 42, 36, .14), 0 2px 6px rgba(32, 42, 36, .04); color: var(--ink); font-family: 'DM Sans', sans-serif; font-size: 12px; line-height: 1.5; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 5px; position: fixed; scrollbar-color: #c2cec4 transparent; scrollbar-width: thin; z-index: 100; }
+.ui-select-option { align-items: center; border: 1px solid transparent; border-radius: 7px; cursor: pointer; display: flex; gap: 12px; justify-content: space-between; min-height: 38px; padding: 9px 10px; user-select: none; }
+.ui-select-option > span { overflow-wrap: anywhere; }
+.ui-select-option > svg { color: var(--green); flex-shrink: 0; }
+.ui-select-option.is-highlighted { background: #f2f5ef; }
+.ui-select-option[aria-selected="true"] { background: var(--green-soft); color: var(--green); font-weight: 600; }
+.ui-select-option[aria-selected="true"].is-highlighted { border-color: #bdcbbf; }
+.ui-select-option[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; opacity: .65; }
+.ui-select-option.is-action { color: var(--green); font-weight: 600; }
+.ui-select-group, .ui-select-empty { color: var(--muted); font-size: 11px; padding: 8px 10px; }
+.ui-select-group { font-weight: 600; }
+.calendar-period-controls > .ui-select:first-child { max-width: 136px; }
+.calendar-period-controls > .ui-select { flex: 1; }
+.calendar-period-controls .ui-select-trigger { min-height: 32px; }
+.workspace-switcher > .ui-select { max-width: 260px; }
+.workspace-switcher .ui-select-trigger { min-height: 28px; }
+.mobile-field > .ui-select { grid-column: 2; grid-row: 1; justify-self: end; max-width: min(220px, 58vw); }
+.mobile-field .ui-select-trigger { gap: 7px; justify-content: flex-end; min-height: 38px; padding: 3px 0; }
+.mobile-field .ui-select-value { color: inherit; font-size: inherit; }
+.mobile-field > .ui-select + svg { display: none; }
+.mobile-shell .ui-select-chevron { color: #b8cec1; }
+.mobile-shell .ui-select-trigger:focus-visible, .mobile-shell .ui-select-trigger[aria-expanded="true"] { box-shadow: 0 0 0 2px #466a58; }
+.mobile-workspace-picker > .ui-select { min-width: 0; }
+.mobile-workspace-picker .ui-select-trigger { background: #292929; border-color: #454545; color: #f5f5f5; }
+.ui-select-menu-dark { --panel: #292929; --line: #454545; --ink: #f5f5f5; --muted: #adbaaf; --green: #c1dfcc; --green-soft: #2d493c; scrollbar-color: #5a6b60 transparent; }
+.ui-select-menu-dark .ui-select-option.is-highlighted { background: #34483c; }
+@media (max-width: 760px) { .workspace-switcher > .ui-select { max-width: 190px; }.ui-select-option { min-height: 44px; }.ui-select-menu { font-size: 13px; } }
+@media (prefers-reduced-motion: reduce) { .ui-select-trigger, .ui-select-chevron { transition: none; } }

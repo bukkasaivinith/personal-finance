@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LogOut, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import {
@@ -181,7 +182,7 @@ export function AdminUserManagement({ currentUserId }: { currentUserId: string }
         <div><h3>Platform users</h3><p>Account identity, sign-in status, and aggregate usage totals only.</p></div>
         <div className="admin-user-tools">
           <label className="admin-user-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search email address" aria-label="Search users" /></label>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filter users by account status"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="deleted">Deleted</option></select>
+          <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filter users by account status"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="deleted">Deleted</option></Select>
         </div>
       </div>
       {error ? <p className="form-error admin-panel-error">{error}</p> : null}

@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
@@ -117,7 +118,7 @@ export function MobileApp() {
             </div>
           </header>
 
-          {workspaceAccess.workspaces.length > 1 ? <label className="mobile-workspace-picker"><span>Workspace</span><select value={workspaceOwnerId ?? ''} onChange={(event) => setWorkspaceOwnerId(event.target.value)}>{workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared`}</option>)}</select></label> : null}
+          {workspaceAccess.workspaces.length > 1 ? <label className="mobile-workspace-picker"><span>Workspace</span><Select value={workspaceOwnerId ?? ''} onChange={(event) => setWorkspaceOwnerId(event.target.value)}>{workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared`}</option>)}</Select></label> : null}
 
           <h1>New Transaction</h1>
           <div className="mobile-kind-tabs" role="tablist" aria-label="Transaction kind">
@@ -153,40 +154,40 @@ export function MobileApp() {
 
             <label className="mobile-field">
               <span>Transaction type</span>
-              <select value={typeId} onChange={(event) => { setTypeId(event.target.value); setCategoryId(''); }}>
+              <Select value={typeId} onChange={(event) => { setTypeId(event.target.value); setCategoryId(''); }}>
                 <option value="">Select type</option>
                 {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-              </select>
+              </Select>
               <ChevronDown size={17} />
             </label>
 
             {kind !== 'transfer' ? (
               <label className="mobile-field">
                 <span>Category</span>
-                <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={!typeId}>
+                <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={!typeId}>
                   <option value="">Select category</option>
                   {categories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}
-                </select>
+                </Select>
                 <ChevronDown size={17} />
               </label>
             ) : null}
 
             <label className="mobile-field">
               <span>{kind === 'transfer' ? 'From account' : 'Account'}</span>
-              <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <Select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
                 <option value="">Select account</option>
                 {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-              </select>
+              </Select>
               <ChevronDown size={17} />
             </label>
 
             {kind === 'transfer' ? (
               <label className="mobile-field">
                 <span>To account</span>
-                <select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
+                <Select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
                   <option value="">Select account</option>
                   {destinationAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                </select>
+                </Select>
                 <ChevronDown size={17} />
               </label>
             ) : null}

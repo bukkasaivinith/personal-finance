@@ -1,0 +1,29 @@
+.category-emoji-browser { min-width: 0; }
+.category-emoji-browser .category-emoji-search { align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--muted); display: flex; gap: 9px; margin-top: 10px; padding: 0 11px; }
+.category-emoji-browser .category-emoji-search:focus-within { border-color: #7c9a83; box-shadow: 0 0 0 3px var(--green-soft); }
+.category-emoji-browser .category-emoji-search svg { flex: 0 0 auto; }
+.category-emoji-browser .category-emoji-search input { background: transparent; border: 0; box-shadow: none; font-size: 12px; min-width: 0; outline: 0; padding: 11px 0; width: 100%; }
+.category-emoji-browser .category-emoji-search input:focus { border: 0; box-shadow: none; }
+.category-emoji-browser .category-emoji-groups { display: flex; flex-wrap: wrap; gap: 5px; margin: 11px 0 8px; }
+.category-emoji-browser .category-emoji-groups button { background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--muted); font-size: 11px; font-weight: 500; padding: 5px 8px; }
+.category-emoji-browser .category-emoji-groups button:hover { background: var(--green-soft); color: var(--green); }
+.category-emoji-browser .category-emoji-groups button[aria-pressed="true"] { background: var(--green-soft); border-color: #c9d8cc; color: var(--green); }
+.category-emoji-browser .category-emoji-results { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; padding: 9px; scrollbar-color: #c6d3c8 transparent; scrollbar-width: thin; }
+.category-emoji-browser .emoji-options { display: grid; gap: 5px; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); margin: 0; }
+.category-emoji-browser .emoji-option { border-color: transparent; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-size: 22px; height: 38px; width: 100%; }
+.category-emoji-browser .emoji-option.selected { border-color: var(--green); }
+.category-emoji-browser button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.category-emoji-browser .category-emoji-more { background: var(--green-soft); border: 0; border-radius: 8px; color: var(--green); font-size: 11px; margin-top: 10px; padding: 9px; width: 100%; }
+.category-emoji-browser .category-emoji-selection { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 8px; min-height: 38px; padding-top: 8px; }
+.category-emoji-browser .category-emoji-selection > span:not(.category-emoji-preview) { flex: 1; overflow-wrap: anywhere; }
+.category-emoji-browser .category-emoji-preview { font-size: 22px; line-height: 1.3; }
+.category-emoji-browser .category-emoji-selection button { align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--muted); display: inline-flex; justify-content: center; min-height: 30px; min-width: 30px; padding: 5px; }
+.category-emoji-browser .category-emoji-selection button:hover { background: var(--green-soft); color: var(--green); }
+.category-emoji-browser .category-emoji-empty { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 8px; }
+.category-emoji-browser .category-emoji-empty button { background: transparent; border: 0; color: var(--green); font-size: inherit; padding: 0; text-decoration: underline; }
+.category-emoji-browser .emoji-custom-input { margin-top: 8px; }
+@media (max-width: 520px) {
+  .category-emoji-browser .emoji-options { grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); }
+  .category-emoji-browser .emoji-option { height: 42px; }
+  .category-emoji-browser .category-emoji-groups button { min-height: 34px; }
+}

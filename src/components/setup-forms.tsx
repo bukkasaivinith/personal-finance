@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useState, type FormEvent } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { kindChoices } from '@/components/transaction-pickers';
@@ -55,13 +56,13 @@ export function TransactionTypeModal({
           </label>
           <label className="full-field">
             Counts as
-            <select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)}>
+            <Select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)}>
               {kindChoices.map((choice) => (
                 <option value={choice.value} key={choice.value}>
                   {choice.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
@@ -119,11 +120,11 @@ export function RenameTypeModal({
           </label>
           <label className="full-field">
             Counts as
-            <select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)} disabled={type.kind === 'transfer'}>
+            <Select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)} disabled={type.kind === 'transfer'}>
               {kindChoices
                 .filter((choice) => (type.kind === 'transfer' ? choice.value === 'transfer' : choice.value !== 'transfer'))
                 .map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
-            </select>
+            </Select>
           </label>
           {type.kind === 'transfer' ? <p className="form-hint full-field">Transfer types remain transfers because their entries use two accounts.</p> : null}
         </div>
@@ -230,14 +231,14 @@ export function CategoryFormModal({
           ) : (
             <label className="full-field">
               Parent category (optional)
-              <select value={parentId} onChange={(event) => setParentId(event.target.value)}>
+              <Select value={parentId} onChange={(event) => setParentId(event.target.value)}>
                 <option value="">None (top level)</option>
                 {parentOptions.map((option) => (
                   <option value={option.id} key={option.id}>
                     {option.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
         </div>

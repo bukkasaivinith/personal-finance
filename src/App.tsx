@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useEffect, useMemo, useState } from 'react';
 import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, Users, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
@@ -390,9 +391,9 @@ export default function App() {
             {!isAdminOnly && workspaceAccess.workspaces.length > 1 ? (
               <label className="workspace-switcher">
                 <span>Workspace</span>
-                <select value={activeOwnerId ?? ''} onChange={(event) => { setActiveOwnerId(event.target.value); setRecurringChecked(false); }}>
+                <Select value={activeOwnerId ?? ''} onChange={(event) => { setActiveOwnerId(event.target.value); setRecurringChecked(false); }}>
                   {workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared (${workspace.role})`}</option>)}
-                </select>
+                </Select>
               </label>
             ) : null}
           </div>

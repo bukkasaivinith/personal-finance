@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDownLeft,
@@ -446,7 +447,7 @@ export function TransactionsView({
                 aria-label="Search transactions"
               />
             </label>
-            <select
+            <Select
               className="compact-select"
               value={filter}
               onChange={(event) => { setPage(0); onFilter(event.target.value as 'all' | TransactionKind); }}
@@ -456,7 +457,7 @@ export function TransactionsView({
               <option value="income">Counts as income</option>
               <option value="expense">Counts as expense</option>
               <option value="transfer">Counts as transfer</option>
-            </select>
+            </Select>
           </div>
           <TransactionTable transactions={shownTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
           {transactions.length > pageSize ? (

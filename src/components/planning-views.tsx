@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Download, List, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
@@ -137,14 +138,14 @@ function BudgetModal({
         <div className="form-grid">
           <label className="full-field">
             Category
-            <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={saving || availableCategories.length === 0}>
+            <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={saving || availableCategories.length === 0}>
               {availableCategories.length === 0 ? <option value="">No categories available</option> : null}
               {availableCategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.emoji ? `${category.emoji} ` : ''}{category.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="full-field">
             Monthly limit (₹)
@@ -319,14 +320,14 @@ function RecurringModal({
       <form className="modal-form" onSubmit={submit}>
         <p className="modal-description">Due entries are safely generated once when you open the app or process them below. Generated entries are marked Scheduled until you reconcile them with your bank.</p>
         <div className="form-grid">
-          <label className="full-field">Transaction type<select value={typeId} onChange={(event) => changeType(event.target.value)}>{usableTypes.length === 0 ? <option value="">No active types available</option> : null}{usableTypes.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.kind})</option>)}</select></label>
+          <label className="full-field">Transaction type<Select value={typeId} onChange={(event) => changeType(event.target.value)}>{usableTypes.length === 0 ? <option value="">No active types available</option> : null}{usableTypes.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.kind})</option>)}</Select></label>
           <label className="full-field">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Monthly rent" maxLength={60} autoFocus /></label>
           <label>Amount (₹)<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 15000" /></label>
           <label>Every<input type="number" min="1" max="366" inputMode="numeric" value={intervalValue} onChange={(event) => setIntervalValue(event.target.value)} /></label>
-          <label>Interval unit<select value={intervalUnit} onChange={(event) => setIntervalUnit(event.target.value as 'day' | 'week' | 'month')}><option value="day">day(s)</option><option value="week">week(s)</option><option value="month">month(s)</option></select></label>
-          {!isTransfer ? <label className="full-field">Category<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Choose a category</option>{compatibleCategories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}</select></label> : null}
-          <label className={isTransfer ? '' : 'full-field'}>{isTransfer ? 'From account' : 'Account'}<select value={accountId} onChange={(event) => { setAccountId(event.target.value); setToAccountId(''); }}><option value="">Choose an account</option>{usableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-          {isTransfer ? <label>To account<select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">Choose an account</option>{destinationAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label> : null}
+          <label>Interval unit<Select value={intervalUnit} onChange={(event) => setIntervalUnit(event.target.value as 'day' | 'week' | 'month')}><option value="day">day(s)</option><option value="week">week(s)</option><option value="month">month(s)</option></Select></label>
+          {!isTransfer ? <label className="full-field">Category<Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Choose a category</option>{compatibleCategories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}</Select></label> : null}
+          <label className={isTransfer ? '' : 'full-field'}>{isTransfer ? 'From account' : 'Account'}<Select value={accountId} onChange={(event) => { setAccountId(event.target.value); setToAccountId(''); }}><option value="">Choose an account</option>{usableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</Select></label>
+          {isTransfer ? <label>To account<Select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">Choose an account</option>{destinationAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</Select></label> : null}
           <div className="full-field"><DatePicker label="First due date" value={nextDate} onChange={setNextDate} /></div>
           <div className="full-field"><DatePicker label="End date (optional)" value={endDate} onChange={setEndDate} min={nextDate} clearable placeholder="No end date" /></div>
         </div>
@@ -623,12 +624,12 @@ function ActivityLog({ data, workspaceOwnerId }: { data: FinanceData; workspaceO
     <div className="surface-card activity-log-card">
       <div className="card-title-row"><div><h3>Activity log</h3><p>Important changes to this workspace, including who made each change.</p></div></div>
       <div className="filter-row activity-filters">
-        <select value={action} onChange={(event) => changeFilters(() => setAction(event.target.value as ActivityAction | 'all'))} aria-label="Filter activity by action">
+        <Select value={action} onChange={(event) => changeFilters(() => setAction(event.target.value as ActivityAction | 'all'))} aria-label="Filter activity by action">
           <option value="all">All actions</option><option value="created">Created</option><option value="updated">Updated</option><option value="renamed">Renamed</option><option value="deleted">Deleted</option><option value="paused">Paused</option><option value="resumed">Resumed</option><option value="signed_in">Signed in</option><option value="signed_out">Signed out</option>
-        </select>
-        <select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
+        </Select>
+        <Select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
           <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="investment_types">Investment types</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
-        </select>
+        </Select>
         <DatePicker label="From" value={from} max={to || undefined} onChange={(value) => changeFilters(() => setFrom(value))} clearable />
         <DatePicker label="To" value={to} min={from || undefined} onChange={(value) => changeFilters(() => setTo(value))} clearable />
       </div>

@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -70,6 +71,9 @@ export function DatePicker({
   useEffect(() => {
     const close = (event: MouseEvent) => {
       const target = event.target as Node;
+      // Month/year menus are portaled too, but still belong to this calendar.
+      const ownerId = target instanceof Element ? target.closest<HTMLElement>('[data-select-owner]')?.dataset.selectOwner : undefined;
+      if (ownerId && popover.current?.contains(document.getElementById(ownerId))) return;
       if (!root.current?.contains(target) && !popover.current?.contains(target)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -133,12 +137,12 @@ export function DatePicker({
       <div className="calendar-header">
         <button type="button" className="calendar-nav" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={17} /></button>
         <div className="calendar-period-controls">
-          <select aria-label="Calendar month" value={visibleMonth.getMonth()} onChange={(event) => setVisibleMonth((current) => new Date(current.getFullYear(), Number(event.target.value), 1, 12))}>
+          <Select aria-label="Calendar month" value={visibleMonth.getMonth()} onChange={(event) => setVisibleMonth((current) => new Date(current.getFullYear(), Number(event.target.value), 1, 12))}>
             {monthNames.map((month, index) => <option key={month} value={index}>{month}</option>)}
-          </select>
-          <select aria-label="Calendar year" value={visibleMonth.getFullYear()} onChange={(event) => setVisibleMonth((current) => new Date(Number(event.target.value), current.getMonth(), 1, 12))}>
+          </Select>
+          <Select aria-label="Calendar year" value={visibleMonth.getFullYear()} onChange={(event) => setVisibleMonth((current) => new Date(Number(event.target.value), current.getMonth(), 1, 12))}>
             {years.map((year) => <option key={year} value={year}>{year}</option>)}
-          </select>
+          </Select>
         </div>
         <button type="button" className="calendar-nav" aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={17} /></button>
       </div>

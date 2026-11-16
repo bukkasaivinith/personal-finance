@@ -1,3 +1,4 @@
+import { Select } from '@/components/select';
 import { useState, type ReactNode } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { DatePicker } from '@/components/date-picker';
@@ -172,7 +173,7 @@ export function TypePicker({
     <>
       <label>
         Transaction type
-        <select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
+        <Select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
           {value === '' && !creating ? (
             <option value="" disabled>
               {options.length === 0 ? 'No transaction types yet' : 'Choose a type'}
@@ -185,7 +186,7 @@ export function TypePicker({
           ))}
           {selected ? <option value={EDIT_OPTION}>✎ Edit selected transaction type</option> : null}
           <option value={NEW_OPTION}>+ Create transaction type</option>
-        </select>
+        </Select>
       </label>
       {creating ? (
         <InlineCreate
@@ -207,13 +208,13 @@ export function TypePicker({
           </label>
           <label className="full-field">
             Counts as
-            <select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)}>
+            <Select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)}>
               {kindChoices.map((choice) => (
                 <option value={choice.value} key={choice.value}>
                   {choice.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </InlineCreate>
       ) : null}
@@ -232,11 +233,11 @@ export function TypePicker({
           </label>
           <label className="full-field">
             Counts as
-            <select value={editKind} onChange={(event) => setEditKind(event.target.value as TransactionKind)} disabled={selected.kind === 'transfer'}>
+            <Select value={editKind} onChange={(event) => setEditKind(event.target.value as TransactionKind)} disabled={selected.kind === 'transfer'}>
               {kindChoices
                 .filter((choice) => (selected.kind === 'transfer' ? choice.value === 'transfer' : choice.value !== 'transfer'))
                 .map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
-            </select>
+            </Select>
           </label>
           {selected.kind === 'transfer' ? <p className="form-hint full-field">Transfer types stay as transfers because their existing entries have two accounts.</p> : null}
         </InlineCreate>
@@ -351,7 +352,7 @@ export function CategoryPicker({
     <>
       <label>
         Category
-        <select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
+        <Select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
           {value === '' && !creating ? (
             <option value="" disabled>
               {options.length === 0 ? 'No categories for this type yet' : 'Choose a category'}
@@ -364,7 +365,7 @@ export function CategoryPicker({
           ))}
           {selected ? <option value={EDIT_OPTION}>✎ Edit selected category</option> : null}
           <option value={NEW_OPTION}>+ Create category</option>
-        </select>
+        </Select>
       </label>
       {creating ? (
         <InlineCreate
@@ -576,7 +577,7 @@ export function AccountPicker({
     <>
       <label>
         {label}
-        <select
+        <Select
           value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value}
           onChange={(event) => {
             if (event.target.value === NEW_OPTION) {
@@ -608,7 +609,7 @@ export function AccountPicker({
           ))}
           {selected ? <option value={EDIT_OPTION}>✎ Edit selected account</option> : null}
           <option value={NEW_OPTION}>+ Create account</option>
-        </select>
+        </Select>
       </label>
       {creating ? (
         <div className="full-field">

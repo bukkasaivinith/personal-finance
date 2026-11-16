@@ -4,6 +4,7 @@ import App from './App.tsx';
 import { AuthGate } from '@/components/auth-gate';
 import { MobileApp } from '@/components/mobile-app';
 import './index.css';
+import './components/select.css';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js'));
