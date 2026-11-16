@@ -1,0 +1,16 @@
+.recognition-destination { color: var(--muted); display: grid; font-size: 12px; gap: 7px; }
+.recognition-filename { color: var(--muted); font-size: 11px; margin: 0; overflow-wrap: anywhere; }
+.recognition-source-image, .recognition-source-text { border: 1px solid var(--line); border-radius: 10px; font-size: 12px; padding: 12px; }
+.recognition-source-image summary, .recognition-source-text summary { color: var(--green); cursor: pointer; font-weight: 600; }
+.recognition-source-image img { display: block; margin: 12px auto 0; max-height: 360px; max-width: 100%; object-fit: contain; }
+.recognition-source-text label { color: var(--muted); display: grid; gap: 7px; margin: 12px 0; }
+.recognition-source-text textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; color: var(--ink); font: inherit; line-height: 1.6; padding: 10px; resize: vertical; width: 100%; }
+.recognition-source-text .form-hint { margin-top: 12px; }
+.recognition-source-text textarea:focus { border-color: #7c9a83; box-shadow: 0 0 0 3px var(--green-soft); outline: none; }
+.recognition-questions { background: #f7f8f4; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 12px; line-height: 1.65; padding: 12px; }
+.recognition-questions strong { color: var(--green); font-weight: 600; }
+.recognition-questions ul { margin: 5px 0 0; padding-left: 18px; }
+.recognition-questions p { margin: 6px 0 0; }
+.recognition-check { align-items: start; color: var(--ink); display: flex; font-size: 12px; gap: 9px; line-height: 1.6; }
+.recognition-check input { accent-color: var(--green); flex: 0 0 auto; height: 16px; margin-top: 2px; width: 16px; }
+.recognition-summary b { overflow-wrap: anywhere; }

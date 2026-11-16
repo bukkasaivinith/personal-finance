@@ -11,9 +11,11 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "test:athlete": "node --test tests/athlete-*.test.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@supabase/supabase-js": "^2.57.4",
     "@tesseract.js-data/eng": "1.0.0",
     "lucide-react": "^0.446.0",
