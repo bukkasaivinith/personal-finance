@@ -241,6 +241,10 @@ button { cursor: pointer; }
 .athlete-calendar-event { align-items: center; background: #eaf1eb; border-left: 2px solid #75a07d; border-radius: 5px; color: #35503c; display: flex; font-size: 8px; gap: 3px; justify-content: space-between; line-height: 1.2; min-width: 0; padding: 4px 4px; }
 .athlete-calendar-event.planned { background: #f7f4e9; border-left-color: #c4a156; color: #73602d; }
 .athlete-calendar-event.race { background: #edf0f8; border-left-color: #788cb6; color: #4d5d81; }
+.athlete-calendar-event.recovery.low { background: #fff1ef; border-left-color: #c7655b; color: #9f4b42; }
+.athlete-calendar-event.recovery.mid { background: #fcf6e8; border-left-color: #c9a04e; color: #806428; }
+.athlete-calendar-event.recovery.good { background: #f0f6ea; border-left-color: #73a06d; color: #457143; }
+.athlete-calendar-event.recovery.great { background: #e8f4eb; border-left-color: #2f7853; color: #23613d; }
 .athlete-calendar-event i { font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .athlete-calendar-event em { font-style: normal; font-weight: 600; white-space: nowrap; }
 .athlete-calendar-cell > small { color: var(--muted); font-size: 8px; }
