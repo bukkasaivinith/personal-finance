@@ -8,7 +8,7 @@ Complete [database setup](IPO-SETUP.md) before using it with saved records.
 
 - Portfolio, Calendar, Reports and Applicants sections inside Investments.
 - Reusable self/friend profiles, multiple demat accounts per person, optional broker/account nicknames, renaming and archival without deleting history.
-- Manual Mainboard/SME company records, issue price, lot size and minimum lots. The company form has opening/closing dates and **actual** allotment, refund and listing dates; expected-date inputs were removed as requested.
+- Manual Mainboard/SME company records with issue price, lot size, minimum lots and optional opening and closing dates. Record each applicant's result later from their application. You can update actual company dates for the calendar under **Edit company**.
 - Company cards containing their application accounts, allotted capital, shares held and realised profit/loss, with search, combined filters, sorting and pagination.
 - Application amounts calculated from lots × shares per lot × issue price, with an optional explained adjustment.
 - Immediate application activity in Transactions, marked as a memo so it never creates a fictitious bank debit.
@@ -26,8 +26,8 @@ Complete [database setup](IPO-SETUP.md) before using it with saved records.
 
 1. Open **Investments → IPO → Applicants → Add applicant**. Choose your account or a friend's account and save a display name.
 2. Choose **Add account** on that profile. Give the demat account a recognizable nickname. No PAN, passwords or full account numbers are needed.
-3. Choose **Add IPO**, enter the company and issue terms, and save. Optional actual dates can stay blank until known.
-4. Open the company and choose **Add application**. Select the applicant/demat account, date, lots, price and your funding account. Review the calculated amount and save.
+3. Choose **Add IPO**, enter the company and issue terms, and select **Save IPO**. The company page opens.
+4. Choose **Add application**. Select the applicant/demat account, date, lots, price and your funding account. Review the calculated amount and save. The application shows **Awaiting allotment result**.
 5. An application memo appears immediately on Transactions. Record its actual funding state using **Record an event…** on the application.
 
 ## Choose the correct funding workflow
@@ -48,7 +48,7 @@ Blocked funds remain until you explicitly record their release. A failed allotme
 
 ## Allotment and sales
 
-Open an application → **Record an event… → Allotment result**. Enter the result, allotted shares, purchase charges and actual date. Zero shares create no investment. Positive allotments appear automatically in the normal Investments overview with a **View IPO** button.
+Once you know the result, open the company, select the application and choose **Record allotment result**. Select the outcome and actual date. A full allotment uses all the applied shares. For a partial allotment, enter the quantity you received. Add any purchase charges and select **Save result**. Positive allotments appear automatically in the Investments overview with a **View IPO** button.
 
 To sell, choose **Sell shares** and enter quantity, price, sale charges and date. The app recognises profit/loss on the shares sold and retains the remaining shares at cost. A reference listing price is informational and does not create profit. The linked investment stays active until all shares are sold.
 
