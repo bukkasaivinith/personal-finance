@@ -48,7 +48,7 @@ Blocked funds remain until you explicitly record their release. A failed allotme
 
 ## Allotment and sales
 
-Once you know the result, open the company, select the application and choose **Record allotment result**. Select the outcome and actual date. A full allotment uses all the applied shares. For a partial allotment, enter the quantity you received. Add any purchase charges and select **Save result**. Positive allotments appear automatically in the Investments overview with a **View IPO** button.
+Once you know the result, open the company and choose **Enter results** beside the application. Enter allotted lots, non-allotted lots and the actual allotment date. The two counts must add up to the lots applied for that demat account. The app converts allotted lots to shares using the application's saved lot size. Positive allotments appear automatically in the Investments overview with a **View IPO** button.
 
 To sell, choose **Sell shares** and enter quantity, price, sale charges and date. The app recognises profit/loss on the shares sold and retains the remaining shares at cost. A reference listing price is informational and does not create profit. The linked investment stays active until all shares are sold.
 
@@ -75,7 +75,7 @@ Portfolio/Reports filters combine company/applicant search, applicant, applicati
 
 Company and applicant reports use the matching applications. A friend's balance is a shared funding pool across IPOs; it is labelled as a whole-person pool instead of pretending to allocate it to a particular company. People funded before their first application are included in the unfiltered outstanding report.
 
-Calendar shows saved company dates and activity. Use previous/next, Today or Jump to month. Hover a date or select it to see events; select an event to open its company. Current application balances shown in the details are explicitly labelled as current, not historical balances on that date. Previously recorded expected events remain distinguishable from actual events, but the company form no longer asks for expected dates.
+The calendar shows application, allotment and listing dates. Use previous/next, Today or Jump to month. Select a date to see the companies, then select a company to open it. Record the actual listing in **Edit company** or **Record activity**. Previous expected dates are kept in saved records and hidden from the IPO page.
 
 ## Corrections and history
 

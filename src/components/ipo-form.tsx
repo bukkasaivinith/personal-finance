@@ -4,7 +4,7 @@ import { Select } from '@/components/select';
 import { ModalShell } from '@/components/ui';
 import { formatMoney, isUsable, todayKey, type Account } from '@/lib/finance';
 import { commandIpo } from '@/lib/ipo-api';
-import type { IpoData } from '@/lib/ipo';
+import { ipoLotsResult, type IpoData } from '@/lib/ipo';
 
 export type IpoFormSpec = { command: string; title: string; seed?: Record<string, unknown> };
 type Field = { key: string; label: string; type?: 'number' | 'date' | 'text' | 'textarea' | 'select'; optional?: boolean; options?: [string,string][]; step?: string; min?: number; max?: number; minDate?: string; maxDate?: string };
@@ -16,10 +16,12 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
  const { command, seed = {} } = spec;
  const company = data.companies.find(c => c.id === seed.company_id);
  const application = data.applications.find(a => a.id === seed.application_id);
+ const demat = data.applicant_accounts.find(account => account.id === application?.applicant_account_id);
+ const holder = data.applicants.find(person => person.id === demat?.applicant_id);
  const todayParts = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
  const ipoToday = ['year', 'month', 'day'].map(part => todayParts.find(value => value.type === part)?.value).join('-');
  const [values, setValues] = useState<Record<string, unknown>>({
-  date: command === 'allot' ? ipoToday : todayKey(),
+  date: command === 'allot' || command === 'event' ? ipoToday : todayKey(),
   designation: 'self',
   classification: 'Mainboard',
   minimum_lots: 1,
@@ -28,12 +30,10 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
   issue_price: company?.issue_price ?? '',
   adjustment: 0,
   funding_method: 'direct',
-  purchase_charges: 0,
   charges: 0,
   status: 'requested',
   destination: 'bank',
   kind: 'shares_credited',
-  expected: false,
   ...seed,
  });
  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
@@ -42,10 +42,12 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
  const bank: Field = { key: 'account_id', label: 'Your financial account', type: 'select', options: accounts.filter(a => isUsable(a) && !a.isLiability).map(a => [a.id, a.name]) };
  const applicant: Field = { key: 'applicant_id', label: 'Applicant', type: 'select', options: data.applicants.filter(a => !a.archived || a.id === values.applicant_id).map(a => [a.id, a.name]) };
  const archive: Field = { key: 'archived', label: 'Profile status', type: 'select', options: [['false','Active'],['true','Archived']] };
- const appliedShares = application ? application.lots * application.lot_size : 0;
- const hasAllottedShares = values.result === 'full' || values.result === 'partial';
- const allottedShares = values.result === 'full' ? appliedShares : values.result === 'partial' ? Number(values.shares ?? 0) : 0;
- const purchaseCharges = hasAllottedShares ? Number(values.purchase_charges) : 0;
+ const lotsApplied = application?.lots ?? 0;
+ const allotmentResult = application ? ipoLotsResult(
+  application,
+  Number(values.allotted_lots ?? NaN),
+  Number(values.not_allotted_lots ?? NaN),
+ ) : null;
  let fields: Field[] = [];
  if (command === 'applicant') fields = [{ key:'name',label:'Applicant name' },{ key:'designation',label:'Whose demat account?',type:'select',options:[['self','My account'],['friend',"Friend’s account"]] },{key:'relationship',label:'Relationship / description (optional)',optional:true},notes,...(seed.id ? [archive] : [])];
  if (command === 'demat') fields = [applicant,{key:'nickname',label:'Account nickname'},{key:'broker',label:'Broker / platform (optional)',optional:true},{key:'demat_label',label:'Demat label (optional)',optional:true},{key:'bank_nickname',label:'Funding bank nickname (optional)',optional:true},notes,...(seed.id ? [archive] : [])];
@@ -75,20 +77,21 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
  if (['fund_friend','repay'].includes(command)) fields = [applicant,bank,amount,date,notes];
  if (command === 'refund') fields = [bank,amount,date,notes];
  if (command === 'allot') {
-  const results: [string, string][] = [['full', 'Fully allotted']];
-  if (appliedShares > 1) results.push(['partial', 'Partially allotted']);
-  results.push(['none', 'Not allotted'], ['rejected', 'Rejected'], ['cancelled', 'Cancelled']);
   fields = [
-   { key: 'result', label: 'Allotment result', type: 'select', options: results },
-   { ...date, label: 'Result date', minDate: application?.application_date, maxDate: ipoToday },
+   { key: 'allotted_lots', label: 'Allotted lots', type: 'number', min: 0, max: lotsApplied, step: '1' },
+   { key: 'not_allotted_lots', label: 'Non-allotted lots', type: 'number', min: 0, max: lotsApplied, step: '1' },
+   { ...date, label: 'Allotment date', minDate: application?.application_date, maxDate: ipoToday },
   ];
-  if (values.result === 'partial') fields.push({ key: 'shares', label: 'Shares allotted', type: 'number', min: 1, max: appliedShares - 1, step: '1' });
-  if (hasAllottedShares) fields.push({ key: 'purchase_charges', label: 'Purchase charges (₹)', type: 'number', min: 0 });
  }
  if (command === 'sale') fields = [{key:'shares',label:'Shares sold',type:'number',min:1,step:'1'},{key:'price',label:'Sale price per share (₹)',type:'number',min:0},{key:'charges',label:'Total sale charges (₹)',type:'number',min:0},date,notes];
  if (command === 'receipt') fields = [{key:'destination',label:'Where did the proceeds arrive?',type:'select',options:[['bank','My financial account'],['friend','Applicant’s custody account']]},...(values.destination==='bank'?[bank]:[]),amount,date,notes];
  if (command === 'mandate') fields = [{key:'status',label:'Mandate status',type:'select',options:option(['not_requested','requested','approved','rejected'])},date];
- if (command === 'event') fields = [{key:'kind',label:'Event',type:'select',options:option(['shares_credited','listing','expected_refund','expected_allotment','expected_listing','note'])},date,{key:'expected',label:'Confirmation',type:'select',options:[['false','Confirmed / actually occurred'],['true','Expected / forecast only']]},{key:'reference_price',label:'Reference listing price (optional, ₹)',type:'number',min:0,optional:true},notes];
+ if (command === 'event') fields = [
+  { key: 'kind', label: 'Event', type: 'select', options: [['shares_credited', 'Shares credited'], ['listing', 'Listing'], ['note', 'Note']] },
+  { ...date, minDate: application?.application_date, maxDate: ipoToday },
+  { key: 'reference_price', label: 'Reference listing price (optional, ₹)', type: 'number', min: 0, optional: true },
+  notes,
+ ];
  if (command === 'reverse') fields = [{key:'reason',label:'Reason for correction',type:'textarea'},date];
  const text = (field: Field) => String(field.key.startsWith('dates.') ? (values.dates as Record<string,string> | undefined)?.[field.key.slice(6)] ?? '' : values[field.key] ?? '');
  const change = (field: Field, value: string) => {
@@ -104,7 +107,7 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
    return;
   }
   if (fields.some(field => field.minDate && text(field) < field.minDate)) {
-   setError('The result date cannot be before the application date.');
+   setError('The date cannot be before the application date.');
    return;
   }
   const payload: Record<string,unknown>={};
@@ -117,10 +120,13 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
   }
   for (const field of fields) if (field.type==='number') payload[field.key]=text(field)===''?null:Number(text(field));
   if (command === 'allot') {
-   payload.shares = allottedShares;
-   payload.purchase_charges = purchaseCharges;
+   if (!allotmentResult) {
+    setError(`Allotted and non-allotted lots must add up to the ${lotsApplied} applied.`);
+    return;
+   }
+   Object.assign(payload, allotmentResult);
   }
-  payload.archived=String(values.archived)==='true'; payload.expected=String(values.expected)==='true';
+  payload.archived=String(values.archived)==='true';
   const serialized=JSON.stringify(payload);
   if (retry.current.payload!==serialized) retry.current={payload:serialized,id:crypto.randomUUID()};
   inFlight.current=true; setBusy(true); setError('');
@@ -135,7 +141,7 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
   unblock: 'Releasing a block never credits cash to your account.',
   prepay: 'Use only when money actually left your bank. ASBA blocking is recorded with “Block funds”.',
   fund_friend: 'One actual transfer can fund several applications. It moves money to applicant custody, not an expense.',
-  allot: 'Enter the confirmed result for this application. For allotted shares, saving records the cost and creates the linked investment.',
+  allot: [company?.name, holder && demat ? `${holder.name} / ${demat.nickname}` : '', `${lotsApplied} ${lotsApplied === 1 ? 'lot' : 'lots'} applied`].filter(Boolean).join(' · '),
   sale: 'Profit or loss is realised now. Proceeds remain awaiting settlement until you record where they arrived.',
   receipt: 'This moves already-recorded proceeds and does not count profit again.',
   repay: 'Only unreserved money held by the applicant can be returned.',
@@ -177,8 +183,8 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
       </div>
      ))}
     </div>
-    {command === 'allot' && hasAllottedShares && allottedShares > 0 ? (
-     <p className="ipo-preview">{allottedShares} shares · {formatMoney(allottedShares * (application?.issue_price ?? 0) + purchaseCharges)} allotted cost including charges</p>
+    {command === 'allot' && allotmentResult && application ? (
+     <p className="ipo-preview">{allotmentResult.shares} shares allotted · {formatMoney(allotmentResult.shares * application.issue_price)} allotted cost</p>
     ) : null}
     {preview ? <p className="ipo-preview">{preview}</p> : null}
     {error ? <p role="alert" className="form-error">{error}</p> : null}

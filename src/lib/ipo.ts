@@ -52,10 +52,50 @@ export function filterIpo(rows: IpoRow[], filters: IpoFilters, friends: Map<stri
 export function summaryIpo(rows: IpoRow[]) {
  return { companies: new Set(rows.map(x => x.company_id)).size, applications: rows.length, applied: sum(rows, r => r.amount), blocked: sum(rows, r => r.blocked), allotted: rows.filter(r => (r.allotment?.shares ?? 0) > 0).length, unsuccessful: rows.filter(r => r.allotment && !r.allotment.shares).length, invested: sum(rows, r => r.remainingCost), profit: sum(rows, r => r.profit), proceeds: sum(rows, r => r.proceeds), unsettled: sum(rows, r => r.unsettled), originalCost: sum(rows, r => r.allotment?.cost ?? 0), shares: sum(rows, r => r.remainingShares), refund: sum(rows, r => r.refund_due) };
 }
-export type CalendarEvent = { id: string; date: string; companyId: string | null; applicationId: string | null; personId: string | null; label: string; amount: number; expected: boolean; event?: IpoEvent };
+export function ipoLotsResult(application: Pick<IpoApplication, 'lots' | 'lot_size'>, allotted: number, notAllotted: number) {
+ if (!Number.isInteger(allotted) || !Number.isInteger(notAllotted) || allotted < 0 || notAllotted < 0 || allotted + notAllotted !== application.lots) return null;
+ return {
+  shares: allotted * application.lot_size,
+  result: allotted === 0 ? 'none' : notAllotted === 0 ? 'full' : 'partial',
+ };
+}
+
+export type CalendarEvent = { id: string; date: string; companyId: string; applicationId: string | null; personId: string | null; label: 'Applied' | 'Allotment' | 'Listing' };
 export function ipoCalendar(data: IpoData): CalendarEvent[] {
- const history: CalendarEvent[] = data.events.filter(e => !e.reversed && !['applicant','demat','company'].includes(e.command)).map(e => ({ id: e.id, date: e.event_date, companyId: e.company_id, applicationId: e.application_id, personId: e.applicant_id, label: eventLabel(e), amount: e.amount, expected: e.expected, event: e }));
- return history.concat(data.companies.flatMap(c => Object.entries(c.dates).filter(([, date]) => Boolean(date)).map(([kind, date]) => ({ id: `${c.id}:${kind}`, date, companyId: c.id, applicationId: null, personId: null, label: kind.replace(/_/g, ' '), amount: 0, expected: !kind.startsWith('actual_') }))));
+ const events: CalendarEvent[] = [];
+ const dematOwners = new Map(data.applicant_accounts.map(account => [account.id, account.applicant_id]));
+ const activeAllotments = new Map(data.allotments.filter(result => !result.voided).map(result => [result.application_id, result]));
+ const recordedAllotments = new Set<string>();
+ const latestListing = new Map<string, IpoEvent>();
+
+ for (const application of data.applications) {
+  const { id, company_id: companyId } = application;
+  const related = { companyId, applicationId: id, personId: dematOwners.get(application.applicant_account_id) ?? null };
+  events.push({ ...related, id: `${id}:applied`, date: application.application_date, label: 'Applied' });
+  const allotment = activeAllotments.get(id);
+  if (allotment) {
+   recordedAllotments.add(`${companyId}:${allotment.allotted_on}`);
+   events.push({ ...related, id: `${id}:allotment`, date: allotment.allotted_on, label: 'Allotment' });
+  }
+ }
+
+ for (const event of data.events) {
+  if (event.command !== 'event' || event.details.kind !== 'listing' || event.reversed || event.expected || !event.company_id) continue;
+  const existing = latestListing.get(event.company_id);
+  if (!existing || event.created_at > existing.created_at) latestListing.set(event.company_id, event);
+ }
+
+ for (const company of data.companies) {
+  const { id, dates } = company;
+  const related = { companyId: id, applicationId: null, personId: null };
+  const allotmentDate = dates.actual_allotment;
+  if (allotmentDate && !recordedAllotments.has(`${id}:${allotmentDate}`)) {
+   events.push({ ...related, id: `${id}:allotment`, date: allotmentDate, label: 'Allotment' });
+  }
+  const listingDate = dates.actual_listing || latestListing.get(id)?.event_date;
+  if (listingDate) events.push({ ...related, id: `${id}:listing`, date: listingDate, label: 'Listing' });
+ }
+ return events.sort((first, second) => first.date.localeCompare(second.date));
 }
 export type CsvCell = string | number | null | undefined;
 export function ipoCsv(rows: CsvCell[][]) {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const compiled = await build({entryPoints:['src/lib/ipo.ts'],bundle:true,write:false,format:'esm',platform:'node'});
-const { indexIpo,filterIpo,summaryIpo,emptyFilters,ipoCalendar,ipoCsv } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+const { indexIpo,filterIpo,summaryIpo,emptyFilters,ipoCalendar,ipoCsv,ipoLotsResult } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const financeCompiled = await build({entryPoints:['src/lib/finance.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const { netPosition, signedBalance } = await import(`data:text/javascript;base64,${Buffer.from(financeCompiled.outputFiles[0].text).toString('base64')}`);
 const data={applicants:[{id:'p',name:'Renamed person'}],applicant_accounts:[{id:'d',applicant_id:'p',nickname:'First demat'},{id:'d2',applicant_id:'p',nickname:'Second demat'}],companies:[{id:'c',name:'Company',classification:'SME',dates:{expected_allotment:'2026-02-10',actual_listing:'2026-02-14'}}],applications:[{id:'a',company_id:'c',applicant_account_id:'d',application_date:'2026-02-01',amount:10000,funding_method:'friend',status:'partial',blocked:4000,refund_due:0,reference:''},{id:'b',company_id:'c',applicant_account_id:'d2',application_date:'2026-02-02',amount:10000,funding_method:'friend',status:'none',blocked:0,refund_due:0,reference:''}],allotments:[{application_id:'a',shares:60,cost:6010,voided:false},{application_id:'b',shares:0,cost:0,result:'none',voided:false}],sales:[{id:'s',application_id:'a',shares:20,cost_basis:2003.33,net:2395,profit:391.67,voided:false},{id:'reversed-sale',application_id:'a',shares:40,cost_basis:4006.67,net:0,profit:-4006.67,voided:true}],settlements:[{applicant_id:'p',kind:'funding',amount:20000,voided:false},{applicant_id:'p',sale_id:'s',kind:'receipt',amount:1000,voided:false},{applicant_id:'p',kind:'repayment',amount:500,voided:false},{applicant_id:'p',kind:'repayment',amount:2000,voided:true}],events:[{id:'e',command:'application',application_id:'a',company_id:'c',applicant_id:'p',event_date:'2026-02-01',amount:10000,expected:false,reversed:false,details:{},payload:{}},{id:'old',command:'sale',event_date:'2026-02-02',reversed:true,details:{},payload:{}}],cash_accounts:[]};
@@ -19,11 +19,31 @@ test('combined filters and custom date ranges keep only matching records',()=>{
  assert.equal(filterIpo(i.rows,{...emptyFilters,holding:'sold'},i.friendBalances).length,0);
  assert.equal(filterIpo(i.rows,{...emptyFilters,search:'other'},i.friendBalances).length,0);
 });
-test('calendar keeps expected company dates distinct from confirmed events',()=>{
- const events=ipoCalendar(data);assert.equal(events.length,3);
- assert.equal(events.find(e=>e.id==='c:expected_allotment').expected,true);
- assert.equal(events.find(e=>e.id==='c:actual_listing').expected,false);
- assert.equal(events.find(e=>e.id==='e').date,'2026-02-01');
+test('calendar shows only current applications, actual results and one listing per company',()=>{
+ const fixture = {
+  ...data,
+  companies: [{ ...data.companies[0], dates: { opening:'2026-01-31', closing:'2026-02-03', expected_allotment:'2026-02-10', actual_allotment:'2026-02-12', actual_refund:'2026-02-13', actual_listing:'2026-02-14' } }],
+  applications: [{ ...data.applications[0], application_date:'2026-02-03' }, data.applications[1]],
+  allotments: [{ ...data.allotments[0], allotted_on:'2026-02-12' }, { ...data.allotments[1], allotted_on:'2026-02-12', voided:true }],
+  events: [
+   ...data.events,
+   { company_id:'c', command:'block', event_date:'2026-02-03' },
+   { company_id:'c', command:'event', details:{kind:'listing'}, event_date:'2026-02-14' },
+   { company_id:'c', command:'event', details:{kind:'listing'}, event_date:'2026-02-18', expected:true },
+  ],
+ };
+ assert.deepEqual(ipoCalendar(fixture).map(event=>[event.label,event.date]),[
+  ['Applied','2026-02-02'], ['Applied','2026-02-03'], ['Allotment','2026-02-12'], ['Listing','2026-02-14'],
+ ]);
+});
+test('allotted and non-allotted lots must reconcile before conversion to shares',()=>{
+ const application = { lots:3, lot_size:55 };
+ assert.deepEqual(ipoLotsResult(application,3,0),{ shares:165,result:'full' });
+ assert.deepEqual(ipoLotsResult(application,1,2),{ shares:55,result:'partial' });
+ assert.deepEqual(ipoLotsResult(application,0,3),{ shares:0,result:'none' });
+ for (const [allotted, notAllotted] of [[2,0],[3,1],[-1,4],[1.5,1.5],[NaN,3]]) {
+  assert.equal(ipoLotsResult(application,allotted,notAllotted),null);
+ }
 });
 test('empty portfolio has no invented values',()=>{
  const blank=Object.fromEntries(Object.keys(data).map(k=>[k,[]]));const i=indexIpo(blank);
