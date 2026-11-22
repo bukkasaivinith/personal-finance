@@ -73,7 +73,7 @@ function WorkspaceSharing({ ownerId, accounts, onChange }: { ownerId: string; ac
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const activeAccounts = useMemo(() => accounts.filter((account) => account.isActive && account.deletedAt === null), [accounts]);
+  const activeAccounts = useMemo(() => accounts.filter((account) => account.isActive && account.deletedAt === null && !account.ipoCustody), [accounts]);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {

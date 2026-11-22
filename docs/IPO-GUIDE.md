@@ -1,0 +1,92 @@
+# IPO portfolio: features and usage
+
+The feature lives in **Investments → IPO** on the `ipo` testing branch. It uses the existing signed-in user's private Supabase workspace. It does not contact a broker, place an application, trade shares, or transfer real money. Record movements after they happen.
+
+Complete [database setup](IPO-SETUP.md) before using it with saved records.
+
+## What was added
+
+- Portfolio, Calendar, Reports and Applicants sections inside Investments.
+- Reusable self/friend profiles, multiple demat accounts per person, optional broker/account nicknames, renaming and archival without deleting history.
+- Manual Mainboard/SME company records, issue price, lot size and minimum lots. The company form has opening/closing dates and **actual** allotment, refund and listing dates; expected-date inputs were removed as requested.
+- Company cards containing their application accounts, allotted capital, shares held and realised profit/loss, with search, combined filters, sorting and pagination.
+- Application amounts calculated from lots × shares per lot × issue price, with an optional explained adjustment.
+- Immediate application activity in Transactions, marked as a memo so it never creates a fictitious bank debit.
+- Separate mandate, bank-block, block-release, actual prepayment, applicant funding and repayment records.
+- Full, partial, unsuccessful, rejected and cancelled allotments. A positive allotment creates one linked investment and one capital debit atomically.
+- Partial/final share sales, purchase/sale charges, exact cost allocation and realised profit/loss.
+- Sale settlement to a bank or applicant account, partial receipts and partial repayments. Outstanding money stays visible until actually received.
+- Accounts → IPO balances: remaining invested capital, funds pending receipt, prepayments awaiting result, blocked funds and expandable custody-account details. IPO holdings and custody are excluded from total assets/net position; genuine bank receipts return to the bank balance normally.
+- Ten portfolio summary metrics, calendar navigation and date details, company/account/funding/classification reports, daily/monthly/yearly profit views and custom date ranges.
+- Eight CSV exports: applications, companies, applicants, allotments, sales, profit, outstanding funds/repayments and calendar. Exports quote text and protect against spreadsheet formula injection.
+- Detailed IPO history plus entries in the existing Activity log, including reasons and reversing movements for corrections.
+- Database ownership checks, active-session checks, protected automatic records, atomic commands and duplicate-request protection.
+
+## First application
+
+1. Open **Investments → IPO → Applicants → Add applicant**. Choose your account or a friend's account and save a display name.
+2. Choose **Add account** on that profile. Give the demat account a recognizable nickname. No PAN, passwords or full account numbers are needed.
+3. Choose **Add IPO**, enter the company and issue terms, and save. Optional actual dates can stay blank until known.
+4. Open the company and choose **Add application**. Select the applicant/demat account, date, lots, price and your funding account. Review the calculated amount and save.
+5. An application memo appears immediately on Transactions. Record its actual funding state using **Record an event…** on the application.
+
+## Choose the correct funding workflow
+
+| What happened | What to record | Bank effect |
+|---|---|---|
+| ASBA/UPI funds are blocked but still in your bank | Block funds | None; shown as reserved |
+| A block is released | Release block | None; funds were already in the account |
+| Money actually left your bank before allotment | Actual prepayment | Transfer to IPO escrow |
+| You sent money to a friend/applicant | Send funds | One transfer to that person's IPO custody |
+| Allotment consumed money | Allotment result | One debit from bank, escrow or applicant custody |
+| Unused actual prepayment was refunded | Actual refund | Escrow transfers back to your selected bank |
+| A friend returned money | Applicant repayment | Custody transfers back to your bank |
+
+One applicant's custody pool can fund several IPOs/demat accounts. Selecting friend funding on an application does not send money again. The funding-account selection records the intended source; the actual Send funds records determine which bank paid into the pool.
+
+Blocked funds remain until you explicitly record their release. A failed allotment does not invent a refund or income. **Actual refund** is only for money that was prepaid; use **Release block** for ASBA funds.
+
+## Allotment and sales
+
+Open an application → **Record an event… → Allotment result**. Enter the result, allotted shares, purchase charges and actual date. Zero shares create no investment. Positive allotments appear automatically in the normal Investments overview with a **View IPO** button.
+
+To sell, choose **Sell shares** and enter quantity, price, sale charges and date. The app recognises profit/loss on the shares sold and retains the remaining shares at cost. A reference listing price is informational and does not create profit. The linked investment stays active until all shares are sold.
+
+After selling, use **Record receipt** next to that sale when the money actually arrives. Choose your bank or applicant custody. If an applicant receives it, your bank does not increase yet. Record **Applicant repayment** when they transfer money back; each partial repayment reduces what remains with them.
+
+Example: 100 shares cost ₹14,700 and sell for ₹20,000 net. Realised profit is ₹5,300. If Rahul receives ₹20,000 and returns ₹12,000, ₹8,000 remains in his custody and the profit stays ₹5,300. Do not record a second manual investment or duplicate bank transfer for these same events.
+
+## Accounts and totals
+
+Accounts shows normal bank/cash/card balances separately from IPO balances. The IPO section distinguishes:
+
+- **Capital invested:** cost of unsold shares, excluding cost already allocated to sales.
+- **Funds pending receipt:** funds in applicant custody + unsettled sale proceeds + actual refunds due. These are separate locations, so the same money is not added twice.
+- **Prepayments awaiting result:** prepaid cash awaiting allotment, excluding refunds already classified as due.
+- **Blocked funds:** still held in a bank or applicant account, shown for information and not added again to the IPO amounts.
+
+IPO custody and holdings are not included in the site's total assets/net position. Blocked money still physically in your bank remains in its posted balance, with the amount available after blocks shown underneath. Actual receipts into your bank increase its balance once.
+
+IPO cash movements remain visible in Transactions and existing cash-flow views. Those views describe ledger movements; **IPO Reports** is the view for realised share-sale profit. The separate IPO application-activity table contains memos, not income/expense entries.
+
+## Reports and calendar
+
+Portfolio/Reports filters combine company/applicant search, applicant, application start/end dates, classification, status, allotment result, funding and outstanding/holding state. Use the date pickers to select a month, year or custom application period. Profit reports additionally filter by **sale date** and group daily, monthly or yearly.
+
+Company and applicant reports use the matching applications. A friend's balance is a shared funding pool across IPOs; it is labelled as a whole-person pool instead of pretending to allocate it to a particular company. People funded before their first application are included in the unfiltered outstanding report.
+
+Calendar shows saved company dates and activity. Use previous/next, Today or Jump to month. Hover a date or select it to see events; select an event to open its company. Current application balances shown in the details are explicitly labelled as current, not historical balances on that date. Previously recorded expected events remain distinguishable from actual events, but the company form no longer asks for expected dates.
+
+## Corrections and history
+
+Profiles and company details can be edited; archive them to stop using them without erasing their history. An application can be corrected before allotment once blocks/prepayments are cleared. Its date cannot move past existing activity.
+
+After financial activity, open **Recorded history → event → Reverse with reason**, then enter the correct replacement. Corrections retain the original and reversing ledger entries. Reverse newer dependent activity first; the current implementation deliberately requires newest-first across the IPO workspace to protect pooled funds and cost allocation. Reversing an allotment retires its linked investment from the active display while preserving its history.
+
+Automatic IPO transactions, custody accounts and linked investments cannot be independently edited/deleted through ordinary finance actions. Repeated Save requests with the same request key return the original result. A completely new form submission is a new command, so check history before deliberately re-entering a saved cash movement.
+
+## Availability
+
+No extra API key, market feed or payment integration is required. There are no automatic trades, refunds, allotments or payments. Shared viewers/editors and platform administrators cannot open another person's private IPO portfolio. Existing selected-bank sharing remains intact; a shared bank's cash movements retain the existing sharing/redaction rules, while IPO profiles and custody accounts stay private.
+
+The local tests and responsive preview were verified. Live Supabase migration, authenticated browser integration, true simultaneous database connections and production deployment remain separate setup checks described in [IPO-SETUP.md](IPO-SETUP.md).

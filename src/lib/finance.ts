@@ -1,3 +1,4 @@
+import type { IpoBalances, IpoMemo } from '@/lib/ipo';
 export type TransactionKind = 'expense' | 'income' | 'transfer';
 
 export type ItemStatus = {
@@ -10,7 +11,7 @@ export type TransactionTypeOption = ItemStatus & { id: string; name: string; kin
 /** Investment accounting types are created and maintained by the Investments workflow. */
 export function isInvestmentManagedTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
   const name = type.name.trim().toLocaleLowerCase('en-US');
-  return name === 'investment capital' || name === 'investment return';
+  return name === 'investment capital' || name === 'investment return' || ['ipo expense','ipo income','ipo transfer'].includes(name);
 }
 
 export type CategoryOption = ItemStatus & {
@@ -22,6 +23,8 @@ export type CategoryOption = ItemStatus & {
 };
 
 export type Account = ItemStatus & {
+  ipoCustody?: string | null;
+  ipoBlocked?: number;
   id: string;
   name: string;
   description: string;
@@ -120,7 +123,7 @@ export type ActivityAction =
 
 export type ActivityEvent = {
   id: string;
-  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments' | 'investment_types' | 'workspace' | 'workspace_invitation';
+  entityTable: 'transaction_types' | 'categories' | 'accounts' | 'transactions' | 'budgets' | 'recurring_entries' | 'authentication' | 'investments' | 'investment_types' | 'workspace' | 'workspace_invitation' | 'ipo_events';
   entityId: string;
   entityName: string;
   action: ActivityAction;
@@ -137,6 +140,8 @@ export type InvestmentType = {
 };
 
 export type Investment = {
+  ipoApplicationId?: string;
+  ipoRemainingShares?: number;
   id: string;
   name: string;
   investmentType: string;
@@ -170,6 +175,8 @@ export type InvestmentDraft = {
 };
 
 export type FinanceData = {
+  ipoBalances?: IpoBalances;
+  ipoMemos?: IpoMemo[];
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
   accounts: Account[];
@@ -265,8 +272,8 @@ export function stateOf(item: ItemStatus): ItemState {
   return item.isActive ? 'active' : 'inactive';
 }
 
-export function isUsable(item: ItemStatus): boolean {
-  return item.isActive && item.deletedAt === null;
+export function isUsable(item: ItemStatus & { ipoCustody?: string | null }): boolean {
+  return item.isActive && item.deletedAt === null && !item.ipoCustody;
 }
 
 export function signedBalance(account: Account, transactions: Transaction[]): number {
@@ -295,6 +302,7 @@ export function netPosition(accounts: Account[], transactions: Transaction[]) {
   let assets = 0;
   let owed = 0;
   for (const account of accounts) {
+    if (account.ipoCustody) continue;
     const signed = signedBalance(account, transactions);
     if (account.isLiability) {
       owed -= signed;
