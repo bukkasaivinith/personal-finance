@@ -43,7 +43,7 @@ export function MobileApp() {
     () => finance.data?.transactionTypes.filter((type) => type.isActive && type.kind === kind && !isInvestmentManagedTransactionType(type)) ?? [],
     [finance.data, kind],
   );
-  const accounts = useMemo(() => finance.data?.accounts.filter((account) => account.isActive) ?? [], [finance.data]);
+  const accounts = useMemo(() => finance.data?.accounts.filter((account) => account.isActive && !account.ipoCustody) ?? [], [finance.data]);
   const categories = useMemo(() => {
     const selectedType = finance.data?.transactionTypes.find((type) => type.id === typeId);
     return selectedType ? categoriesFor(finance.data?.categories.filter((category) => category.isActive) ?? [], selectedType.id) : [];

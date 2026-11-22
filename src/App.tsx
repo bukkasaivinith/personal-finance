@@ -276,6 +276,7 @@ export default function App() {
       case 'transactions':
         return (
           <TransactionsView
+            ipoMemos={data?.ipoMemos}
             transactions={visibleTransactions}
             totalCount={transactions.length}
             searchQuery={searchQuery}
@@ -291,6 +292,7 @@ export default function App() {
         return (
           <AccountsView
             accounts={accounts}
+            ipoBalances={data?.ipoBalances}
             transactions={transactions}
             position={position}
             actions={actions}
@@ -335,7 +337,7 @@ export default function App() {
           />
         ) : <SharedWorkspaceNotice title="Recurring" />;
       case 'investments':
-        return isWorkspaceOwner ? <InvestmentsView investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} /> : <SharedWorkspaceNotice title="Investments" />;
+        return isWorkspaceOwner ? <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onRefresh={finance.refresh} /> : <SharedWorkspaceNotice title="Investments" />;
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':

@@ -1,0 +1,190 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, readdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { PGlite } from '@electric-sql/pglite';
+import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
+
+test('IPO accounting on the complete application migration history', async (t) => {
+ const db = new PGlite({ extensions: { pgcrypto } });
+ t.after(() => db.close());
+ await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+ CREATE SCHEMA auth; CREATE SCHEMA extensions;
+ CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,created_at timestamptz DEFAULT now(),email_confirmed_at timestamptz DEFAULT now(),raw_user_meta_data jsonb DEFAULT '{}');
+ CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),refreshed_at timestamptz,not_after timestamptz,user_agent text);
+ CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT COALESCE(NULLIF(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
+ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT (auth.jwt()->>'sub')::uuid $$;
+ GRANT USAGE ON SCHEMA public,auth TO authenticated,anon;
+ `);
+ const directory = new URL('../supabase/migrations/', import.meta.url);
+ for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
+  try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
+  catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
+ }
+ const owner=randomUUID(), other=randomUUID(), session=randomUUID();
+ await db.query('INSERT INTO auth.users(id,email) VALUES ($1,$2),($3,$4)',[owner,'ipo-owner@example.test',other,'ipo-other@example.test']);
+ await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)',[session,owner]);
+ await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
+ await db.exec('SELECT public.activate_current_single_device_session(); SET ROLE authenticated;');
+ const command=async (name,data,key=randomUUID()) => (await db.query('SELECT public.ipo_command($1,$2,$3) AS r',[key,name,JSON.stringify(data)])).rows[0].r;
+ const scalar=async (sql,args=[]) => Object.values((await db.query(sql,args)).rows[0])[0];
+ const bank=await scalar("INSERT INTO public.accounts(user_id,name,opening_balance,opening_balance_date,is_liability) VALUES(auth.uid(),'Bank',100000,'2026-01-01',false) RETURNING id");
+ const person=(await command('applicant',{name:'Rahul',designation:'friend'})).id;
+ const demat=(await command('demat',{applicant_id:person,nickname:'Rahul / One'})).id;
+ const company=(await command('company',{name:'Example IPO',classification:'Mainboard',issue_price:100,lot_size:100,minimum_lots:1})).id;
+ const createApp=async (method='direct',extras={}) => (await command('application',{company_id:company,applicant_account_id:demat,date:'2026-01-02',lots:1,lot_size:100,issue_price:100,funding_method:method,account_id:bank,...extras})).id;
+ const row=async (table,id) => (await db.query(`SELECT * FROM public.${table} WHERE id=$1`,[id])).rows[0];
+ const ledger=async account => Number(await scalar("SELECT COALESCE(sum(CASE WHEN transaction_kind='expense' AND account_id=$1 THEN -amount WHEN transaction_kind='income' AND account_id=$1 THEN amount WHEN transaction_kind='transfer' THEN CASE WHEN account_id=$1 THEN -amount ELSE amount END ELSE 0 END),0) FROM public.transactions WHERE account_id=$1 OR to_account_id=$1",[account]));
+ let application;
+ await t.test('application and block are memo records, never bank debits',async()=>{
+  application=await createApp(); await command('block',{application_id:application,date:'2026-01-02',amount:10000});
+  assert.equal(await ledger(bank),0); assert.equal(Number((await row('ipo_applications',application)).blocked),10000);
+ });
+ let investment;
+ await t.test('partial allotment posts exactly one debit and one linked investment',async()=>{
+  const input={application_id:application,date:'2026-01-03',shares:60,purchase_charges:10,result:'partial'}, key=randomUUID();
+  const [a,b]=await Promise.all([command('allot',input,key),command('allot',input,key)]); assert.deepEqual(a,b);
+  assert.equal(await ledger(bank),-6010); investment=await scalar('SELECT investment_id FROM public.ipo_allotments WHERE application_id=$1',[application]);
+  assert.equal(Number((await row('investments',investment)).principal_amount),6010);
+  await assert.rejects(command('allot',input),/already has/);
+  await assert.rejects(command('allot',{...input,shares:20},key),/different details/);
+  await command('unblock',{application_id:application,date:'2026-01-03',amount:4000}); assert.equal(await ledger(bank),-6010);
+  await assert.rejects(command('refund',{application_id:application,date:'2026-01-03',amount:4000,account_id:bank}),/prepaid/);
+ });
+ let firstSale,secondSale;
+ await t.test('partial and final sales allocate charges exactly and realise only sale profits',async()=>{
+  firstSale=(await command('sale',{application_id:application,date:'2026-01-04',shares:20,price:120,charges:5})).id;
+  let s=await row('ipo_sales',firstSale); assert.equal(Number(s.cost_basis),2003.33); assert.equal(Number(s.profit),391.67);
+  assert.equal((await row('investments',investment)).status,'active'); assert.equal(await ledger(bank),-6010);
+  const balances=await scalar('SELECT public.ipo_finance_links($1)',[owner]);
+  assert.equal(Number(balances.balances.invested),4006.67);assert.equal(Number(balances.balances.awaiting_receipt),2395);
+  secondSale=(await command('sale',{application_id:application,date:'2026-01-05',shares:40,price:80,charges:5})).id;
+  s=await row('ipo_sales',secondSale); assert.equal(Number(s.cost_basis),4006.67); assert.equal(Number(s.profit),-811.67);
+  const i=await row('investments',investment); assert.equal(i.status,'settled'); assert.equal(Number(i.final_amount),5590); assert.equal(Number(i.profit_amount),-420);
+  await assert.rejects(command('sale',{application_id:application,date:'2026-01-05',shares:1,price:100}),/remaining shares/);
+ });
+ await t.test('proceeds received by friend and partial repayments do not realise profit twice',async()=>{
+  await command('receipt',{sale_id:firstSale,date:'2026-01-06',amount:2395,destination:'friend'});
+  await command('repay',{applicant_id:person,account_id:bank,date:'2026-01-07',amount:1000});
+  assert.equal(await ledger(bank),-5010); assert.equal(Number((await row('investments',investment)).profit_amount),-420);
+  await assert.rejects(command('receipt',{sale_id:firstSale,date:'2026-01-07',amount:1,destination:'bank',account_id:bank}),/exceeds/);
+  await assert.rejects(command('repay',{applicant_id:person,account_id:bank,date:'2026-01-07',amount:2000}),/exceeds/);
+  await command('receipt',{sale_id:secondSale,date:'2026-01-07',amount:3195,destination:'bank',account_id:bank});
+  assert.equal(await ledger(bank),-1815);
+ });
+ await t.test('pooled friend funding can fund multiple applications without duplicate outflows',async()=>{
+  await command('fund_friend',{applicant_id:person,account_id:bank,company_id:company,date:'2026-01-08',amount:20000});
+  const a=await createApp('friend'), b=await createApp('friend');
+  await command('block',{application_id:a,date:'2026-01-08',amount:10000}); await command('block',{application_id:b,date:'2026-01-08',amount:10000});
+  const before=await ledger(bank);
+  await command('allot',{application_id:a,date:'2026-01-09',shares:100,result:'full'});
+  await command('allot',{application_id:b,date:'2026-01-09',shares:0,result:'none'});
+  assert.equal(await ledger(bank),before);
+  await command('unblock',{application_id:b,date:'2026-01-09',amount:10000});
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_allotments WHERE investment_id IS NOT NULL AND NOT voided')),2);
+ });
+ await t.test('actual prepayment refunds, correction history and rollback',async()=>{
+  const a=await createApp(); const before=await ledger(bank);
+  await command('prepay',{application_id:a,date:'2026-01-10',amount:10000});
+  await command('allot',{application_id:a,date:'2026-01-11',shares:0,result:'rejected'});
+  const refund=await command('refund',{application_id:a,date:'2026-01-12',amount:8000,account_id:bank});
+  assert.equal(await ledger(bank),before-2000);
+  await command('reverse',{event_id:refund.event_id,date:'2026-01-12',reason:'Incorrect amount'});
+  assert.equal(await ledger(bank),before-10000); assert.equal(Number((await row('ipo_applications',a)).refund_due),10000);
+  await command('refund',{application_id:a,date:'2026-01-12',amount:10000,account_id:bank}); assert.equal(await ledger(bank),before);
+  const count=await scalar('SELECT count(*) FROM public.ipo_events');
+  await assert.rejects(command('allot',{application_id:randomUUID(),date:'2026-01-13',shares:50,result:'partial'}),/unavailable/);
+  assert.equal(await scalar('SELECT count(*) FROM public.ipo_events'),count);
+ });
+ await t.test('ownership, backend write protection, session expiry and private reads',async()=>{
+  const links=await scalar('SELECT public.ipo_finance_links($1)',[owner]);
+  assert.equal(Number(links.balances.invested),10000);assert.equal(Number(links.balances.applicant_custody),11395);
+  assert.ok(links.investments.some(i=>i.id===investment));assert.ok(links.memos.some(m=>m.application_id===application));
+  const dashboard=await scalar('SELECT public.ipo_dashboard()');assert.equal(dashboard.companies.length,1);
+  await db.query("SELECT set_config('ipo.write','on',false)");
+  await assert.rejects(db.query("UPDATE public.transactions SET amount=1 WHERE investment_id=$1",[investment]),/managed by IPO/);
+  await assert.rejects(db.query('SELECT public.delete_investment($1)',[investment]),/managed by IPO/);
+  await assert.rejects(db.query('INSERT INTO public.ipo_write_context VALUES(txid_current(),auth.uid())'),/permission denied/);
+  await db.query("SELECT set_config('ipo.write','',false)");
+  await assert.rejects(db.query('SELECT public.delete_investment($1)',[investment]),/managed by IPO/);
+  await assert.rejects(command('company',{name:'Invalid price',classification:'Mainboard',issue_price:'NaN',lot_size:1,minimum_lots:1}),/finite/);
+  await db.query("UPDATE public.accounts SET name='Renamed bank' WHERE id=$1",[bank]);
+  await command('applicant',{id:person,name:'Renamed applicant',designation:'friend',archived:true});
+  const updated=await scalar('SELECT public.ipo_finance_links($1)',[owner]);assert.ok(updated.investments.some(i=>i.name.includes('Renamed applicant')));
+  const custody=await scalar("SELECT account_id FROM public.ipo_cash_accounts WHERE applicant_id=$1",[person]);
+  assert.ok((await row('accounts',custody)).name.includes('Renamed applic'));
+  await assert.rejects(db.query('SELECT public.record_investment_withdrawal($1,1,$2)',[updated.investments.find(i=>!i.voided&&i.remaining_shares>0).id,'2026-01-14']),/managed by IPO/);
+  await assert.rejects(db.query("INSERT INTO public.ipo_applicants(user_id,name,designation) VALUES($1,'Bypass','self')",[owner]),/permission denied/);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:other,session_id:session})]);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_applications')),0);
+  await assert.rejects(command('applicant',{name:'No session',designation:'self'}),/session/);
+  await db.exec('RESET ROLE');
+  await db.query("INSERT INTO public.workspace_members(owner_id,member_id,role) VALUES($1,$2,'editor')",[owner,other]);
+  await db.query("INSERT INTO public.account_shares(account_id,owner_id,member_id,role) VALUES($1,$2,$3,'editor')",[bank,owner,other]);
+  await assert.rejects(db.query("INSERT INTO public.account_shares(account_id,owner_id,member_id,role) VALUES($1,$2,$3,'editor')",[custody,owner,other]),/managed by IPO/);
+  await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)',[randomUUID(),other]);
+  const otherSession=await scalar('SELECT id FROM auth.sessions WHERE user_id=$1',[other]);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:other,session_id:otherSession})]);
+  await db.exec('SELECT public.activate_current_single_device_session(); SET ROLE authenticated;');
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events')),0);
+  await assert.rejects(command('block',{application_id:application,date:'2026-01-02',amount:1}),/unavailable/);
+  assert.deepEqual(await scalar('SELECT public.ipo_finance_links($1)',[owner]),{});
+  await db.exec('RESET ROLE');await db.query('INSERT INTO public.platform_administrators(user_id) VALUES($1)',[other]);await db.exec('SET ROLE authenticated');
+  await assert.rejects(scalar('SELECT public.ipo_dashboard()'),/private owner workspace/);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_applicants')),0);
+ });
+ await t.test('backdated custody movements and pre-opening bank entries roll back',async()=>{
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
+  const p=(await command('applicant',{name:'Date check',designation:'friend'})).id;
+  await command('fund_friend',{applicant_id:p,account_id:bank,date:'2026-01-20',amount:100});
+  const before=await ledger(bank);
+  await assert.rejects(command('repay',{applicant_id:p,account_id:bank,date:'2026-01-19',amount:50}),/negative/);
+  await assert.rejects(command('fund_friend',{applicant_id:p,account_id:bank,date:'2025-12-31',amount:50}),/opening balance date/);
+  assert.equal(await ledger(bank),before);
+ });
+ await t.test('application correction, audit history and one-to-one requests',async()=>{
+  await command('company',{id:company,name:'Example IPO',classification:'Mainboard',issue_price:100,lot_size:100,minimum_lots:1,dates:{actual_allotment:'2026-01-03',actual_listing:'2026-01-04'}});
+  assert.equal((await row('ipo_companies',company)).dates.actual_allotment,'2026-01-03');
+  await assert.rejects(command('company',{name:'Bad dates',classification:'SME',issue_price:1,lot_size:1,minimum_lots:1,dates:{opening:'2026-02-01',closing:'2026-01-01'}}),/Closing date/);
+  const p=(await command('applicant',{name:'Correction',designation:'self'})).id;
+  const da=(await command('demat',{applicant_id:p,nickname:'Another demat'})).id;
+  const a=await createApp('direct',{applicant_account_id:da});
+  await command('edit_application',{application_id:a,company_id:company,applicant_account_id:da,date:'2026-01-02',lots:2,lot_size:100,issue_price:100,adjustment:-10,adjustment_reason:'Recorded discount',funding_method:'direct',account_id:bank});
+  assert.equal(Number((await row('ipo_applications',a)).amount),19990);
+  await command('block',{application_id:a,date:'2026-01-02',amount:100});
+  await assert.rejects(command('edit_application',{application_id:a,company_id:company,applicant_account_id:da,date:'2026-01-02',lots:1,lot_size:100,issue_price:100,funding_method:'direct',account_id:bank}),/Release funds/);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.audit_events WHERE entity_table='ipo_events'")),Number(await scalar('SELECT count(*) FROM public.ipo_events')));
+  await db.exec('RESET ROLE');assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_write_context')),0);await db.exec('SET ROLE authenticated');
+ });
+ await t.test('ordinary investment workflow and corrections remain independent',async()=>{
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
+  const profile=(await command('applicant',{name:'Self',designation:'self'})).id;
+  const account=(await command('demat',{applicant_id:profile,nickname:'Personal'})).id;
+  const a=await createApp('direct',{applicant_account_id:account,lot_size:3,issue_price:33.33});
+  const allot=await command('allot',{application_id:a,shares:3,result:'full',purchase_charges:0.01,date:'2026-01-13'});
+  const sale=await command('sale',{application_id:a,shares:3,price:0,charges:0,date:'2026-01-14'});
+  const zero=await scalar('SELECT profit FROM public.ipo_sales WHERE id=$1',[sale.id]);assert.equal(Number(zero),-100);
+  await command('reverse',{event_id:sale.event_id,reason:'Wrong sale',date:'2026-01-14'});
+  await command('reverse',{event_id:allot.event_id,reason:'Wrong allotment',date:'2026-01-14'});
+  const before=await scalar('SELECT count(*) FROM public.investments');
+  await command('allot',{application_id:a,shares:0,result:'cancelled',date:'2026-01-14'});
+  assert.equal(await scalar('SELECT count(*) FROM public.investments'),before);
+  const type=await scalar("SELECT public.create_investment_type('Private')");
+  const ordinary=await scalar('SELECT public.record_investment($1,$2,$3,$4,$5,$6)',['Business',type,'',bank,500,'2026-01-15']);
+  assert.equal(Number((await row('investments',ordinary)).principal_amount),500);
+  await db.query('SELECT public.record_investment_withdrawal($1,$2,$3)',[ordinary,100,'2026-01-16']);
+  await db.query('SELECT public.settle_investment($1,$2,$3)',[ordinary,500,'2026-01-17']);
+  assert.equal(Number((await row('investments',ordinary)).profit_amount),100);
+ });
+ await t.test('manual verification queries run against the complete schema',async()=>{
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL('../docs/IPO-VERIFY.sql',import.meta.url),'utf8'));
+  await db.exec('SET ROLE authenticated');
+ });
+ await t.test('existing intentional account deletion also removes private IPO records',async()=>{
+  await db.query('SELECT public.delete_my_finance_account()');
+  await db.exec('RESET ROLE');
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events WHERE user_id=$1',[owner])),0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM auth.users WHERE id=$1',[owner])),0);
+ });
+});

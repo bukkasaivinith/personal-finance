@@ -21,6 +21,7 @@ import {
   isUsable,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
+import { loadIpoLinks } from '@/lib/ipo-api';
 
 export type ItemTable = 'transaction_types' | 'categories' | 'accounts';
 
@@ -120,7 +121,7 @@ function statusOf(row: StatusRow) {
 }
 
 export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
@@ -151,6 +152,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
       .order('invested_on', { ascending: false }),
     supabase.from('investment_types').select('id, name').eq('user_id', workspaceOwnerId).order('name', { ascending: true }),
     supabase.from('investment_withdrawals').select('investment_id, amount_received, capital_return, profit_amount').eq('user_id', workspaceOwnerId),
+    loadIpoLinks(workspaceOwnerId),
   ]);
 
   for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
@@ -187,6 +189,8 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
   }));
 
   const accounts: Account[] = accountRows.map((row) => ({
+    ipoCustody: ipoLinks.accounts?.find(a => a.id === row.id)?.custody,
+    ipoBlocked: ipoLinks.accounts?.find(a => a.id === row.id)?.blocked ?? 0,
     id: row.id,
     name: row.name,
     description: row.description ?? '',
@@ -297,7 +301,12 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
   }));
   const investmentTypes: InvestmentType[] = investmentTypeRows.map((row) => ({ id: row.id, name: row.name }));
 
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes };
+  const ipoByInvestment = new Map((ipoLinks.investments ?? []).map(link => [link.id, link]));
+  const linkedInvestments = investments.filter(i => !ipoByInvestment.get(i.id)?.voided).map(i => {
+    const link = ipoByInvestment.get(i.id);
+    return link ? { ...i, name: link.name, ipoApplicationId: link.application_id, ipoRemainingShares: link.remaining_shares, withdrawnCapital: Number(link.sold_cost), withdrawnProfit: Number(link.profit), withdrawnTotal: Number(link.proceeds) } : i;
+  });
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments: linkedInvestments, investmentTypes, ipoMemos: ipoLinks.memos ?? [], ipoBalances: ipoLinks.balances };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {
