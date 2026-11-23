@@ -89,7 +89,7 @@ test('unknown image headers and truncated files are rejected', () => {
 });
 
 test('too many uploads are rejected before loading OCR worker', async () => {
-  await assert.rejects(readAthleteScreenshots(Array.from({ length: screenshotLimits.files + 1 }, () => ({}))), /up to 8/);
+  await assert.rejects(readAthleteScreenshots(Array.from({ length: screenshotLimits.files + 1 }, () => ({}))), /up to 16/);
 });
 
 test('already-cancelled recognition does not initialize a worker', async () => {

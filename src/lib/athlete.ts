@@ -54,12 +54,15 @@ export type VoiceAthleteRoute = {
   goal: Partial<AthleteGoalDraft>;
 };
 
+export type RecoveryMetrics = Partial<Record<'hrv' | 'restingHeartRate' | 'sleepMinutes' | 'sleepPerformance' | 'respiratoryRate' | 'strain' | 'energy' | 'fatigue' | 'soreness' | 'sleepQuality' | 'mood' | 'wellness' | 'discomfort', number>>;
+
 export type RecoveryScore = {
   id: string;
   recoveryDate: string;
   score: number;
   notes: string;
   source: 'manual' | 'whoop';
+  metrics?: RecoveryMetrics;
 };
 
 export type Race = {

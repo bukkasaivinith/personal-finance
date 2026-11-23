@@ -7,7 +7,7 @@ import { GoalsView, RecurringView, SettingsView } from '@/components/planning-vi
 import { SavingsView } from '@/components/savings-view';
 import { InvestmentsView } from '@/components/investments-view';
 import { IpoPortfolio } from '@/components/ipo-portfolio';
-import { AthleteHub } from '@/components/athlete-hub';
+import { AthleteHub, AthletePreferencesButton } from '@/components/athlete-hub';
 import { loadAthleteHubData } from '@/lib/athlete-api';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
@@ -331,7 +331,7 @@ export default function App() {
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':
-        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} />;
+        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} athletePreferences={<AthletePreferencesButton onNotify={showToast} />} />;
     }
   };
 

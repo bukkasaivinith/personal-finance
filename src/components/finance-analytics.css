@@ -1,0 +1,12 @@
+.finance-analytics-filters { width: 100%; }
+.finance-drilldown { display: flex; justify-content: space-between; gap: 1rem; width: 100%; padding: 0.65rem 0; text-align: left; }
+.finance-drilldown[aria-pressed="true"] { font-weight: 700; }
+.finance-export-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.finance-analytics-table { width: 100%; border-collapse: collapse; }
+.finance-analytics-table td, .finance-analytics-table th { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--line); text-align: left; }
+.finance-analytics-table td:last-child, .finance-analytics-table th:last-child { text-align: right; }
+.finance-analytics-table td:nth-child(2) { white-space: normal; min-width: 8rem; }
+@media (max-width: 760px) {
+  .finance-analytics-filters > label { grid-column: span 1; }
+  .analytics-tabs { flex-wrap: wrap; }
+}

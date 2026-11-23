@@ -1,4 +1,5 @@
 import type { AthleteActivity, AthleteHubData, RecoveryScore } from './athlete';
+import { runningKinds } from './athlete-workout';
 
 export type AnalysisBucket = { key: string; label: string; start: string; end: string; distanceMeters: number; activities: AthleteActivity[]; recovery: RecoveryScore[]; averageRecovery: number | null };
 export type AnalysisPeriod = 'weeks' | 'months' | 'custom';
@@ -11,7 +12,6 @@ const shiftDays = (key: string, days: number) => { const date = utcDate(key); da
 const shiftMonths = (key: string, months: number) => { const date = utcDate(key); date.setUTCDate(1); date.setUTCMonth(date.getUTCMonth() + months); return keyOf(date); };
 const weekStart = (key: string) => shiftDays(key, -(utcDate(key).getUTCDay() + 6) % 7);
 const monthStart = (key: string) => `${key.slice(0, 7)}-01`;
-const runKinds = new Set(['run', 'treadmill', 'race']);
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
 export function analysisRange(period: AnalysisPeriod, today: string, customStart: string, customEnd: string): { start: string; end: string; unit: BucketUnit } {
@@ -25,7 +25,7 @@ export function analysisRange(period: AnalysisPeriod, today: string, customStart
 
 export function buildAthleteAnalysis(data: AthleteHubData, start: string, end: string, unit: BucketUnit) {
   const activities = data.activities.filter((item) => item.activityDate >= start && item.activityDate <= end);
-  const runs = activities.filter((item) => runKinds.has(item.kind));
+  const runs = activities.filter((item) => runningKinds.has(item.kind));
   const recovery = data.recoveryScores.filter((item) => item.recoveryDate >= start && item.recoveryDate <= end);
   const buckets: AnalysisBucket[] = [];
   let cursor = unit === 'week' ? weekStart(start) : unit === 'month' ? monthStart(start) : start;
@@ -45,8 +45,14 @@ export function buildAthleteAnalysis(data: AthleteHubData, start: string, end: s
   const timedRuns = runs.filter((item) => (item.distanceMeters ?? 0) > 0 && (item.durationSeconds ?? 0) > 0);
   const distanceWithTime = timedRuns.reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0);
   const secondsWithDistance = timedRuns.reduce((sum, item) => sum + (item.durationSeconds ?? 0), 0);
+  const rollingDistance = (days: number) => data.activities.filter((item) => runningKinds.has(item.kind) && item.activityDate >= shiftDays(end, 1 - days) && item.activityDate <= end)
+    .reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0);
   return {
     activities, runs, recovery, buckets,
+    rolling7Meters: rollingDistance(7),
+    rolling28Meters: rollingDistance(28),
+    averageCadence: average(runs.flatMap((item) => typeof item.cadence === 'number' ? [item.cadence] : [])),
+    totalElevation: runs.reduce((sum, item) => sum + (item.elevationMeters ?? 0), 0),
     totalDistanceMeters: runs.reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0),
     movingSeconds: runs.reduce((sum, item) => sum + (item.durationSeconds ?? 0), 0),
     paceDistanceMeters: distanceWithTime,
