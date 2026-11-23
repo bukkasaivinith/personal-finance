@@ -7,6 +7,7 @@ import { IpoResultForm } from '@/components/ipo-result-form';
 import { Select } from '@/components/select';
 import { EmptyPanel, Metric } from '@/components/ui';
 import { formatDate, formatMoney, todayKey, type Account } from '@/lib/finance';
+import { ipoLotPricePaise } from '@/lib/ipo-lot-allocations';
 import { formatDematAccount, loadIpoPortfolio, removeIpoApplication, type IpoApplication, type IpoPortfolioData } from '@/lib/ipo-portfolio-api';
 import { defaultIpoCustomRange, ipoPortfolioRange, summarizeIpoPortfolio, type IpoPortfolioPeriod } from '@/lib/ipo-portfolio-summary';
 import './ipo-portfolio.css';
@@ -38,6 +39,7 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
           <tbody>
             {applications.map((application) => {
               const holder = formatDematAccount(application.holder, application.demat, application.broker);
+              const hasResult = application.not_allotted || application.realized_profit_loss != null || application.present_total_value != null;
               return (
                 <tr key={application.id}>
                   <td><b>{application.company}</b></td>
@@ -46,17 +48,20 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
                   <td>{application.allotment_date ? formatDate(application.allotment_date) : '—'}</td>
                   <td>{application.listing_date ? formatDate(application.listing_date) : '—'}</td>
                   <td className="amount-column">{formatMoney(application.amount)}</td>
-                  <td>
+                  <td>{application.not_allotted ? <>
+                    <strong>Not allotted</strong>
+                    <div className="ipo-application-detail">{formatMoney(ipoLotPricePaise(application.issue_price, application.lot_size) / 100)} per lot</div>
+                  </> : <>
                     {application.realized_profit_loss != null ? <ProfitLoss value={application.realized_profit_loss} /> : null}
                     {application.present_total_value != null ? <div className="ipo-application-detail">{formatMoney(application.present_total_value)} present value</div> : null}
                     {application.invested_amount != null ? <div className="ipo-application-detail">{formatMoney(application.invested_amount)} invested</div> : null}
-                    {application.realized_profit_loss == null && application.invested_amount == null && application.present_total_value == null ? '—' : null}
-                  </td>
+                    {!hasResult && application.invested_amount == null ? '—' : null}
+                  </>}</td>
                   <td>
                     {application.can_change === false ? <span className="ipo-application-detail">Linked activity</span> : (
                       <div className="ipo-application-actions">
                         <button type="button" className="ghost-button" onClick={() => onRecordResult(application)} disabled={Boolean(deleting)}>
-                          {application.realized_profit_loss == null && application.present_total_value == null ? 'Record result' : 'Edit result'}
+                          {hasResult ? 'Edit result' : 'Record result'}
                         </button>
                         <button type="button" className="ghost-button" onClick={() => onEdit(application)} disabled={Boolean(deleting)}
                           aria-label={`Edit ${application.company} application for ${holder}`}><Pencil size={15} /> Edit</button>
@@ -235,9 +240,9 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
           demats={data.demat_accounts} onManageDemats={() => { closeForm(); onManageDemats(); }} onClose={closeForm} onSave={saved} />
       ) : null}
       {recordingResult && section === 'portfolio' ? (
-        <IpoResultForm key={recordingResult.id} application={recordingResult} onClose={() => setRecordingResult(undefined)} onSaved={(profitLoss, presentTotalValue) => {
+        <IpoResultForm key={recordingResult.id} application={recordingResult} onClose={() => setRecordingResult(undefined)} onSaved={(result) => {
           setData((current) => current && ({ ...current, applications: current.applications.map((application) => application.id === recordingResult.id
-            ? { ...application, realized_profit_loss: profitLoss, present_total_value: presentTotalValue }
+            ? { ...application, ...result }
             : application) }));
           setRecordingResult(undefined);
           onNotify('IPO result saved.');
