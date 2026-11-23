@@ -60,7 +60,7 @@ function NavigationGroup({
   activeView: View;
   onSelect: (view: View) => void;
 }) {
-  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments' : activeView;
+  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-analysis' || activeView === 'ipo-demats' ? 'investments' : activeView;
   return (
     <div className="nav-group">
       <span className="nav-label">{label}</span>
@@ -85,7 +85,8 @@ export default function App() {
   const profile = useCurrentFinanceProfile();
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
-  const isIpoPortfolio = activeView === 'ipo-portfolio';
+  const isIpoAnalysis = activeView === 'ipo-analysis';
+  const isIpoApplicationPage = activeView === 'ipo-portfolio' || isIpoAnalysis;
   const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
   const finance = useFinanceData(activeOwnerId);
@@ -310,15 +311,17 @@ export default function App() {
       case 'investments':
         return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onOpenIpo={() => navigate('ipo-portfolio')} />;
       case 'ipo-portfolio':
+      case 'ipo-analysis':
       case 'ipo-demats':
         return (
           <IpoPortfolio
             accounts={usableAccounts}
             ownerName={displayName}
-            managingDemats={isIpoDemats}
+            section={isIpoDemats ? 'demats' : isIpoAnalysis ? 'analysis' : 'portfolio'}
             adding={isIpoDemats ? modal === 'ipo-demat' : modal === 'ipo'}
             onClose={closeModal}
-            onBack={() => navigate(isIpoDemats ? 'ipo-portfolio' : 'investments')}
+            onBack={() => navigate(isIpoDemats || isIpoAnalysis ? 'ipo-portfolio' : 'investments')}
+            onOpenAnalysis={() => navigate('ipo-analysis')}
             onManageDemats={() => navigate('ipo-demats')}
             onNotify={showToast}
           />
@@ -379,11 +382,11 @@ export default function App() {
           </div>
           {activeView !== 'transactions' && activeView !== 'athlete' ? (
             <div className="top-actions">
-              <button className={`primary-button header-action${isIpoPortfolio ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoPortfolio ? 'ipo' : isIpoDemats ? 'ipo-demat' : 'transaction')}>
+              <button className={`primary-button header-action${isIpoApplicationPage ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoApplicationPage ? 'ipo' : isIpoDemats ? 'ipo-demat' : 'transaction')}>
                 <span className="header-action-icon" aria-hidden="true">
                   <Plus size={15} strokeWidth={2} />
                 </span>
-                <span>{isIpoPortfolio ? 'Add IPO' : isIpoDemats ? 'Add new account' : 'Add transaction'}</span>
+                <span>{isIpoApplicationPage ? 'Add IPO' : isIpoDemats ? 'Add new account' : 'Add transaction'}</span>
               </button>
             </div>
           ) : null}

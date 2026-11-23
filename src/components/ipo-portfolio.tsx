@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Building2, FileText, Users, Wallet } from 'lucide-react';
+import { ArrowLeft, BarChart3, Building2, FileText, Users, Wallet } from 'lucide-react';
 import { AddIpoForm } from '@/components/add-ipo-form';
 import { IpoDematAccounts } from '@/components/ipo-demat-accounts';
 import { EmptyPanel, Metric } from '@/components/ui';
@@ -7,13 +7,48 @@ import { formatDate, formatMoney, type Account } from '@/lib/finance';
 import { formatDematAccount, loadIpoPortfolio, type IpoPortfolioData } from '@/lib/ipo-portfolio-api';
 import './ipo-portfolio.css';
 
-export function IpoPortfolio({ accounts, ownerName, managingDemats, adding, onClose, onBack, onManageDemats, onNotify }: {
+function IpoAnalysis({ applications }: { applications: IpoPortfolioData['applications'] }) {
+  const byDemat = new Map<string, { label: string; applications: number; lots: number; amountPaise: number }>();
+  for (const application of applications) {
+    const label = formatDematAccount(application.holder, application.demat, application.broker);
+    const key = application.demat_account_id ?? label;
+    const totals = byDemat.get(key) ?? { label, applications: 0, lots: 0, amountPaise: 0 };
+    totals.applications += 1;
+    totals.lots += application.lots;
+    totals.amountPaise += Math.round(application.amount * 100);
+    byDemat.set(key, totals);
+  }
+  const rows = [...byDemat.entries()].sort(([, first], [, second]) => second.amountPaise - first.amountPaise || first.label.localeCompare(second.label));
+  return (
+    <section className="surface-card" aria-labelledby="ipo-analysis-title">
+      <div className="card-title-row"><h3 id="ipo-analysis-title">Applications by demat account</h3></div>
+      {rows.length ? <div className="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Demat account</th><th scope="col">Applications</th><th scope="col">Lots applied</th><th scope="col" className="amount-column">Applied amount</th></tr></thead>
+          <tbody>
+            {rows.map(([id, row]) => (
+              <tr key={id}>
+                <td><b>{row.label}</b></td>
+                <td>{row.applications}</td>
+                <td>{row.lots}</td>
+                <td className="amount-column">{formatMoney(row.amountPaise / 100)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div> : <EmptyPanel icon={<BarChart3 size={20} />} title="No IPO applications yet" description="Record an IPO application to see its account breakdown here." />}
+    </section>
+  );
+}
+
+export function IpoPortfolio({ accounts, ownerName, section, adding, onClose, onBack, onOpenAnalysis, onManageDemats, onNotify }: {
   accounts: Account[];
   ownerName: string;
-  managingDemats: boolean;
+  section: 'portfolio' | 'analysis' | 'demats';
   adding: boolean;
   onClose: () => void;
   onBack: () => void;
+  onOpenAnalysis: () => void;
   onManageDemats: () => void;
   onNotify: (message: string) => void;
 }) {
@@ -41,8 +76,11 @@ export function IpoPortfolio({ accounts, ownerName, managingDemats, adding, onCl
   return (
     <>
       <nav className="ipo-subpage-actions" aria-label="IPO pages">
-        <button type="button" className="text-button" onClick={onBack}><ArrowLeft size={15} /> {managingDemats ? 'Back to portfolio' : 'Back to investments'}</button>
-        {!managingDemats ? <button type="button" className="secondary-button" onClick={onManageDemats}><Users size={15} /> Demat account holders</button> : null}
+        <button type="button" className="text-button" onClick={onBack}><ArrowLeft size={15} /> {section === 'portfolio' ? 'Back to investments' : 'Back to portfolio'}</button>
+        {section === 'portfolio' ? <>
+          <button type="button" className="secondary-button" onClick={onOpenAnalysis}><BarChart3 size={15} /> Analysis</button>
+          <button type="button" className="secondary-button" onClick={onManageDemats}><Users size={15} /> Demat account holders</button>
+        </> : null}
       </nav>
       {error || !data ? (
         <div className="surface-card">
@@ -50,8 +88,10 @@ export function IpoPortfolio({ accounts, ownerName, managingDemats, adding, onCl
             action={error ? <button className="secondary-button" type="button" onClick={() => void refresh()}>Try again</button> : undefined}
           />
         </div>
-      ) : managingDemats ? (
+      ) : section === 'demats' ? (
         <IpoDematAccounts demats={data.demat_accounts} ownerName={ownerName} adding={adding} onClose={onClose} onChanged={refresh} onNotify={onNotify} />
+      ) : section === 'analysis' ? (
+        <IpoAnalysis applications={applications} />
       ) : (
         <>
           <div className="metrics-grid ipo-portfolio-metrics">
@@ -69,7 +109,7 @@ export function IpoPortfolio({ accounts, ownerName, managingDemats, adding, onCl
                     {applications.map((application) => (
                       <tr key={application.id}>
                         <td><b>{application.company}</b><div className="ipo-application-detail">{formatMoney(application.issue_price)} per share</div></td>
-                        <td>{formatDematAccount(application.holder, application.demat)}</td>
+                        <td>{formatDematAccount(application.holder, application.demat, application.broker)}</td>
                         <td>{formatDate(application.application_date)}</td>
                         <td>{application.listing_date ? formatDate(application.listing_date) : '—'}</td>
                         <td>{application.lots}<div className="ipo-application-detail">{application.lot_size} shares per lot</div></td>
@@ -83,7 +123,7 @@ export function IpoPortfolio({ accounts, ownerName, managingDemats, adding, onCl
           </section>
         </>
       )}
-      {adding && data && !managingDemats ? (
+      {adding && data && section !== 'demats' ? (
         <AddIpoForm accounts={accounts.filter((account) => !account.isLiability)} demats={data.demat_accounts} onManageDemats={onManageDemats} onClose={onClose} onSave={saved} />
       ) : null}
     </>

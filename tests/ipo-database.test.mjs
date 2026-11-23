@@ -21,8 +21,9 @@ test('IPO accounting on the complete application migration history', async (t) =
  const disableIpoMigration = '20261123120000_disable_ipo_feature.sql';
  const portfolioMigration = '20261123130000_ipo_portfolio_applications.sql';
  const dematLotsMigration = '20261123140000_ipo_demat_accounts_and_lots.sql';
+ const editDematMigration = '20261123150000_ipo_demat_edit_and_broker_apps.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration].includes(name)) continue; // Test each upgrade with existing data.
+  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -384,6 +385,53 @@ test('IPO accounting on the complete application migration history', async (t) =
   await assert.rejects(add('Wrong owner', ''), /session|workspace owner/i);
   await assert.rejects(remove(first), /session|workspace owner/i);
   await assert.rejects(save(allocations, 3), /session|workspace owner/i);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('broker apps distinguish demat accounts and edits preserve existing applications', async () => {
+  const beforeBalance = await ledger(bank);
+  const before = await scalar('SELECT public.get_ipo_portfolio()');
+  const target = before.demat_accounts.find((account) => account.holder === 'First holder');
+  const sibling = await scalar('SELECT public.save_ipo_demat_account($1,$2,$3)', [target.holder, 'Backup', 'self']);
+  const original = await row('ipo_applicant_accounts', target.id);
+  const previousApplication = before.applications.find((entry) => entry.company === 'Split lot IPO' && entry.holder === target.holder);
+
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(editDematMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const edit = (id, holder, nickname, designation, broker = '') =>
+   scalar('SELECT public.update_ipo_demat_account($1,$2,$3,$4,$5)', [id, holder, nickname, designation, broker]);
+  const addWithBroker = (holder, nickname, designation, broker) =>
+   scalar('SELECT public.save_ipo_demat_account($1,$2,$3,$4)', [holder, nickname, designation, broker]);
+  await assert.rejects(edit(target.id, 'Updated holder', 'backup', 'friend'), /already has a demat account/);
+  assert.equal((await row('ipo_applicants', original.applicant_id)).name, target.holder);
+  await assert.rejects(edit(target.id, 'Second holder', 'Updated broker', 'friend'), /already uses that name/);
+  await assert.rejects(edit(randomUUID(), 'Other holder', '', 'friend'), /account unavailable/);
+
+  const kite = await addWithBroker('Broker test holder', '', 'friend', 'Kite');
+  const groww = await addWithBroker('Broker test holder', '', 'friend', 'Groww');
+  assert.notEqual(kite, groww);
+  assert.equal(await addWithBroker('Broker test holder', '', 'friend', 'kite'), kite);
+  await assert.rejects(edit(groww, 'Broker test holder', '', 'friend', 'Kite'), /already has a demat account/);
+
+  await edit(target.id, 'Updated holder', 'Primary demat', 'friend', 'Upstox');
+  const data = await scalar('SELECT public.get_ipo_portfolio()');
+  assert.deepEqual(data.demat_accounts.find((account) => account.id === target.id), {
+   id: target.id, holder: 'Updated holder', demat: 'Primary demat', designation: 'friend', broker: 'Upstox',
+  });
+  assert.equal(data.demat_accounts.find((account) => account.id === sibling).holder, 'Updated holder');
+  assert.equal(data.demat_accounts.find((account) => account.id === kite).broker, 'Kite');
+  assert.equal(data.demat_accounts.find((account) => account.id === groww).broker, 'Groww');
+  const updated = data.applications.find((entry) => entry.id === previousApplication.id);
+  assert.equal(updated.demat, 'Primary demat');
+  assert.equal(updated.broker, 'Upstox');
+  assert.equal(updated.demat_account_id, target.id);
+  assert.equal(updated.amount, previousApplication.amount);
+  assert.equal((await row('ipo_applications', updated.id)).applicant_account_id, target.id);
+  assert.equal(await ledger(bank), beforeBalance);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  await assert.rejects(edit(target.id, 'Wrong owner', '', 'friend'), /session|workspace owner/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{

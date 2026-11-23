@@ -22,6 +22,7 @@ export type View =
   | 'recurring'
   | 'investments'
   | 'ipo-portfolio'
+  | 'ipo-analysis'
   | 'ipo-demats'
   | 'athlete'
   | 'setup'
@@ -63,6 +64,7 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   recurring: { title: 'Recurring', eyebrow: 'Repeating income and bills' },
   investments: { title: 'Investments', eyebrow: 'Capital, returns and reinvestment' },
   'ipo-portfolio': { title: 'Portfolio', eyebrow: 'IPO' },
+  'ipo-analysis': { title: 'Analysis', eyebrow: 'IPO portfolio' },
   'ipo-demats': { title: 'Demat account holders', eyebrow: 'IPO' },
   athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },

@@ -185,7 +185,7 @@ export function AddIpoForm({ accounts, demats, onManageDemats, onClose, onSave }
                       <option value="">Choose a demat account</option>
                       {demats.map((demat) => (
                         <option key={demat.id} value={demat.id} disabled={allocations.some((other) => other.id !== item.id && other.dematId === demat.id)}>
-                          {formatDematAccount(demat.holder, demat.demat)}
+                          {formatDematAccount(demat.holder, demat.demat, demat.broker)}
                         </option>
                       ))}
                     </Select>
