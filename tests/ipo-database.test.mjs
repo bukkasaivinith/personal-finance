@@ -23,8 +23,9 @@ test('IPO accounting on the complete application migration history', async (t) =
  const dematLotsMigration = '20261123140000_ipo_demat_accounts_and_lots.sql';
  const editDematMigration = '20261123150000_ipo_demat_edit_and_broker_apps.sql';
  const manageApplicationsMigration = '20261123160000_manage_ipo_applications.sql';
+ const allotmentDateMigration = '20261123180000_ipo_allotment_date.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration].includes(name)) continue; // Test each upgrade with existing data.
+  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration, allotmentDateMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -496,6 +497,48 @@ test('IPO accounting on the complete application migration history', async (t) =
   await assert.rejects(edit(sibling.id, draft), /session|workspace owner/i);
   await assert.rejects(remove(sibling.id), /session|workspace owner/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('allotment dates persist across demat accounts and can be updated or cleared', async () => {
+  const bankBalance = await ledger(bank);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(allotmentDateMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const load = () => scalar('SELECT public.get_ipo_portfolio()');
+  const portfolio = await load();
+  assert.equal(portfolio.allotment_date_supported, true);
+  assert.equal(portfolio.applications.find((entry) => entry.company === 'Corrected listing').allotment_date, null);
+  const [first, second] = portfolio.demat_accounts;
+  const allocations = [{ demat_id: first.id, lots: 1 }, { demat_id: second.id, lots: 1 }];
+  const base = {
+   company_name: 'Dated allotment IPO', classification: 'Mainboard', application_date: '2026-01-23',
+   listing_date: '2099-02-01', issue_price: '100', lot_size: '10', account_id: bank,
+  };
+  const draft = { ...base, allotment_date: '2099-01-26' };
+  const save = (input, key = randomUUID()) => scalar('SELECT public.save_ipo_portfolio_applications($1,$2,$3,$4)',
+   [key, JSON.stringify(input), JSON.stringify(allocations), 2]);
+  const key = randomUUID();
+  await assert.rejects(save({ ...draft, allotment_date: '2026-01-22' }), /allotment date must/);
+  await assert.rejects(save({ ...draft, allotment_date: '2099-02-02' }), /allotment date must/);
+  const ids = await save(draft, key);
+  assert.deepEqual(await save(draft, key), ids);
+  await assert.rejects(save({ ...draft, allotment_date: '2099-01-27' }, key), /already used for different details/);
+  await assert.rejects(save({ ...draft, allotment_date: '2099-01-27' }), /different allotment date/);
+  const readDates = async () => (await load()).applications.filter((entry) => ids.includes(entry.id)).map((entry) => entry.allotment_date);
+  assert.deepEqual(await readDates(), ['2099-01-26', '2099-01-26']);
+
+  const edit = (input, requestId = randomUUID()) => scalar('SELECT public.update_ipo_portfolio_application($1,$2,$3)',
+   [ids[0], requestId, JSON.stringify({ ...input, ...allocations[0] })]);
+  await assert.rejects(edit({ ...draft, listing_date: '2099-01-25' }), /allotment date must/);
+  await edit(base);
+  assert.deepEqual(await readDates(), ['2099-01-26', '2099-01-26']);
+  const editKey = randomUUID();
+  await edit({ ...draft, allotment_date: '2099-01-29' }, editKey);
+  await edit({ ...draft, allotment_date: '2099-01-29' }, editKey);
+  assert.deepEqual(await readDates(), ['2099-01-29', '2099-01-29']);
+  await edit({ ...draft, allotment_date: '' });
+  assert.deepEqual(await readDates(), [null, null]);
+  assert.equal(await ledger(bank), bankBalance);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');

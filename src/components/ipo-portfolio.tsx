@@ -66,7 +66,7 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
       </div>
       {applications.length ? <div className="table-scroll">
         <table>
-          <thead><tr><th scope="col">Company</th><th scope="col">Demat account</th><th scope="col">Applied on</th><th scope="col">Listing date</th><th scope="col" className="amount-column">Applied amount</th><th scope="col" aria-label="Actions" /></tr></thead>
+          <thead><tr><th scope="col">Company</th><th scope="col">Demat account</th><th scope="col">Applied on</th><th scope="col">Allotment date</th><th scope="col">Listing date</th><th scope="col" className="amount-column">Applied amount</th><th scope="col" aria-label="Actions" /></tr></thead>
           <tbody>
             {applications.map((application) => {
               const holder = formatDematAccount(application.holder, application.demat, application.broker);
@@ -75,6 +75,7 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
                   <td><b>{application.company}</b></td>
                   <td>{holder}</td>
                   <td>{formatDate(application.application_date)}</td>
+                  <td>{application.allotment_date ? formatDate(application.allotment_date) : '—'}</td>
                   <td>{application.listing_date ? formatDate(application.listing_date) : '—'}</td>
                   <td className="amount-column">{formatMoney(application.amount)}</td>
                   <td>
@@ -212,7 +213,7 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
           <section className="surface-card" aria-labelledby="ipo-applications-title">
             <div className="card-title-row"><h3 id="ipo-applications-title">IPO applications</h3></div>
             {companies.size ? (
-              <div className="account-list expanded">
+              <div className="account-list">
                 {[...companies.entries()].map(([id, label]) => (
                   <button className="account-row ipo-company-link" type="button" key={id} onClick={() => setDetails({ section: 'portfolio', id, label })}>
                     <span className="account-icon" aria-hidden="true"><Building2 size={17} /></span>
@@ -227,6 +228,7 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
       )}
       {(adding || editing) && data && section !== 'demats' ? (
         <AddIpoForm key={editing?.id ?? 'new'} application={editing} accounts={accounts.filter((account) => !account.isLiability)}
+          allotmentDateSupported={data.allotment_date_supported === true}
           demats={data.demat_accounts} onManageDemats={() => { closeForm(); onManageDemats(); }} onClose={closeForm} onSave={saved} />
       ) : null}
     </>

@@ -13,6 +13,7 @@ export type IpoApplication = {
   company_id: string;
   company: string;
   application_date: string;
+  allotment_date?: string | null;
   listing_date: string | null;
   holder: string;
   demat: string;
@@ -32,12 +33,14 @@ export type IpoApplication = {
 export type IpoPortfolioData = {
   applications: IpoApplication[];
   demat_accounts: IpoDematAccount[];
+  allotment_date_supported?: boolean;
 };
 
 export type IpoApplicationDraft = {
   company_name: string;
   classification: 'Mainboard' | 'SME';
   application_date: string;
+  allotment_date: string;
   listing_date: string;
   issue_price: string;
   lot_size: string;

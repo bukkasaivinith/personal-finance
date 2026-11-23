@@ -17,10 +17,11 @@ function wholeNumber(value: string) {
   return number <= maxShares ? number : 0;
 }
 
-export function AddIpoForm({ accounts, demats, application, onManageDemats, onClose, onSave }: {
+export function AddIpoForm({ accounts, demats, application, allotmentDateSupported, onManageDemats, onClose, onSave }: {
   accounts: Account[];
   demats: IpoDematAccount[];
   application?: IpoApplication;
+  allotmentDateSupported: boolean;
   onManageDemats: () => void;
   onClose: () => void;
   onSave: (applicationCount: number) => void;
@@ -30,6 +31,7 @@ export function AddIpoForm({ accounts, demats, application, onManageDemats, onCl
     company_name: application?.company ?? '',
     classification: application?.classification ?? 'Mainboard',
     application_date: application?.application_date ?? today,
+    allotment_date: application?.allotment_date ?? '',
     listing_date: application?.listing_date ?? '',
     issue_price: application ? String(application.issue_price) : '',
     lot_size: application ? String(application.lot_size) : '',
@@ -101,6 +103,12 @@ export function AddIpoForm({ accounts, demats, application, onManageDemats, onCl
       if (!draft.company_name.trim()) return setError('Enter the company name.');
       if (!draft.application_date || draft.application_date > today) return setError('Choose an application date on or before today.');
       if (draft.listing_date && draft.listing_date < draft.application_date) return setError('The listing date must be on or after the application date.');
+      if (draft.allotment_date) {
+        if (!allotmentDateSupported) return setError('Apply the latest IPO Portfolio SQL update in Supabase to save an allotment date.');
+        if (draft.allotment_date < draft.application_date || (draft.listing_date && draft.allotment_date > draft.listing_date)) {
+          return setError('The allotment date must be on or after the application date and on or before the listing date.');
+        }
+      }
       if (draft.account_id !== savedFunding && !accounts.some((account) => account.id === draft.account_id)) return setError('Choose an active bank or cash account.');
       if (!validAmount) return setError('Enter a valid issue price, shares per lot and whole number of lots.');
       if (!hasDemats) return setError('Add a demat account before assigning lots.');
@@ -143,8 +151,6 @@ export function AddIpoForm({ accounts, demats, application, onManageDemats, onCl
                 <option value="SME">SME</option>
               </Select>
             </label>
-            <DatePicker label="Application date" value={draft.application_date} max={today} onChange={(value) => updateField('application_date', value)} />
-            <DatePicker label="Listing date (optional)" value={draft.listing_date} min={draft.application_date || undefined} onChange={(value) => updateField('listing_date', value)} clearable />
             <label>Funding account
               <Select aria-label="Funding account" value={draft.account_id} onChange={(event) => updateField('account_id', event.target.value)}>
                 <option value="">Choose a bank or cash account</option>
@@ -153,6 +159,9 @@ export function AddIpoForm({ accounts, demats, application, onManageDemats, onCl
                 {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
               </Select>
             </label>
+            <DatePicker label="Application date" value={draft.application_date} max={today} onChange={(value) => updateField('application_date', value)} />
+            <DatePicker label="Allotment date (optional)" value={draft.allotment_date} min={draft.application_date || undefined} max={draft.listing_date || undefined} onChange={(value) => updateField('allotment_date', value)} clearable />
+            <DatePicker label="Listing date (optional)" value={draft.listing_date} min={draft.allotment_date || draft.application_date || undefined} onChange={(value) => updateField('listing_date', value)} clearable />
             <label>Issue price per share (₹)
               <input type="number" min="0.01" step="0.01" inputMode="decimal" value={draft.issue_price} onChange={(event) => updateField('issue_price', event.target.value)} />
             </label>
@@ -195,7 +204,7 @@ export function AddIpoForm({ accounts, demats, application, onManageDemats, onCl
             </div>
           </div>
         )}
-        {application && step === 'details' ? <p className="form-hint">Company name, classification and listing date apply to every application for this IPO listing.</p> : null}
+        {application && step === 'details' ? <p className="form-hint">Company name, classification, allotment date and listing date apply to every application for this IPO.</p> : null}
         {step === 'details' && validAmount ? <div className="ipo-lot-summary" aria-live="polite"><span>{totalShares} shares <b>{formatMoney(lotPaise / 100)} per lot</b></span><span>Total amount applied <b>{formatMoney(totalPaise / 100)}</b></span></div> : null}
         {!hasFunding ? <p className="form-hint">Add a bank or cash account in Accounts to save an application.</p> : null}
         {!hasDemats ? <button type="button" className="text-button ipo-missing-demats" onClick={onManageDemats}>Add a demat account first</button> : null}
