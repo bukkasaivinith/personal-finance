@@ -26,6 +26,24 @@
   inset: calc(100% + 4px) 0 auto;
 }
 
+.account-row.ipo-company-link {
+  width: 100%;
+  text-align: left;
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.account-row.ipo-company-link:hover {
+  background: var(--green-soft);
+}
+
+.ipo-application-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .modal-backdrop:has(.ipo-application-modal) {
   align-items: center;
   overflow: hidden;
@@ -56,7 +74,7 @@
 }
 
 .ipo-details-grid > *,
-.ipo-allocation-row > * {
+.ipo-lot-fields > * {
   min-width: 0;
 }
 
@@ -82,17 +100,33 @@
   gap: 8px;
 }
 
-.ipo-allocation-row {
+.ipo-lot-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(58px, 92px) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  align-items: end;
 }
 
-.ipo-allocation-row .danger {
+.ipo-allocations label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+}
+
+.ipo-allocations .ui-select-trigger {
   background: var(--panel);
-  border-color: var(--line);
-  color: var(--red);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  font-size: 12px;
+  min-height: 39px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.ipo-all-lots {
+  max-width: 360px;
 }
 
 .ipo-allocation-actions,
@@ -143,8 +177,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ipo-allocation-row {
-    grid-template-columns: minmax(0, 1fr) 62px auto;
+  .ipo-lot-fields {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -168,7 +202,6 @@
   }
 
   .ipo-application-modal .form-grid input,
-  .ipo-application-modal .ipo-allocation-row input,
   .ipo-application-modal .date-picker-trigger,
   .ipo-application-modal .ui-select-trigger {
     min-height: 34px;
@@ -182,6 +215,10 @@
 
 @media (max-height: 390px) and (max-width: 560px) {
   .ipo-application-modal .ipo-details-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ipo-lot-fields {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 

@@ -267,6 +267,15 @@ button { cursor: pointer; }
 @media (max-width: 760px) { .athlete-hub { gap: 13px; }.athlete-hub .section-heading { flex-wrap: wrap; }.athlete-hub .heading-actions { width: 100%; }.athlete-hub .heading-actions .primary-button { margin-left: auto; }.athlete-screenshot-button { padding: 9px; }.athlete-screenshot-button:not(:has(svg)) { display: none; }.athlete-toolbar { align-items: flex-start; flex-direction: column; }.athlete-voice-controls { width: 100%; }.athlete-custom-dates { width: 100%; }.athlete-custom-dates .date-picker { flex: 1; min-width: 0; }.athlete-calendar-card { overflow-x: auto; }.athlete-calendar-grid { min-width: 630px; }.athlete-calendar-cell { min-height: 96px; }.athlete-activity-list article { grid-template-columns: auto minmax(0, 1fr); }.athlete-activity-stats { grid-column: 2; justify-content: flex-start; }.athlete-form-grid { grid-template-columns: 1fr; }.athlete-timeline-toolbar { grid-template-columns: 1fr; }.athlete-full-timeline-list article { grid-template-columns: auto minmax(0, 1fr); }.athlete-timeline-date { grid-column: 1 / -1; }.athlete-full-timeline-list .athlete-activity-stats { grid-column: 2; justify-content: flex-start; } }
 
 /* Investment tracking keeps important value data dense but easy to scan. */
+.investment-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.investment-page-switch button { font-size: .875rem; padding: 8px 14px; }
 .investment-insight-card { margin-bottom: 16px; }
 .investment-custom-range { align-items: end; border-top: 1px solid #edf0eb; display: flex; gap: 9px; margin-top: 14px; padding-top: 12px; }.investment-custom-range .date-picker { min-width: 164px; }
 .investment-insight-metrics { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 17px; }

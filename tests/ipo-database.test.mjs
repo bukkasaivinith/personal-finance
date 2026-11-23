@@ -22,8 +22,9 @@ test('IPO accounting on the complete application migration history', async (t) =
  const portfolioMigration = '20261123130000_ipo_portfolio_applications.sql';
  const dematLotsMigration = '20261123140000_ipo_demat_accounts_and_lots.sql';
  const editDematMigration = '20261123150000_ipo_demat_edit_and_broker_apps.sql';
+ const manageApplicationsMigration = '20261123160000_manage_ipo_applications.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration].includes(name)) continue; // Test each upgrade with existing data.
+  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -432,6 +433,68 @@ test('IPO accounting on the complete application migration history', async (t) =
 
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
   await assert.rejects(edit(target.id, 'Wrong owner', '', 'friend'), /session|workspace owner/i);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('application corrections and removals preserve other applications and the ledger', async () => {
+  const bankBalance = await ledger(bank);
+  const count = await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(manageApplicationsMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const data = await scalar('SELECT public.get_ipo_portfolio()');
+  const target = data.applications.find((entry) => entry.company === 'Split lot IPO' && entry.holder === 'Updated holder');
+  const sibling = data.applications.find((entry) => entry.company_id === target.company_id && entry.id !== target.id);
+  const linked = data.applications.find((entry) => entry.can_change === false);
+  assert.ok(target.can_change);
+  assert.equal(target.funding_account_id, bank);
+  assert.ok(linked);
+  const draft = {
+   company_name: 'Corrected listing', classification: 'Mainboard', application_date: '2026-01-21',
+   listing_date: '2099-01-25', issue_price: '272.00', lot_size: '55', lots: 3,
+   demat_id: target.demat_account_id, account_id: bank,
+  };
+  const edit = (id, input, key = randomUUID()) => scalar('SELECT public.update_ipo_portfolio_application($1,$2,$3)', [id, key, JSON.stringify(input)]);
+  const remove = (id) => scalar('SELECT public.archive_ipo_portfolio_application($1)', [id]);
+  await assert.rejects(edit(linked.id, draft), /linked activity/);
+  await assert.rejects(remove(linked.id), /linked activity/);
+  await assert.rejects(edit(target.id, { ...draft, lots: 1.5 }), /valid issue price, shares per lot and number of lots/);
+  await assert.rejects(edit(target.id, { ...draft, listing_date: '2025-12-31' }), /listing date/);
+
+  const key = randomUUID();
+  await edit(target.id, draft, key);
+  await edit(target.id, draft, key);
+  await assert.rejects(edit(target.id, { ...draft, lots: 2 }, key), /already used for different details/);
+  const edited = await scalar('SELECT public.get_ipo_portfolio()');
+  const updated = edited.applications.find((entry) => entry.id === target.id);
+  const siblingAfter = edited.applications.find((entry) => entry.id === sibling.id);
+  assert.equal(updated.company, draft.company_name);
+  assert.equal(updated.listing_date, draft.listing_date);
+  assert.equal(updated.lots, 3);
+  assert.equal(Number(updated.amount), 44880);
+  assert.equal(siblingAfter.company, draft.company_name);
+  assert.equal(siblingAfter.lots, sibling.lots);
+  assert.equal(siblingAfter.amount, sibling.amount);
+  assert.equal((await row('ipo_applicant_accounts', sibling.demat_account_id)).archived, true);
+  await edit(sibling.id, { ...draft, demat_id: sibling.demat_account_id, lots: 2 });
+  const archivedAccountApplication = await row('ipo_applications', sibling.id);
+  assert.equal(archivedAccountApplication.applicant_account_id, sibling.demat_account_id);
+  assert.equal(Number(archivedAccountApplication.amount), 29920);
+
+  await remove(target.id);
+  await remove(target.id);
+  const remaining = await scalar('SELECT public.get_ipo_portfolio()');
+  assert.ok(!remaining.applications.some((entry) => entry.id === target.id));
+  assert.ok(remaining.applications.some((entry) => entry.id === sibling.id));
+  assert.equal((await row('ipo_applications', target.id)).lots, 3);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_events WHERE application_id=$1 AND command='delete_application'", [target.id])), 1);
+  await assert.rejects(edit(target.id, draft), /was deleted/);
+  assert.equal(await ledger(bank), bankBalance);
+  assert.equal(await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]), count);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  await assert.rejects(edit(sibling.id, draft), /session|workspace owner/i);
+  await assert.rejects(remove(sibling.id), /session|workspace owner/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{

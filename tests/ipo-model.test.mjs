@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const financeCompiled = await build({entryPoints:['src/lib/finance.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const { netPosition, signedBalance } = await import(`data:text/javascript;base64,${Buffer.from(financeCompiled.outputFiles[0].text).toString('base64')}`);
+const allocationsCompiled = await build({ entryPoints: ['src/lib/ipo-lot-allocations.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { groupIpoLots } = await import(`data:text/javascript;base64,${Buffer.from(allocationsCompiled.outputFiles[0].text).toString('base64')}`);
+
+test('one holder selection per lot combines repeated accounts for saving', () => {
+ assert.deepEqual(groupIpoLots(3, '', new Map([[0, 'first'], [1, 'second'], [2, 'first']])), [
+  { demat_id: 'first', lots: 2 }, { demat_id: 'second', lots: 1 },
+ ]);
+ assert.deepEqual(groupIpoLots(3, 'first', new Map([[0, ''], [1, 'second'], [3, 'ignored']])), [
+  { demat_id: 'first', lots: 1 }, { demat_id: 'second', lots: 1 },
+ ]);
+});
 
 test('Historical custody postings continue to reconcile outside total assets',()=>{
  const base={openingBalanceDate:'2026-01-01',isLiability:false,isActive:true,deletedAt:null};

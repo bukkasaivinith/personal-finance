@@ -8,7 +8,7 @@ export type IpoDematAccount = {
   designation: 'self' | 'friend';
 };
 
-type IpoApplication = {
+export type IpoApplication = {
   id: string;
   company_id: string;
   company: string;
@@ -18,6 +18,11 @@ type IpoApplication = {
   demat: string;
   broker?: string;
   demat_account_id?: string;
+  funding_account_id?: string;
+  funding_account_name?: string;
+  classification?: 'Mainboard' | 'SME';
+  adjustment?: number;
+  can_change?: boolean;
   issue_price: number;
   amount: number;
   lot_size: number;
@@ -65,6 +70,20 @@ export async function saveIpoApplications(draft: IpoApplicationDraft, allocation
     p_allocations: allocations,
     p_total_lots: totalLots,
   });
+  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+}
+
+export async function updateIpoApplication(id: string, draft: IpoApplicationDraft, allocation: IpoLotAllocation, requestId: string): Promise<void> {
+  const { error } = await supabase.rpc('update_ipo_portfolio_application', {
+    p_application_id: id,
+    p_request_id: requestId,
+    p_draft: { ...draft, ...allocation },
+  });
+  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+}
+
+export async function removeIpoApplication(id: string): Promise<void> {
+  const { error } = await supabase.rpc('archive_ipo_portfolio_application', { p_application_id: id });
   if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
 }
 

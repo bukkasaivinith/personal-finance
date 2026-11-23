@@ -231,6 +231,17 @@ export default function App() {
   };
 
   const renderView = () => {
+    const investmentsSelected = activeView === 'investments';
+    const investmentNavigation = (
+      <nav className="analytics-tabs investment-page-switch" aria-label="Investment pages">
+        <button type="button" className={investmentsSelected ? 'active' : ''} aria-current={investmentsSelected ? 'page' : undefined} onClick={() => navigate('investments')}>
+          Investments
+        </button>
+        <button type="button" className={investmentsSelected ? '' : 'active'} aria-current={investmentsSelected ? undefined : 'page'} onClick={() => navigate('ipo-portfolio')}>
+          IPO
+        </button>
+      </nav>
+    );
     switch (activeView) {
       case 'overview':
         return (
@@ -309,7 +320,7 @@ export default function App() {
           />
         );
       case 'investments':
-        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onOpenIpo={() => navigate('ipo-portfolio')} />;
+        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} navigation={investmentNavigation} />;
       case 'ipo-portfolio':
       case 'ipo-analysis':
       case 'ipo-demats':
@@ -317,10 +328,11 @@ export default function App() {
           <IpoPortfolio
             accounts={usableAccounts}
             ownerName={displayName}
+            navigation={investmentNavigation}
             section={isIpoDemats ? 'demats' : isIpoAnalysis ? 'analysis' : 'portfolio'}
             adding={isIpoDemats ? modal === 'ipo-demat' : modal === 'ipo'}
             onClose={closeModal}
-            onBack={() => navigate(isIpoDemats || isIpoAnalysis ? 'ipo-portfolio' : 'investments')}
+            onBack={() => navigate('ipo-portfolio')}
             onOpenAnalysis={() => navigate('ipo-analysis')}
             onManageDemats={() => navigate('ipo-demats')}
             onNotify={showToast}
