@@ -6,12 +6,14 @@ export function ModalShell({
   title,
   labelId,
   onClose,
+  className,
   children,
 }: {
   eyebrow: string;
   title: string;
   labelId: string;
   onClose: () => void;
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -22,7 +24,7 @@ export function ModalShell({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={labelId}>
+      <div className={className ? `modal ${className}` : 'modal'} role="dialog" aria-modal="true" aria-labelledby={labelId}>
         <div className="modal-heading">
           <div>
             <div className="eyebrow">{eyebrow}</div>

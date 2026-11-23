@@ -33,14 +33,16 @@ export type IpoApplicationDraft = {
   listing_date: string;
   issue_price: string;
   lot_size: string;
-  amount: string;
   account_id: string;
-  demat_id: string;
-  holder_name: string;
-  designation?: 'self' | 'friend';
 };
 
-const setupPending = 'Apply the IPO Portfolio SQL update in Supabase, then try again.';
+export type IpoLotAllocation = { demat_id: string; lots: number };
+
+const setupPending = 'Apply the latest IPO Portfolio SQL update in Supabase, then try again.';
+
+export function formatDematAccount(holder: string, demat: string) {
+  return demat === 'Demat' || demat.toLocaleLowerCase() === holder.toLocaleLowerCase() ? holder : `${holder} / ${demat}`;
+}
 
 export async function loadIpoPortfolio(): Promise<IpoPortfolioData> {
   const { data, error } = await supabase.rpc('get_ipo_portfolio');
@@ -48,10 +50,24 @@ export async function loadIpoPortfolio(): Promise<IpoPortfolioData> {
   return data as IpoPortfolioData;
 }
 
-export async function saveIpoApplication(draft: IpoApplicationDraft, requestId: string): Promise<void> {
-  const { error } = await supabase.rpc('save_ipo_portfolio_application', {
+export async function saveIpoApplications(draft: IpoApplicationDraft, allocations: IpoLotAllocation[], totalLots: number, requestId: string): Promise<void> {
+  const { error } = await supabase.rpc('save_ipo_portfolio_applications', {
     p_request_id: requestId,
     p_draft: draft,
+    p_allocations: allocations,
+    p_total_lots: totalLots,
   });
+  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+}
+
+export async function saveIpoDematAccount(holder: string, nickname: string, designation: IpoDematAccount['designation']): Promise<void> {
+  const { error } = await supabase.rpc('save_ipo_demat_account', {
+    p_holder_name: holder, p_nickname: nickname, p_designation: designation,
+  });
+  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+}
+
+export async function removeIpoDematAccount(id: string): Promise<void> {
+  const { error } = await supabase.rpc('archive_ipo_demat_account', { p_demat_id: id });
   if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
 }

@@ -8,11 +8,106 @@
   background: linear-gradient(160deg, rgb(255 255 255 / 23%), transparent 72%), var(--green);
 }
 
-.ipo-back-button {
-  display: inline-flex;
+.ipo-subpage-actions {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 10px 20px;
   margin-bottom: 16px;
+}
+
+.modal-backdrop:has(.ipo-application-modal) {
+  align-items: center;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.modal.ipo-application-modal {
+  width: min(740px, 100%);
+  padding: clamp(14px, 3vmin, 26px);
+  margin: 0;
+}
+
+.ipo-application-modal .modal-heading {
+  margin-bottom: 14px;
+}
+
+.ipo-application-modal .modal-form,
+.ipo-application-modal .form-grid {
+  gap: 12px;
+}
+
+.ipo-application-modal .ipo-details-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ipo-company-field {
+  grid-column: span 2;
+}
+
+.ipo-details-grid > *,
+.ipo-allocation-row > * {
+  min-width: 0;
+}
+
+.ipo-lot-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  background: var(--green-soft);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ipo-lot-summary b {
+  padding-inline-start: 4px;
+  color: var(--ink);
+}
+
+.ipo-allocations {
+  display: grid;
+  gap: 8px;
+}
+
+.ipo-allocation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(58px, 92px) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.ipo-allocation-row .danger {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--red);
+}
+
+.ipo-allocation-actions,
+.ipo-allocation-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  font-size: 11px;
+}
+
+.ipo-allocation-pages {
+  margin-inline-start: auto;
+}
+
+.ipo-allocation-pages button:disabled {
+  opacity: .45;
+}
+
+.ipo-application-modal .modal-actions {
+  margin-top: 0;
+}
+
+.ipo-missing-demats {
+  justify-self: start;
 }
 
 .metrics-grid.ipo-portfolio-metrics {
@@ -32,5 +127,56 @@
 
   .ipo-portfolio-metrics > :last-child {
     grid-column: 1 / -1;
+  }
+
+  .ipo-application-modal .ipo-details-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ipo-allocation-row {
+    grid-template-columns: minmax(0, 1fr) 62px auto;
+  }
+}
+
+@media (max-height: 520px) {
+  .modal.ipo-application-modal {
+    padding: 12px;
+  }
+
+  .ipo-application-modal .modal-heading {
+    margin-bottom: 6px;
+  }
+
+  .ipo-application-modal .modal-heading h2 {
+    font-size: 22px;
+  }
+
+  .ipo-application-modal .modal-form,
+  .ipo-application-modal .form-grid,
+  .ipo-application-modal .ipo-allocations {
+    gap: 6px;
+  }
+
+  .ipo-application-modal .form-grid input,
+  .ipo-application-modal .ipo-allocation-row input,
+  .ipo-application-modal .date-picker-trigger,
+  .ipo-application-modal .ui-select-trigger {
+    min-height: 34px;
+    padding-block: 5px;
+  }
+
+  .ipo-application-modal .form-error {
+    padding: 6px 8px;
+  }
+}
+
+@media (max-height: 390px) and (max-width: 560px) {
+  .ipo-application-modal .ipo-details-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ipo-application-modal .ipo-details-grid label,
+  .ipo-application-modal .date-picker-label {
+    font-size: 10px;
   }
 }

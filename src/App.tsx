@@ -29,7 +29,7 @@ import {
 import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
 
-type ModalKind = 'transaction' | 'account' | 'ipo';
+type ModalKind = 'transaction' | 'account' | 'ipo' | 'ipo-demat';
 
 const monthOptions = recentMonthKeys(6);
 
@@ -60,7 +60,7 @@ function NavigationGroup({
   activeView: View;
   onSelect: (view: View) => void;
 }) {
-  const selectedView = activeView === 'ipo-portfolio' ? 'investments' : activeView;
+  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments' : activeView;
   return (
     <div className="nav-group">
       <span className="nav-label">{label}</span>
@@ -86,6 +86,7 @@ export default function App() {
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
   const isIpoPortfolio = activeView === 'ipo-portfolio';
+  const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
   const finance = useFinanceData(activeOwnerId);
   const data = finance.data ?? emptyFinance;
@@ -145,7 +146,7 @@ export default function App() {
   const navigate = (view: View) => {
     setActiveView(view);
     setMobileMenuOpen(false);
-    if (modal === 'ipo' && view !== 'ipo-portfolio') setModal(null);
+    if ((modal === 'ipo' || modal === 'ipo-demat') && view !== activeView) setModal(null);
   };
 
   const closeModal = () => setModal(null);
@@ -309,7 +310,19 @@ export default function App() {
       case 'investments':
         return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onOpenIpo={() => navigate('ipo-portfolio')} />;
       case 'ipo-portfolio':
-        return <IpoPortfolio accounts={usableAccounts} ownerName={displayName} adding={modal === 'ipo'} onClose={closeModal} onBack={() => navigate('investments')} onNotify={showToast} />;
+      case 'ipo-demats':
+        return (
+          <IpoPortfolio
+            accounts={usableAccounts}
+            ownerName={displayName}
+            managingDemats={isIpoDemats}
+            adding={isIpoDemats ? modal === 'ipo-demat' : modal === 'ipo'}
+            onClose={closeModal}
+            onBack={() => navigate(isIpoDemats ? 'ipo-portfolio' : 'investments')}
+            onManageDemats={() => navigate('ipo-demats')}
+            onNotify={showToast}
+          />
+        );
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':
@@ -366,11 +379,11 @@ export default function App() {
           </div>
           {activeView !== 'transactions' && activeView !== 'athlete' ? (
             <div className="top-actions">
-              <button className={`primary-button header-action${isIpoPortfolio ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoPortfolio ? 'ipo' : 'transaction')}>
+              <button className={`primary-button header-action${isIpoPortfolio ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoPortfolio ? 'ipo' : isIpoDemats ? 'ipo-demat' : 'transaction')}>
                 <span className="header-action-icon" aria-hidden="true">
                   <Plus size={15} strokeWidth={2} />
                 </span>
-                <span>{isIpoPortfolio ? 'Add IPO' : 'Add transaction'}</span>
+                <span>{isIpoPortfolio ? 'Add IPO' : isIpoDemats ? 'Add new account' : 'Add transaction'}</span>
               </button>
             </div>
           ) : null}
