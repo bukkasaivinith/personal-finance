@@ -244,7 +244,6 @@ export default function App() {
       case 'transactions':
         return (
           <TransactionsView
-            ipoMemos={data?.ipoMemos}
             transactions={visibleTransactions}
             allTransactions={sorted}
             searchQuery={searchQuery}
@@ -260,7 +259,6 @@ export default function App() {
         return (
           <AccountsView
             accounts={accounts}
-            ipoBalances={data?.ipoBalances}
             transactions={transactions}
             position={position}
             actions={actions}
@@ -305,7 +303,7 @@ export default function App() {
           />
         );
       case 'investments':
-        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onRefresh={finance.refresh} />;
+        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} />;
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':

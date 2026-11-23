@@ -21,7 +21,6 @@ import {
   isUsable,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
-import { loadIpoLinks } from '@/lib/ipo-api';
 
 export type ItemTable = 'transaction_types' | 'categories' | 'accounts';
 
@@ -144,6 +143,19 @@ async function loadWorkspaceTransactions(workspaceOwnerId: string): Promise<Tran
   return rows;
 }
 
+type LegacyIpoLinks = {
+  accounts?: { id: string; custody: string | null }[];
+  investments?: { id: string }[];
+};
+
+async function loadLegacyIpoLinks(workspaceOwnerId: string): Promise<LegacyIpoLinks> {
+  // Keep former custody accounts and managed holdings out of the regular finance screens.
+  const { data, error } = await supabase.rpc('ipo_finance_links', { p_owner_id: workspaceOwnerId });
+  if (error?.code === 'PGRST202') return {};
+  if (error) failWith(error);
+  return (data ?? {}) as LegacyIpoLinks;
+}
+
 export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
   const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks] = await Promise.all([
     supabase
@@ -176,7 +188,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
       .order('invested_on', { ascending: false }),
     supabase.from('investment_types').select('id, name').eq('user_id', workspaceOwnerId).order('name', { ascending: true }),
     supabase.from('investment_withdrawals').select('investment_id, amount_received, capital_return, profit_amount').eq('user_id', workspaceOwnerId),
-    loadIpoLinks(workspaceOwnerId),
+    loadLegacyIpoLinks(workspaceOwnerId),
   ]);
 
   for (const result of [typeResult, categoryResult, linkResult, accountResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
@@ -211,9 +223,9 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     ...statusOf(row),
   }));
 
+  const custodyByAccount = new Map(ipoLinks.accounts?.map((link) => [link.id, link.custody]));
   const accounts: Account[] = accountRows.map((row) => ({
-    ipoCustody: ipoLinks.accounts?.find(a => a.id === row.id)?.custody,
-    ipoBlocked: ipoLinks.accounts?.find(a => a.id === row.id)?.blocked ?? 0,
+    ipoCustody: custodyByAccount.get(row.id),
     id: row.id,
     name: row.name,
     description: row.description ?? '',
@@ -299,7 +311,9 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     current.capital += Number(row.capital_return); current.profit += Number(row.profit_amount); current.total += Number(row.amount_received);
     withdrawalsByInvestment.set(row.investment_id, current);
   });
-  const investments: Investment[] = investmentRows.map((row) => ({
+  const legacyInvestmentIds = new Set(ipoLinks.investments?.map((link) => link.id));
+  const regularInvestmentRows = investmentRows.filter((row) => !legacyInvestmentIds.has(row.id));
+  const investments: Investment[] = regularInvestmentRows.map((row) => ({
     id: row.id,
     name: row.name,
     investmentType: row.investment_type,
@@ -322,14 +336,13 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     withdrawnProfit: withdrawalsByInvestment.get(row.id)?.profit ?? 0,
     withdrawnTotal: withdrawalsByInvestment.get(row.id)?.total ?? 0,
   }));
-  const investmentTypes: InvestmentType[] = investmentTypeRows.map((row) => ({ id: row.id, name: row.name }));
+  const legacyInvestmentTypeIds = new Set(investmentRows.filter((row) => legacyInvestmentIds.has(row.id)).map((row) => row.investment_type_id));
+  const regularInvestmentTypeIds = new Set(regularInvestmentRows.map((row) => row.investment_type_id));
+  const investmentTypes: InvestmentType[] = investmentTypeRows
+    .filter((row) => !legacyInvestmentTypeIds.has(row.id) || regularInvestmentTypeIds.has(row.id))
+    .map((row) => ({ id: row.id, name: row.name }));
 
-  const ipoByInvestment = new Map((ipoLinks.investments ?? []).map(link => [link.id, link]));
-  const linkedInvestments = investments.filter(i => !ipoByInvestment.get(i.id)?.voided).map(i => {
-    const link = ipoByInvestment.get(i.id);
-    return link ? { ...i, name: link.name, ipoApplicationId: link.application_id, ipoRemainingShares: link.remaining_shares, withdrawnCapital: Number(link.sold_cost), withdrawnProfit: Number(link.profit), withdrawnTotal: Number(link.proceeds) } : i;
-  });
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments: linkedInvestments, investmentTypes, ipoMemos: ipoLinks.memos ?? [], ipoBalances: ipoLinks.balances };
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {

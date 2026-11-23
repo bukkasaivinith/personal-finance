@@ -1,4 +1,3 @@
-import type { IpoBalances, IpoMemo } from '@/lib/ipo';
 export type TransactionKind = 'expense' | 'income' | 'transfer';
 
 export type ItemStatus = {
@@ -8,10 +7,14 @@ export type ItemStatus = {
 
 export type TransactionTypeOption = ItemStatus & { id: string; name: string; kind: TransactionKind };
 
+export function isLegacyIpoTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
+  return ['ipo expense', 'ipo income', 'ipo transfer'].includes(type.name.trim().toLocaleLowerCase('en-US'));
+}
+
 /** Investment accounting types are created and maintained by the Investments workflow. */
 export function isInvestmentManagedTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
   const name = type.name.trim().toLocaleLowerCase('en-US');
-  return name === 'investment capital' || name === 'investment return' || ['ipo expense','ipo income','ipo transfer'].includes(name);
+  return name === 'investment capital' || name === 'investment return' || isLegacyIpoTransactionType(type);
 }
 
 export type CategoryOption = ItemStatus & {
@@ -24,7 +27,6 @@ export type CategoryOption = ItemStatus & {
 
 export type Account = ItemStatus & {
   ipoCustody?: string | null;
-  ipoBlocked?: number;
   id: string;
   name: string;
   description: string;
@@ -140,8 +142,6 @@ export type InvestmentType = {
 };
 
 export type Investment = {
-  ipoApplicationId?: string;
-  ipoRemainingShares?: number;
   id: string;
   name: string;
   investmentType: string;
@@ -175,8 +175,6 @@ export type InvestmentDraft = {
 };
 
 export type FinanceData = {
-  ipoBalances?: IpoBalances;
-  ipoMemos?: IpoMemo[];
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
   accounts: Account[];

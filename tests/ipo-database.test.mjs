@@ -18,8 +18,9 @@ test('IPO accounting on the complete application migration history', async (t) =
  `);
  const directory = new URL('../supabase/migrations/', import.meta.url);
  const ownerMigration = '20261123100000_single_owner_workspace.sql';
+ const disableIpoMigration = '20261123120000_disable_ipo_feature.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if (name === ownerMigration) continue; // Test the upgrade after creating existing users and financial records.
+  if (name === ownerMigration || name === disableIpoMigration) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -255,6 +256,26 @@ test('IPO accounting on the complete application migration history', async (t) =
   assert.deepEqual(applications.map(record => [record.lots, Number(record.amount)]), [[1, 99.99], [3, 299.97]]);
   assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_applicants WHERE name='New holder'")), 1);
   assert.equal(await ledger(bank), originalBalance);
+ });
+ await t.test('retiring IPO blocks its app commands and preserves the existing ledger', async () => {
+  const bankBalance = await ledger(bank);
+  const transactionCount = await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]);
+  const applicationCount = await scalar('SELECT count(*) FROM public.ipo_applications');
+  await db.exec('RESET ROLE');
+  const migration = await readFile(new URL(disableIpoMigration, directory), 'utf8');
+  await db.exec(migration);
+  await db.exec(migration); // Safe to run again if deployment is retried.
+  await db.exec('SET ROLE authenticated');
+
+  await assert.rejects(scalar('SELECT public.ipo_dashboard()'), /permission denied/);
+  await assert.rejects(command('company', { name: 'Disabled' }), /permission denied/);
+  await assert.rejects(scalar("SELECT public.ipo_create_with_applications($1, '{}', '[]')", [randomUUID()]), /permission denied/);
+  assert.equal(await scalar('SELECT count(*) FROM public.ipo_applications'), applicationCount);
+  assert.equal(await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]), transactionCount);
+  assert.equal(await ledger(bank), bankBalance);
+  const legacy = await scalar('SELECT public.ipo_finance_links($1)', [owner]);
+  assert.ok(legacy.accounts.some((account) => account.custody));
+  assert.ok(legacy.investments.some((link) => link.id === investment));
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');

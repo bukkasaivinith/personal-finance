@@ -5,7 +5,7 @@ import { ItemActions, StatusTag } from '@/components/item-actions';
 import { kindChoices } from '@/components/transaction-pickers';
 import { EmptyPanel, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
-import { stateOf, type CategoryOption, type ItemState, type Transaction, type TransactionTypeOption } from '@/lib/finance';
+import { isLegacyIpoTransactionType, stateOf, type CategoryOption, type ItemState, type Transaction, type TransactionTypeOption } from '@/lib/finance';
 
 const stateRank: Record<ItemState, number> = { active: 0, inactive: 1, deleted: 2 };
 
@@ -28,9 +28,10 @@ export function SetupView({
   const [renamingType, setRenamingType] = useState<TransactionTypeOption | null>(null);
   const [categoryDialog, setCategoryDialog] = useState<{ category: CategoryOption | null } | null>(null);
 
-  const orderedTypes = [...transactionTypes].sort((a, b) => stateRank[stateOf(a)] - stateRank[stateOf(b)]);
+  const editableTypes = transactionTypes.filter((type) => !isLegacyIpoTransactionType(type));
+  const orderedTypes = [...editableTypes].sort((a, b) => stateRank[stateOf(a)] - stateRank[stateOf(b)]);
   const orderedCategories = [...categories].sort((a, b) => stateRank[stateOf(a)] - stateRank[stateOf(b)]);
-  const typeName = (id: string) => transactionTypes.find((type) => type.id === id)?.name ?? '';
+  const typeName = (id: string) => editableTypes.find((type) => type.id === id)?.name ?? '';
   const categoryName = (id: string | null) => categories.find((category) => category.id === id)?.name ?? '';
 
   const saveCategory = async (values: CategoryFormValues) => {
@@ -188,7 +189,7 @@ export function SetupView({
         <CategoryFormModal
           category={categoryDialog.category}
           categories={categories}
-          transactionTypes={transactionTypes}
+          transactionTypes={editableTypes}
           onClose={() => setCategoryDialog(null)}
           onSubmit={saveCategory}
         />

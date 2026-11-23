@@ -1,5 +1,4 @@
 import { Select } from '@/components/select';
-import type { IpoBalances, IpoMemo } from '@/lib/ipo';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDownLeft,
@@ -83,8 +82,7 @@ function AccountRow({
       </span>
       <span className="account-balance">
         <b className={isCard && shown > 0 ? 'negative' : ''}>{formatMoney(shown)}</b>
-        <small>{isCard ? 'Owed' : account.ipoCustody ? 'IPO custody · not bank cash' : 'Posted balance'}</small>
-        {account.ipoBlocked ? <small>{formatMoney(shown - account.ipoBlocked)} after {formatMoney(account.ipoBlocked)} IPO blocks</small> : null}
+        <small>{isCard ? 'Owed' : 'Posted balance'}</small>
       </span>
       {actions ? <div className="account-actions">{actions}</div> : null}
     </div>
@@ -548,7 +546,6 @@ function TransactionAnalysis({ transactions }: { transactions: Transaction[] }) 
 }
 
 export function TransactionsView({
-  ipoMemos = [],
   transactions,
   allTransactions,
   searchQuery,
@@ -559,7 +556,6 @@ export function TransactionsView({
   onEditTransaction,
   onDeleteTransaction,
 }: {
-  ipoMemos?: IpoMemo[];
   transactions: Transaction[];
   allTransactions: Transaction[];
   searchQuery: string;
@@ -570,13 +566,8 @@ export function TransactionsView({
   onEditTransaction?: (transaction: Transaction) => void;
   onDeleteTransaction?: (transaction: Transaction) => void;
 }) {
-  const pageSize = transactionPageSize;
   const [section, setSection] = useState<'history' | 'analysis'>('history');
   const [page, setPage] = useState(0);
-  const [memoPage, setMemoPage] = useState(0);
-  const filteredMemos = ipoMemos.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase())).sort((a,b) => b.date.localeCompare(a.date));
-  const memoPages = Math.max(1, Math.ceil(filteredMemos.length / pageSize));
-  const safeMemoPage = Math.min(memoPage, memoPages - 1);
   const analysisOpen = section === 'analysis';
   return (
     <>
@@ -594,8 +585,7 @@ export function TransactionsView({
         <button type="button" className={analysisOpen ? 'active' : ''} aria-current={analysisOpen ? 'page' : undefined} onClick={() => setSection('analysis')}>Analysis</button>
       </nav>
       {analysisOpen ? <TransactionAnalysis transactions={allTransactions} /> : <>
-      {ipoMemos.length ? <section className="surface-card ipo-memo-history"><h3>IPO application activity</h3><p className="form-hint">Memo records appear immediately. They do not change posted balances or income and expenses.</p><div className="table-scroll"><table><thead><tr><th>Activity</th><th>Date</th><th>Amount (INR)</th><th>Status</th></tr></thead><tbody>{filteredMemos.slice(safeMemoPage * pageSize, (safeMemoPage + 1) * pageSize).map(m => <tr key={m.id}><td>{m.name}</td><td>{formatDate(m.date)}</td><td>{formatMoney(m.amount)}</td><td>{m.reversed ? 'Reversed memo' : 'Memo · no cash movement'}</td></tr>)}</tbody></table></div>{memoPages > 1 ? <div className="ipo-pagination"><button className="secondary-button" disabled={!safeMemoPage} onClick={() => setMemoPage(safeMemoPage-1)}>Previous</button><span>Page {safeMemoPage+1} of {memoPages}</span><button className="secondary-button" disabled={safeMemoPage>=memoPages-1} onClick={() => setMemoPage(safeMemoPage+1)}>Next</button></div> : null}</section> : null}
-      {allTransactions.length === 0 && !ipoMemos.length ? (
+      {allTransactions.length === 0 ? (
         <div className="surface-card">
           <EmptyPanel
             icon={<FileText size={20} />}
@@ -642,7 +632,6 @@ export function TransactionsView({
 
 export function AccountsView({
   accounts,
-  ipoBalances,
   transactions,
   position,
   actions,
@@ -650,7 +639,6 @@ export function AccountsView({
   onEditAccount,
 }: {
   accounts: Account[];
-  ipoBalances?: IpoBalances;
   transactions: Transaction[];
   position: { assets: number; owed: number; net: number };
   actions: FinanceActions;
@@ -659,7 +647,6 @@ export function AccountsView({
 }) {
   const rank = { active: 0, inactive: 1, deleted: 2 } as const;
   const ordered = accounts.filter(a => !a.ipoCustody).sort((a, b) => rank[stateOf(a)] - rank[stateOf(b)]);
-  const custodyAccounts = accounts.filter(a => a.ipoCustody);
   return (
     <>
       <SectionHeading
@@ -703,7 +690,7 @@ export function AccountsView({
                   key={account.id}
                   account={account}
                   transactions={transactions}
-                  actions={onEditAccount && !account.ipoCustody ? (
+                  actions={onEditAccount ? (
                     <ItemActions
                       name={account.name}
                       state={stateOf(account)}
@@ -719,24 +706,6 @@ export function AccountsView({
           </div>
         )}
       </div>
-      {ipoBalances && (ipoBalances.applications > 0 || custodyAccounts.length > 0) ? (
-        <section className="surface-card ipo-account-summary">
-          <div className="card-title-row"><div><h3>IPO balances</h3><p>Tracked separately from total assets and net position.</p></div></div>
-          <div className="metrics-grid">
-            <Metric label="Capital invested in IPOs" value={formatMoney(ipoBalances.invested)} foot="Cost of shares you still hold" icon={<PiggyBank size={16} />} />
-            <Metric label="Funds pending receipt" value={formatMoney(ipoBalances.applicant_custody + ipoBalances.awaiting_receipt + ipoBalances.refund_due)} foot="Applicant funds, sale proceeds and refunds" icon={<ArrowDownLeft size={16} />} />
-            <Metric label="Prepayments awaiting result" value={formatMoney(ipoBalances.prepaid_pending)} foot="Actual payments, before an allotment result" icon={<Wallet size={16} />} />
-          </div>
-          <div className="ipo-account-breakdown">
-            <div><span>Money held by applicants</span><strong>{formatMoney(ipoBalances.applicant_custody)}</strong></div>
-            <div><span>Sale proceeds awaiting settlement</span><strong>{formatMoney(ipoBalances.awaiting_receipt)}</strong></div>
-            <div><span>Refunds due from actual prepayments</span><strong>{formatMoney(ipoBalances.refund_due)}</strong></div>
-            <div><span>Still blocked in bank or applicant accounts</span><strong>{formatMoney(ipoBalances.blocked)}</strong></div>
-          </div>
-          <p className="form-hint">Blocked money stays in its account until a real debit occurs. It is not added again to the figures above. Money received back into your bank becomes part of your bank balance.</p>
-          {custodyAccounts.length ? <details><summary>IPO custody accounts ({custodyAccounts.length})</summary><div className="account-list expanded">{custodyAccounts.map(account => <AccountRow key={account.id} account={account} transactions={transactions} />)}</div></details> : null}
-        </section>
-      ) : null}
     </>
   );
 }
