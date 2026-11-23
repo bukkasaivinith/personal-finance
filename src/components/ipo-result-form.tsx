@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ModalShell } from '@/components/ui';
 import { Select } from '@/components/select';
+import { RupeeInput } from '@/components/rupee-input';
 import { formatDematAccount, saveIpoApplicationResult, type IpoApplication } from '@/lib/ipo-portfolio-api';
 
 type ResultKind = 'profit' | 'loss' | 'even' | 'unrecorded';
-const positiveRupees = (value: string) => /^[0-9]{1,12}(\.[0-9]{1,2})?$/.test(value) && Number(value) > 0;
+const positiveRupees = (value: string) => /^[0-9]{1,12}(\.[0-9]{0,2})?$/.test(value) && Number(value) > 0;
 
 export function IpoResultForm({ application, onClose, onSaved }: {
   application: IpoApplication;
@@ -65,10 +66,10 @@ export function IpoResultForm({ application, onClose, onSaved }: {
             </Select>
           </label>
           {needsAmount ? <label>Net amount (₹)
-            <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" disabled={saving} />
+            <RupeeInput value={amount} onValueChange={setAmount} disabled={saving} />
           </label> : null}
           <label className="full-field">Invested in allotted shares (₹, optional)
-            <input value={invested} onChange={(event) => setInvested(event.target.value)} inputMode="decimal" disabled={saving} />
+            <RupeeInput value={invested} onValueChange={setInvested} disabled={saving} />
           </label>
         </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}

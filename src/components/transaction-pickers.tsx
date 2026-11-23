@@ -1,4 +1,5 @@
 import { Select } from '@/components/select';
+import { RupeeInput } from '@/components/rupee-input';
 import { useState, type ReactNode } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { DatePicker } from '@/components/date-picker';
@@ -480,13 +481,9 @@ export function AccountCreateForm({
       </label>
       <label>
         {isLiability ? 'Amount currently owed (₹)' : 'Opening balance (₹)'}
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          inputMode="decimal"
+        <RupeeInput
           value={balance}
-          onChange={(event) => setBalance(event.target.value)}
+          onValueChange={setBalance}
           placeholder="0"
         />
       </label>

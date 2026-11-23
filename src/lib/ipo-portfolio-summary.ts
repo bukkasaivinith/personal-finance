@@ -5,6 +5,14 @@ import { transactionAnalysisRange } from '@/lib/transaction-analysis';
 export type IpoPortfolioPeriod = 'all' | 'week' | 'month' | 'year' | 'custom';
 type DateRange = { from: string; to: string };
 
+export function defaultIpoCustomRange(now = new Date()): DateRange {
+  const year = now.getFullYear();
+  const month = now.getMonth() - 6;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const start = new Date(year, month, Math.min(now.getDate(), lastDay));
+  return { from: toDateKey(start), to: toDateKey(now) };
+}
+
 export function ipoPortfolioRange(period: IpoPortfolioPeriod, custom: DateRange, now = new Date()): DateRange {
   if (period === 'custom') return custom;
   if (period === 'year') return { from: `${now.getFullYear()}-01-01`, to: toDateKey(now) };

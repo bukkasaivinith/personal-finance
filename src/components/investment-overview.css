@@ -12,10 +12,22 @@
   gap: 14px;
 }
 
-.investment-overview-row.ipo-overview-metrics {
-  grid-template-columns: repeat(3, minmax(145px, 1fr));
-}
-
 .investment-overview-row .metric-foot {
   display: block;
+}
+
+.investment-overview-primary .metric-card:nth-child(-n+2) {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
+.investment-overview-primary .metric-card:nth-child(-n+2) .metric-top,
+.investment-overview-primary .metric-card:nth-child(-n+2) .metric-value {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.investment-overview-primary .metric-card:nth-child(-n+2) .metric-icon {
+  background: var(--panel);
+  flex-shrink: 0;
 }

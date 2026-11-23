@@ -26,9 +26,10 @@ test('IPO accounting on the complete application migration history', async (t) =
  const allotmentDateMigration = '20261123180000_ipo_allotment_date.sql';
  const savingsMigration = '20261123190000_savings_entries.sql';
  const ipoResultsMigration = '20261123200000_ipo_realized_results.sql';
+ const savingsHistoryMigration = '20261123210000_savings_account_history.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
-   allotmentDateMigration, savingsMigration, ipoResultsMigration].includes(name)) continue; // Test each upgrade with existing data.
+   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -611,11 +612,61 @@ test('IPO accounting on the complete application migration history', async (t) =
   await assert.rejects(save(manual[0].id, 20), /linked activity/);
   assert.equal(await ledger(bank), bankBalance);
  });
+ await t.test('savings account movements update balances and preserve history when a custom location is removed', async () => {
+  const bankBalance = await ledger(bank);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(savingsHistoryMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const accountsSql = 'SELECT id, balance FROM public.savings_accounts ORDER BY last_activity_at DESC, id DESC';
+  const accounts = async () => (await db.query(accountsSql)).rows.map((account) => [account.id, Number(account.balance)]);
+  const existing = await accounts();
+  assert.equal(existing.length, 1);
+  const [savingsId, originalBalance] = existing[0];
+  assert.equal(originalBalance, 1300);
+  const cash = await scalar("INSERT INTO public.savings_entries(name, amount, saved_on, storage_type) VALUES ('Separate cash',200,'2026-01-11','cash') RETURNING id");
+  assert.deepEqual(await accounts(), [[cash, 200], [savingsId, 1300]]);
+
+  const location = await scalar("INSERT INTO public.savings_locations(name) VALUES ('Locker') RETURNING id");
+  await assert.rejects(db.query("INSERT INTO public.savings_locations(name) VALUES (' locker ')"), /duplicate key/);
+  await db.query('UPDATE public.savings_entries SET location_id=$1 WHERE id=$2', [location, savingsId]);
+  await db.query("UPDATE public.savings_locations SET name='Home locker' WHERE id=$1", [location]);
+  assert.equal(await scalar('SELECT name FROM public.savings_locations WHERE id=$1', [location]), 'Home locker');
+
+  const move = (kind, amount, key = randomUUID()) =>
+   scalar("SELECT public.record_savings_movement($1,$2,$3,$4,'test movement')", [savingsId, key, kind, amount]);
+  const request = randomUUID();
+  assert.equal((await move('withdrawal', 900, request)).account.balance, 400);
+  assert.equal((await move('withdrawal', 900, request)).account.balance, 400);
+  await assert.rejects(move('withdrawal', 850, request), /already used/);
+  const deposit = await move('deposit', 200);
+  assert.equal(deposit.account.balance, 600);
+  assert.deepEqual(await accounts(), [[savingsId, 600], [cash, 200]]);
+  await assert.rejects(move('withdrawal', 601), /exceeds the available/);
+  const attempts = await Promise.allSettled([move('withdrawal', 375), move('withdrawal', 375)]);
+  assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+  assert.deepEqual(await accounts(), [[savingsId, 225], [cash, 200]]);
+  await assert.rejects(db.query('UPDATE public.savings_entries SET amount=800 WHERE id=$1', [savingsId]), /past savings balance negative/);
+  assert.equal(Number(await scalar("SELECT balance FROM public.get_savings_balances() WHERE storage_type='other'")), 225);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements WHERE savings_entry_id=$1', [savingsId])), 3);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements WHERE savings_entry_id=$1', [cash])), 0);
+
+  await db.query('DELETE FROM public.savings_locations WHERE id=$1', [location]);
+  assert.equal(await scalar('SELECT location_id FROM public.savings_accounts WHERE id=$1', [savingsId]), null);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements')), 3);
+  assert.equal(await ledger(bank), bankBalance);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  assert.deepEqual(await accounts(), []);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements')), 0);
+  await assert.rejects(move('deposit', 25), /Sign in again/);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');
   await db.exec('RESET ROLE');
   assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_entries WHERE user_id=$1',[owner])),0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM auth.users WHERE id=$1',[owner])),0);
   const replacement = randomUUID();
   await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[replacement,'bukkasaivinith@gmail.com']);

@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
+import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
 import { SavingsBalanceMetric } from '@/components/savings-view';
@@ -488,11 +489,11 @@ function TransactionAnalysis({ transactions }: { transactions: Transaction[] }) 
           ) : null}
           <label className="transaction-filter-field">
             <span>Minimum amount (₹)</span>
-            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any minimum" value={filters.minAmount} onChange={(event) => updateFilter('minAmount', event.target.value)} />
+            <RupeeInput placeholder="Any minimum" value={filters.minAmount} onValueChange={(value) => updateFilter('minAmount', value)} />
           </label>
           <label className="transaction-filter-field">
             <span>Maximum amount (₹)</span>
-            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any maximum" value={filters.maxAmount} onChange={(event) => updateFilter('maxAmount', event.target.value)} />
+            <RupeeInput placeholder="Any maximum" value={filters.maxAmount} onValueChange={(value) => updateFilter('maxAmount', value)} />
           </label>
           <label className="transaction-filter-field">
             <span>Category</span>

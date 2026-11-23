@@ -1,0 +1,47 @@
+.account-row.savings-account-row {
+  gap: 0;
+  padding: 0;
+}
+
+.account-row.savings-account-link {
+  flex: 1 1 245px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+}
+
+.savings-account-link:hover {
+  background: var(--green-soft);
+}
+
+.savings-account-row > .item-actions {
+  margin-inline-start: auto;
+  padding: 4px 10px;
+}
+
+.savings-account-link .account-balance {
+  white-space: nowrap;
+}
+
+.savings-back {
+  margin-bottom: 12px;
+}
+
+.savings-history-heading,
+.savings-history-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.savings-location-tools {
+  justify-self: start;
+}
+
+.savings-location-form {
+  margin-top: 16px;
+}

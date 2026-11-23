@@ -1,4 +1,5 @@
 import { Select } from '@/components/select';
+import { RupeeInput } from '@/components/rupee-input';
 import { useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
@@ -131,15 +132,11 @@ export function MobileApp() {
             <section className="mobile-amount-card">
               <label htmlFor="mobile-amount">Amount (₹)</label>
               <strong>₹{amount ? Number(amount).toLocaleString('en-IN') : '0.00'}</strong>
-              <input
+              <RupeeInput
                 id="mobile-amount"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
                 placeholder="Enter amount"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
               />
             </section>
 

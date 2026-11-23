@@ -6,7 +6,9 @@ const { netPosition, signedBalance } = await import(`data:text/javascript;base64
 const allocationsCompiled = await build({ entryPoints: ['src/lib/ipo-lot-allocations.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
 const { groupIpoLots } = await import(`data:text/javascript;base64,${Buffer.from(allocationsCompiled.outputFiles[0].text).toString('base64')}`);
 const summaryCompiled = await build({ entryPoints: ['src/lib/ipo-portfolio-summary.ts'], bundle: true, write: false, format: 'esm', platform: 'node', tsconfig: 'tsconfig.app.json' });
-const { ipoPortfolioRange, summarizeIpoPortfolio } = await import(`data:text/javascript;base64,${Buffer.from(summaryCompiled.outputFiles[0].text).toString('base64')}`);
+const { defaultIpoCustomRange, ipoPortfolioRange, summarizeIpoPortfolio } = await import(`data:text/javascript;base64,${Buffer.from(summaryCompiled.outputFiles[0].text).toString('base64')}`);
+const rupeeCompiled = await build({ entryPoints: ['src/lib/rupee-input.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { formatRupeeInput, parseRupeeInput } = await import(`data:text/javascript;base64,${Buffer.from(rupeeCompiled.outputFiles[0].text).toString('base64')}`);
 
 test('one holder selection per lot combines repeated accounts for saving', () => {
  assert.deepEqual(groupIpoLots(3, '', new Map([[0, 'first'], [1, 'second'], [2, 'first']])), [
@@ -56,4 +58,20 @@ test('IPO totals cover only applications in the selected range and keep losses s
  assert.deepEqual(ipoPortfolioRange('month', custom, date), { from: '2026-11-01', to: '2026-11-18' });
  assert.deepEqual(ipoPortfolioRange('year', custom, date), { from: '2026-01-01', to: '2026-11-18' });
  assert.equal(summarizeIpoPortfolio(entries, ipoPortfolioRange('all', custom, date)).applicationCount, 5);
+});
+
+test('IPO custom dates reset to a rolling six calendar months including end-of-month dates', () => {
+ assert.deepEqual(defaultIpoCustomRange(new Date(2026, 10, 23, 12)), { from: '2026-05-23', to: '2026-11-23' });
+ assert.deepEqual(defaultIpoCustomRange(new Date(2026, 7, 31, 12)), { from: '2026-02-28', to: '2026-08-31' });
+ assert.deepEqual(defaultIpoCustomRange(new Date(2026, 0, 15, 12)), { from: '2025-07-15', to: '2026-01-15' });
+});
+
+test('rupee inputs use Indian grouping and preserve in-progress decimal edits', () => {
+ assert.equal(formatRupeeInput('28457'), '28,457');
+ assert.equal(formatRupeeInput('1234567.50'), '12,34,567.50');
+ assert.equal(formatRupeeInput('1000.'), '1,000.');
+ assert.equal(parseRupeeInput('12,34,567.50'), '1234567.50');
+ assert.equal(parseRupeeInput('.25'), '0.25');
+ assert.equal(parseRupeeInput('1,000.001'), null);
+ assert.equal(parseRupeeInput(''), '');
 });

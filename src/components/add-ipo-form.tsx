@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
+import { RupeeInput } from '@/components/rupee-input';
 import { Select } from '@/components/select';
 import { ModalShell } from '@/components/ui';
 import { formatMoney, todayKey, type Account } from '@/lib/finance';
@@ -10,7 +11,7 @@ import { formatDematAccount, saveIpoApplications, updateIpoApplication, type Ipo
 const maxShares = 2_147_483_647;
 const maxAmountPaise = 99_999_999_999_999;
 const lotsPerPage = 3;
-const inrPattern = /^[0-9]{1,12}(\.[0-9]{1,2})?$/;
+const inrPattern = /^[0-9]{1,12}(\.[0-9]{0,2})?$/;
 
 function wholeNumber(value: string) {
   const number = /^[0-9]{1,10}$/.test(value) ? Number(value) : 0;
@@ -125,7 +126,7 @@ export function AddIpoForm({ accounts, demats, application, allotmentDateSupport
     setError('');
     requestId.current ||= crypto.randomUUID();
     try {
-      const details = { ...draft, company_name: draft.company_name.trim() };
+      const details = { ...draft, company_name: draft.company_name.trim(), issue_price: draft.issue_price.replace(/\.$/, '') };
       if (application) await updateIpoApplication(application.id, details, allocations[0], requestId.current);
       else await saveIpoApplications(details, allocations, lots, requestId.current);
       onSave(allocations.length);
@@ -163,7 +164,7 @@ export function AddIpoForm({ accounts, demats, application, allotmentDateSupport
             <DatePicker label="Allotment date (optional)" value={draft.allotment_date} min={draft.application_date || undefined} max={draft.listing_date || undefined} onChange={(value) => updateField('allotment_date', value)} clearable />
             <DatePicker label="Listing date (optional)" value={draft.listing_date} min={draft.allotment_date || draft.application_date || undefined} onChange={(value) => updateField('listing_date', value)} clearable />
             <label>Issue price per share (₹)
-              <input type="number" min="0.01" step="0.01" inputMode="decimal" value={draft.issue_price} onChange={(event) => updateField('issue_price', event.target.value)} />
+              <RupeeInput value={draft.issue_price} onValueChange={(value) => updateField('issue_price', value)} />
             </label>
             <label>Shares per lot
               <input type="number" min="1" max={maxShares} step="1" inputMode="numeric" value={draft.lot_size} onChange={(event) => updateField('lot_size', event.target.value)} />

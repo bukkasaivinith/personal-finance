@@ -2,6 +2,7 @@ import { Select } from '@/components/select';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Download, List, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
+import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
 import { loadActivityEvents } from '@/lib/finance-api';
@@ -162,7 +163,7 @@ function RecurringModal({
         <div className="form-grid">
           <label className="full-field">Transaction type<Select value={typeId} onChange={(event) => changeType(event.target.value)}>{usableTypes.length === 0 ? <option value="">No active types available</option> : null}{usableTypes.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.kind})</option>)}</Select></label>
           <label className="full-field">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Monthly rent" maxLength={60} autoFocus /></label>
-          <label>Amount (₹)<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 15000" /></label>
+          <label>Amount (₹)<RupeeInput value={amount} onValueChange={setAmount} placeholder="e.g. 15,000" /></label>
           <label>Every<input type="number" min="1" max="366" inputMode="numeric" value={intervalValue} onChange={(event) => setIntervalValue(event.target.value)} /></label>
           <label>Interval unit<Select value={intervalUnit} onChange={(event) => setIntervalUnit(event.target.value as 'day' | 'week' | 'month')}><option value="day">day(s)</option><option value="week">week(s)</option><option value="month">month(s)</option></Select></label>
           {!isTransfer ? <label className="full-field">Category<Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Choose a category</option>{compatibleCategories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}</Select></label> : null}

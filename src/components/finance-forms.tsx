@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { RupeeInput } from '@/components/rupee-input';
 import { AccountCreateForm, AccountPicker, CategoryPicker, TypePicker, type AccountDraft } from '@/components/transaction-pickers';
 import { DatePicker } from '@/components/date-picker';
 import { ModalShell } from '@/components/ui';
@@ -208,13 +209,9 @@ export function AddTransactionModal({
           />
           <label>
             Amount (₹)
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              inputMode="decimal"
+            <RupeeInput
               value={amount}
-              onChange={(event) => setAmount(event.target.value)}
+              onValueChange={setAmount}
               placeholder="0"
               autoFocus
             />

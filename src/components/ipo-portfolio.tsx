@@ -8,7 +8,7 @@ import { Select } from '@/components/select';
 import { EmptyPanel, Metric } from '@/components/ui';
 import { formatDate, formatMoney, todayKey, type Account } from '@/lib/finance';
 import { formatDematAccount, loadIpoPortfolio, removeIpoApplication, type IpoApplication, type IpoPortfolioData } from '@/lib/ipo-portfolio-api';
-import { ipoPortfolioRange, summarizeIpoPortfolio, type IpoPortfolioPeriod } from '@/lib/ipo-portfolio-summary';
+import { defaultIpoCustomRange, ipoPortfolioRange, summarizeIpoPortfolio, type IpoPortfolioPeriod } from '@/lib/ipo-portfolio-summary';
 import './ipo-portfolio.css';
 
 function ProfitLoss({ value }: { value: number }) {
@@ -94,7 +94,7 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
   const deletionPending = useRef(false);
   const [details, setDetails] = useState<{ id: string; label: string }>();
   const [period, setPeriod] = useState<IpoPortfolioPeriod>('all');
-  const [custom, setCustom] = useState(() => ipoPortfolioRange('month', { from: '', to: '' }));
+  const [custom, setCustom] = useState(defaultIpoCustomRange);
   const [companySearch, setCompanySearch] = useState('');
   const refresh = useCallback(async () => {
     setError('');
@@ -150,6 +150,11 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
     setDetails(undefined);
   }
 
+  function changePeriod(next: IpoPortfolioPeriod) {
+    if (period === 'custom' && next !== 'custom') setCustom(defaultIpoCustomRange());
+    setPeriod(next);
+  }
+
   return (
     <>
       <div className="ipo-subpage-actions">
@@ -162,7 +167,7 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
                 <DatePicker label="Applied from" value={custom.from} max={custom.to} onChange={(from) => setCustom((current) => ({ ...current, from }))} />
                 <DatePicker label="Applied through" value={custom.to} min={custom.from} max={todayKey()} onChange={(to) => setCustom((current) => ({ ...current, to }))} />
               </> : null}
-              <Select className="compact-select" aria-label="Application date range" value={period} onChange={(event) => setPeriod(event.target.value as IpoPortfolioPeriod)}>
+              <Select className="compact-select" aria-label="Application date range" value={period} onChange={(event) => changePeriod(event.target.value as IpoPortfolioPeriod)}>
                 <option value="all">All time</option>
                 <option value="week">This week</option>
                 <option value="month">This month</option>
