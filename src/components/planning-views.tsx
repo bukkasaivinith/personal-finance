@@ -16,7 +16,6 @@ import {
 } from '@/lib/recurring-analytics';
 import {
   categoriesFor,
-  currentMonthKey,
   formatDate,
   formatMoney,
   formatTime,
@@ -27,7 +26,6 @@ import {
   type Account,
   type ActivityAction,
   type ActivityEvent,
-  type Budget,
   type CategoryOption,
   type FinanceData,
   type Investment,
@@ -85,164 +83,6 @@ function PlanningEmptyView({
           }
         />
       </div>
-    </>
-  );
-}
-
-function BudgetModal({
-  budget,
-  categories,
-  budgets,
-  onClose,
-  onSubmit,
-}: {
-  budget: Budget | null;
-  categories: CategoryOption[];
-  budgets: Budget[];
-  onClose: () => void;
-  onSubmit: (input: { categoryId: string; amount: number }) => Promise<void>;
-}) {
-  const usableCategories = categories.filter(isUsable);
-  const [categoryId, setCategoryId] = useState(budget?.categoryId ?? usableCategories[0]?.id ?? '');
-  const [amount, setAmount] = useState(budget ? String(budget.amount) : '');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const categoryWithBudget = new Set(budgets.filter((item) => item.id !== budget?.id).map((item) => item.categoryId));
-  const availableCategories = usableCategories.filter((category) => !categoryWithBudget.has(category.id) || category.id === categoryId);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const value = parseAmount(amount);
-    if (!categoryId) {
-      setError('Create a category first, then choose it here.');
-      return;
-    }
-    if (!Number.isFinite(value) || value <= 0) {
-      setError('Enter a monthly limit greater than zero.');
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      await onSubmit({ categoryId, amount: value });
-    } catch (err) {
-      setError(errorMessage(err));
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell eyebrow="Budgets" title={budget ? 'Edit budget' : 'Create budget'} labelId="budget-modal-title" onClose={onClose}>
-      <form className="modal-form" onSubmit={submit}>
-        <p className="modal-description">Set the maximum you want to spend in a category each month.</p>
-        <div className="form-grid">
-          <label className="full-field">
-            Category
-            <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={saving || availableCategories.length === 0}>
-              {availableCategories.length === 0 ? <option value="">No categories available</option> : null}
-              {availableCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.emoji ? `${category.emoji} ` : ''}{category.name}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="full-field">
-            Monthly limit (₹)
-            <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 10000" autoFocus={!budget} />
-          </label>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-        <div className="modal-actions">
-          <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={saving || availableCategories.length === 0}>
-            {saving ? 'Saving...' : budget ? 'Save budget' : 'Create budget'}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-export function BudgetsView({
-  budgets,
-  categories,
-  transactions,
-  actions,
-  onNotify,
-}: {
-  budgets: Budget[];
-  categories: CategoryOption[];
-  transactions: Transaction[];
-  actions: FinanceActions;
-  onNotify: (message: string) => void;
-}) {
-  const [editingBudget, setEditingBudget] = useState<Budget | null | undefined>(undefined);
-  const [busyId, setBusyId] = useState('');
-  const monthlySpending = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const transaction of transactions) {
-      if (transaction.kind !== 'expense' || !transaction.categoryId || !transaction.date.startsWith(currentMonthKey())) continue;
-      totals.set(transaction.categoryId, (totals.get(transaction.categoryId) ?? 0) + transaction.amount);
-    }
-    return totals;
-  }, [transactions]);
-  const categoriesById = new Map(categories.map((category) => [category.id, category]));
-
-  const saveBudget = async (input: { categoryId: string; amount: number }) => {
-    const previous = editingBudget;
-    await actions.saveBudget(input);
-    if (previous && previous.categoryId !== input.categoryId) await actions.removeBudget(previous.id);
-    setEditingBudget(undefined);
-    onNotify('Budget saved.');
-  };
-
-  const removeBudget = async (budget: Budget) => {
-    setBusyId(budget.id);
-    try {
-      await actions.removeBudget(budget.id);
-      onNotify('Budget removed.');
-    } catch (error) {
-      onNotify(errorMessage(error));
-    } finally {
-      setBusyId('');
-    }
-  };
-
-  return (
-    <>
-      <SectionHeading
-        title="Budgets"
-        description="Set monthly spending limits for each category."
-        action={<button className="primary-button" type="button" onClick={() => setEditingBudget(null)}><Plus size={16} /> Create budget</button>}
-      />
-      {budgets.length === 0 ? (
-        <div className="surface-card"><EmptyPanel icon={<PiggyBank size={20} />} title="No budgets yet" description="Create a monthly limit to see your category spending progress." action={<button className="primary-button" type="button" onClick={() => setEditingBudget(null)}><Plus size={16} /> Create budget</button>} /></div>
-      ) : (
-        <div className="planning-grid">
-          {budgets.map((budget) => {
-            const category = categoriesById.get(budget.categoryId);
-            const spent = monthlySpending.get(budget.categoryId) ?? 0;
-            const percent = Math.round((spent / budget.amount) * 100);
-            const remaining = budget.amount - spent;
-            return (
-              <article className="surface-card budget-card" key={budget.id}>
-                <div className="planning-card-top">
-                  <div className="planning-category"><span>{category?.emoji || '•'}</span><div><h3>{category?.name || 'Archived category'}</h3><p>{currentMonthKey()}</p></div></div>
-                  <div className="item-actions">
-                    <button className="ghost-button" type="button" aria-label="Edit budget" onClick={() => setEditingBudget(budget)}><Pencil size={15} /> Edit</button>
-                    <button className="ghost-button danger" type="button" aria-label="Delete budget" onClick={() => void removeBudget(budget)} disabled={busyId === budget.id}><Trash2 size={15} /></button>
-                  </div>
-                </div>
-                <div className="budget-money"><strong>{formatMoney(spent)}</strong><span>of {formatMoney(budget.amount)}</span></div>
-                <div className="premium-progress" aria-label={`${Math.max(0, percent)} percent of budget used`}><span className={percent >= 100 ? 'over' : percent >= 80 ? 'warning' : ''} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></div>
-                <div className="budget-card-footer"><span className={remaining < 0 ? 'negative' : 'positive'}>{remaining < 0 ? `${formatMoney(Math.abs(remaining))} over limit` : `${formatMoney(remaining)} remaining`}</span><span>{percent}% used</span></div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-      {editingBudget !== undefined ? <BudgetModal budget={editingBudget} categories={categories} budgets={budgets} onClose={() => setEditingBudget(undefined)} onSubmit={saveBudget} /> : null}
     </>
   );
 }

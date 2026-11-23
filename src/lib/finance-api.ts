@@ -575,24 +575,6 @@ export async function recordInvestmentWithdrawal(input: { id: string; amountRece
   if (error) failWith(error);
 }
 
-export async function upsertBudget(input: { categoryId: string; amount: number }, workspaceOwnerId: string): Promise<void> {
-  const { error } = await supabase.from('budgets').upsert(
-    {
-      category_id: input.categoryId,
-      amount: input.amount,
-      updated_at: new Date().toISOString(),
-      user_id: workspaceOwnerId,
-    },
-    { onConflict: 'category_id' },
-  );
-  if (error) failWith(error);
-}
-
-export async function deleteBudget(id: string): Promise<void> {
-  const result = await supabase.from('budgets').delete().eq('id', id).select('id').maybeSingle();
-  requireWrittenRecord(result);
-}
-
 export async function insertRecurringEntry(input: RecurringEntryDraft, workspaceOwnerId: string): Promise<string> {
   const { data, error } = await supabase
     .from('recurring_entries')

@@ -17,6 +17,7 @@ import {
 import { DatePicker } from '@/components/date-picker';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
+import { SavingsBalanceMetric } from '@/components/savings-view';
 import type { FinanceActions } from '@/lib/finance-actions';
 import {
   formatDate,
@@ -662,6 +663,7 @@ export function AccountsView({
         <Metric label="Total assets" value={formatMoney(position.assets)} foot="Bank, cash and wallets" icon={<Wallet size={16} />} />
         <Metric label="Credit card owed" value={formatMoney(position.owed)} foot="Outstanding on your cards" icon={<CreditCard size={16} />} />
         <Metric label="Net position" value={formatMoney(position.net)} foot="Assets minus amounts owed" icon={<PiggyBank size={16} />} />
+        <SavingsBalanceMetric />
       </div>
       <div className="surface-card">
         <div className="card-title-row">

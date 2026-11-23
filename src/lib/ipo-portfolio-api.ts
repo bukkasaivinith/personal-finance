@@ -15,6 +15,8 @@ export type IpoApplication = {
   application_date: string;
   allotment_date?: string | null;
   listing_date: string | null;
+  realized_profit_loss?: number | null;
+  invested_amount?: number | null;
   holder: string;
   demat: string;
   broker?: string;
@@ -87,6 +89,13 @@ export async function updateIpoApplication(id: string, draft: IpoApplicationDraf
 
 export async function removeIpoApplication(id: string): Promise<void> {
   const { error } = await supabase.rpc('archive_ipo_portfolio_application', { p_application_id: id });
+  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+}
+
+export async function saveIpoApplicationResult(id: string, profitLoss: number | null, investedAmount: number | null): Promise<void> {
+  const { error } = await supabase.rpc('set_ipo_application_result', {
+    p_application_id: id, p_profit_loss: profitLoss, p_invested_amount: investedAmount,
+  });
   if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
 }
 

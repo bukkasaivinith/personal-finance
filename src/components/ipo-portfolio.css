@@ -16,6 +16,31 @@
   margin-bottom: 16px;
 }
 
+.ipo-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+
+.ipo-range-controls .date-picker {
+  min-width: 135px;
+}
+
+.ipo-details-back {
+  margin-bottom: 8px;
+}
+
+.ipo-company-list-header {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.ipo-company-list-header .search-field {
+  min-width: min(210px, 100%);
+}
+
 .demat-broker-field {
   position: relative;
   min-width: 0;
@@ -35,6 +60,12 @@
 
 .account-row.ipo-company-link:hover {
   background: var(--green-soft);
+}
+
+.ipo-profit-loss {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ipo-application-actions {
@@ -152,6 +183,16 @@
 
 .metrics-grid.ipo-portfolio-metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ipo-portfolio-metrics .metric-foot {
+  display: block;
+}
+
+@media (min-width: 1300px) {
+  .metrics-grid.ipo-portfolio-metrics {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .ipo-application-detail {

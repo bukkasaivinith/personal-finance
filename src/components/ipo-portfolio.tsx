@@ -1,72 +1,40 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, BarChart3, Building2, ChevronRight, FileText, Pencil, Trash2, Users, Wallet } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, FileText, Pencil, Search, Trash2, TrendingDown, TrendingUp, Users, Wallet } from 'lucide-react';
 import { AddIpoForm } from '@/components/add-ipo-form';
+import { DatePicker } from '@/components/date-picker';
 import { IpoDematAccounts } from '@/components/ipo-demat-accounts';
+import { IpoResultForm } from '@/components/ipo-result-form';
+import { Select } from '@/components/select';
 import { EmptyPanel, Metric } from '@/components/ui';
-import { formatDate, formatMoney, type Account } from '@/lib/finance';
+import { formatDate, formatMoney, todayKey, type Account } from '@/lib/finance';
 import { formatDematAccount, loadIpoPortfolio, removeIpoApplication, type IpoApplication, type IpoPortfolioData } from '@/lib/ipo-portfolio-api';
+import { ipoPortfolioRange, summarizeIpoPortfolio, type IpoPortfolioPeriod } from '@/lib/ipo-portfolio-summary';
 import './ipo-portfolio.css';
 
-function dematGroup(application: IpoApplication) {
-  return application.demat_account_id ?? formatDematAccount(application.holder, application.demat, application.broker);
+function ProfitLoss({ value }: { value: number }) {
+  const tone = value > 0 ? 'positive' : value < 0 ? 'negative' : '';
+  const label = value > 0 ? 'Profit' : value < 0 ? 'Loss' : 'Break even';
+  return <span className={`ipo-profit-loss ${tone}`}>{label} {formatMoney(value)}</span>;
 }
 
-function companyGroup(application: IpoApplication) {
-  return application.company.trim().toLocaleLowerCase();
-}
-
-function IpoAnalysis({ applications, onView }: { applications: IpoApplication[]; onView: (id: string, label: string) => void }) {
-  const byDemat = new Map<string, { label: string; applications: number; lots: number; amountPaise: number }>();
-  for (const application of applications) {
-    const label = formatDematAccount(application.holder, application.demat, application.broker);
-    const key = dematGroup(application);
-    const totals = byDemat.get(key) ?? { label, applications: 0, lots: 0, amountPaise: 0 };
-    totals.applications += 1;
-    totals.lots += application.lots;
-    totals.amountPaise += Math.round(application.amount * 100);
-    byDemat.set(key, totals);
-  }
-  const rows = [...byDemat.entries()].sort(([, first], [, second]) => second.amountPaise - first.amountPaise || first.label.localeCompare(second.label));
-  return (
-    <section className="surface-card" aria-labelledby="ipo-analysis-title">
-      <div className="card-title-row"><h3 id="ipo-analysis-title">Applications by demat account</h3></div>
-      {rows.length ? <div className="table-scroll">
-        <table>
-          <thead><tr><th scope="col">Demat account</th><th scope="col">Applications</th><th scope="col">Lots applied</th><th scope="col" className="amount-column">Applied amount</th><th scope="col" aria-label="Actions" /></tr></thead>
-          <tbody>
-            {rows.map(([id, row]) => (
-              <tr key={id}>
-                <td><b>{row.label}</b></td>
-                <td>{row.applications}</td>
-                <td>{row.lots}</td>
-                <td className="amount-column">{formatMoney(row.amountPaise / 100)}</td>
-                <td><button type="button" className="text-button" onClick={() => onView(id, row.label)} aria-label={`View applications for ${row.label}`}>View applications</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div> : <EmptyPanel icon={<BarChart3 size={20} />} title="No IPO applications yet" description="Record an IPO application to see its account breakdown here." />}
-    </section>
-  );
-}
-
-function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, onDelete }: {
+function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, onDelete, onRecordResult }: {
   title: string;
   applications: IpoApplication[];
   deleting: string;
   onBack: () => void;
   onEdit: (application: IpoApplication) => void;
   onDelete: (application: IpoApplication) => void;
+  onRecordResult: (application: IpoApplication) => void;
 }) {
   return (
     <section className="surface-card" aria-labelledby="ipo-details-title">
+      <button type="button" className="text-button ipo-details-back" onClick={onBack}><ArrowLeft size={15} /> Back to list</button>
       <div className="card-title-row">
         <h3 id="ipo-details-title">{title}</h3>
-        <button type="button" className="text-button" onClick={onBack}><ArrowLeft size={15} /> Back to list</button>
       </div>
       {applications.length ? <div className="table-scroll">
         <table>
-          <thead><tr><th scope="col">Company</th><th scope="col">Demat account</th><th scope="col">Applied on</th><th scope="col">Allotment date</th><th scope="col">Listing date</th><th scope="col" className="amount-column">Applied amount</th><th scope="col" aria-label="Actions" /></tr></thead>
+          <thead><tr><th scope="col">Company</th><th scope="col">Demat account</th><th scope="col">Applied on</th><th scope="col">Allotment date</th><th scope="col">Listing date</th><th scope="col" className="amount-column">Applied amount</th><th scope="col">Result</th><th scope="col" aria-label="Actions" /></tr></thead>
           <tbody>
             {applications.map((application) => {
               const holder = formatDematAccount(application.holder, application.demat, application.broker);
@@ -79,8 +47,16 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
                   <td>{application.listing_date ? formatDate(application.listing_date) : '—'}</td>
                   <td className="amount-column">{formatMoney(application.amount)}</td>
                   <td>
+                    {application.realized_profit_loss != null ? <ProfitLoss value={application.realized_profit_loss} /> : null}
+                    {application.invested_amount != null ? <div className="ipo-application-detail">{formatMoney(application.invested_amount)} invested</div> : null}
+                    {application.realized_profit_loss == null && application.invested_amount == null ? '—' : null}
+                  </td>
+                  <td>
                     {application.can_change === false ? <span className="ipo-application-detail">Linked activity</span> : (
                       <div className="ipo-application-actions">
+                        <button type="button" className="ghost-button" onClick={() => onRecordResult(application)} disabled={Boolean(deleting)}>
+                          {application.realized_profit_loss == null && application.invested_amount == null ? 'Record result' : 'Edit result'}
+                        </button>
                         <button type="button" className="ghost-button" onClick={() => onEdit(application)} disabled={Boolean(deleting)}
                           aria-label={`Edit ${application.company} application for ${holder}`}><Pencil size={15} /> Edit</button>
                         <button type="button" className="ghost-button danger" onClick={() => onDelete(application)} disabled={Boolean(deleting)}
@@ -98,15 +74,14 @@ function IpoApplicationDetails({ title, applications, deleting, onBack, onEdit, 
   );
 }
 
-export function IpoPortfolio({ accounts, ownerName, navigation, section, adding, onClose, onBack, onOpenAnalysis, onManageDemats, onNotify }: {
+export function IpoPortfolio({ accounts, ownerName, navigation, section, adding, onClose, onBack, onManageDemats, onNotify }: {
   accounts: Account[];
   ownerName: string;
   navigation: ReactNode;
-  section: 'portfolio' | 'analysis' | 'demats';
+  section: 'portfolio' | 'demats';
   adding: boolean;
   onClose: () => void;
   onBack: () => void;
-  onOpenAnalysis: () => void;
   onManageDemats: () => void;
   onNotify: (message: string) => void;
 }) {
@@ -114,9 +89,13 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
   const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState<IpoApplication>();
+  const [recordingResult, setRecordingResult] = useState<IpoApplication>();
   const [deleting, setDeleting] = useState('');
   const deletionPending = useRef(false);
-  const [details, setDetails] = useState<{ section: 'portfolio' | 'analysis'; id: string; label: string }>();
+  const [details, setDetails] = useState<{ id: string; label: string }>();
+  const [period, setPeriod] = useState<IpoPortfolioPeriod>('all');
+  const [custom, setCustom] = useState(() => ipoPortfolioRange('month', { from: '', to: '' }));
+  const [companySearch, setCompanySearch] = useState('');
   const refresh = useCallback(async () => {
     setError('');
     try {
@@ -159,17 +138,12 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
     }
   }
 
-  const applications = data?.applications ?? [];
-  const totalApplied = applications.reduce((total, application) => total + Math.round(application.amount * 100), 0) / 100;
-  const companies = new Map<string, string>();
-  for (const application of applications) {
-    const key = companyGroup(application);
-    if (!companies.has(key)) companies.set(key, application.company);
-  }
-  const activeDetails = details?.section === section ? details : undefined;
-  const selectedApplications = activeDetails
-    ? applications.filter((application) => (section === 'portfolio' ? companyGroup(application) : dematGroup(application)) === activeDetails.id)
-    : [];
+  const range = ipoPortfolioRange(period, custom);
+  const { companies, applicationCount, applied, profit, loss } = summarizeIpoPortfolio(data?.applications ?? [], range);
+  const companyQuery = companySearch.trim().toLocaleLowerCase();
+  const visibleCompanies = [...companies.entries()].filter(([name]) => name.includes(companyQuery));
+  const activeDetails = section === 'portfolio' ? details : undefined;
+  const selectedApplications = activeDetails ? companies.get(activeDetails.id)?.applications ?? [] : [];
 
   function clearDetails() {
     setActionError('');
@@ -182,8 +156,20 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
         {section === 'portfolio' ? (
           <>
             {navigation}
-            <button type="button" className="secondary-button" onClick={onOpenAnalysis}><BarChart3 size={15} /> Analysis</button>
             <button type="button" className="secondary-button" onClick={onManageDemats}><Users size={15} /> Demat account holders</button>
+            <div className="ipo-range-controls">
+              {period === 'custom' ? <>
+                <DatePicker label="Applied from" value={custom.from} max={custom.to} onChange={(from) => setCustom((current) => ({ ...current, from }))} />
+                <DatePicker label="Applied through" value={custom.to} min={custom.from} max={todayKey()} onChange={(to) => setCustom((current) => ({ ...current, to }))} />
+              </> : null}
+              <Select className="compact-select" aria-label="Application date range" value={period} onChange={(event) => setPeriod(event.target.value as IpoPortfolioPeriod)}>
+                <option value="all">All time</option>
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+                <option value="year">This year</option>
+                <option value="custom">Custom range</option>
+              </Select>
+            </div>
           </>
         ) : (
           <button type="button" className="text-button" onClick={() => { clearDetails(); onBack(); }}><ArrowLeft size={15} /> Back to portfolio</button>
@@ -200,29 +186,40 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
         <IpoDematAccounts demats={data.demat_accounts} ownerName={ownerName} adding={adding} onClose={onClose} onChanged={refresh} onNotify={onNotify} />
       ) : activeDetails ? (
         <IpoApplicationDetails title={activeDetails.label} applications={selectedApplications} deleting={deleting}
-          onBack={clearDetails} onEdit={(application) => { setActionError(''); setEditing(application); }} onDelete={(application) => void remove(application)} />
-      ) : section === 'analysis' ? (
-        <IpoAnalysis applications={applications} onView={(id, label) => setDetails({ section: 'analysis', id, label })} />
+          onBack={clearDetails} onEdit={(application) => { setActionError(''); setEditing(application); }} onDelete={(application) => void remove(application)}
+          onRecordResult={setRecordingResult} />
       ) : (
         <>
           <div className="metrics-grid ipo-portfolio-metrics">
             <Metric label="Companies applied" value={String(companies.size)} foot="Distinct companies" icon={<Building2 size={16} />} />
-            <Metric label="Applications" value={String(applications.length)} foot="Recorded across demat accounts" icon={<FileText size={16} />} />
-            <Metric label="Total applied" value={formatMoney(totalApplied)} foot="Combined application amounts" icon={<Wallet size={16} />} />
+            <Metric label="Applications" value={String(applicationCount)} foot="Recorded across demat accounts" icon={<FileText size={16} />} />
+            <Metric label="Total applied" value={formatMoney(applied)} foot="Combined application amounts" icon={<Wallet size={16} />} />
+            <Metric label="Total profit" value={formatMoney(profit)} foot="Profitable applications" icon={<TrendingUp size={16} />} />
+            <Metric label="Total loss" value={formatMoney(loss === 0 ? 0 : -loss)} foot="Loss-making applications" icon={<TrendingDown size={16} />} />
           </div>
           <section className="surface-card" aria-labelledby="ipo-applications-title">
-            <div className="card-title-row"><h3 id="ipo-applications-title">IPO applications</h3></div>
-            {companies.size ? (
+            <div className="card-title-row ipo-company-list-header">
+              <h3 id="ipo-applications-title">IPO applications</h3>
+              <label className="search-field">
+                <Search size={16} aria-hidden="true" />
+                <input type="search" aria-label="Search company names" placeholder="Search company names" value={companySearch}
+                  onChange={(event) => setCompanySearch(event.target.value)} />
+              </label>
+            </div>
+            {visibleCompanies.length ? (
               <div className="account-list">
-                {[...companies.entries()].map(([id, label]) => (
-                  <button className="account-row ipo-company-link" type="button" key={id} onClick={() => setDetails({ section: 'portfolio', id, label })}>
+                {visibleCompanies.map(([id, { label, resultPaise }]) => (
+                  <button className="account-row ipo-company-link" type="button" key={id} onClick={() => setDetails({ id, label })}>
                     <span className="account-icon" aria-hidden="true"><Building2 size={17} /></span>
                     <span className="account-info"><b>{label}</b></span>
+                    {resultPaise != null ? <ProfitLoss value={resultPaise / 100} /> : null}
                     <ChevronRight size={17} aria-hidden="true" />
                   </button>
                 ))}
               </div>
-            ) : <EmptyPanel icon={<FileText size={20} />} title="No IPO applications yet" description="Use Add IPO to record your first application." />}
+            ) : companyQuery ? <EmptyPanel icon={<Search size={20} />} title="No matching company" description="Try a different company name." />
+              : <EmptyPanel icon={<FileText size={20} />} title={period === 'all' ? 'No IPO applications yet' : 'No IPO applications in this range'}
+              description={period === 'all' ? 'Use Add IPO to record your first application.' : 'Choose a different application date range.'} />}
           </section>
         </>
       )}
@@ -230,6 +227,15 @@ export function IpoPortfolio({ accounts, ownerName, navigation, section, adding,
         <AddIpoForm key={editing?.id ?? 'new'} application={editing} accounts={accounts.filter((account) => !account.isLiability)}
           allotmentDateSupported={data.allotment_date_supported === true}
           demats={data.demat_accounts} onManageDemats={() => { closeForm(); onManageDemats(); }} onClose={closeForm} onSave={saved} />
+      ) : null}
+      {recordingResult && section === 'portfolio' ? (
+        <IpoResultForm key={recordingResult.id} application={recordingResult} onClose={() => setRecordingResult(undefined)} onSaved={(value, invested) => {
+          setData((current) => current && ({ ...current, applications: current.applications.map((application) => application.id === recordingResult.id
+            ? { ...application, realized_profit_loss: value, invested_amount: invested }
+            : application) }));
+          setRecordingResult(undefined);
+          onNotify('IPO result saved.');
+        }} />
       ) : null}
     </>
   );

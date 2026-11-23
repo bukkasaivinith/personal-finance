@@ -24,8 +24,11 @@ test('IPO accounting on the complete application migration history', async (t) =
  const editDematMigration = '20261123150000_ipo_demat_edit_and_broker_apps.sql';
  const manageApplicationsMigration = '20261123160000_manage_ipo_applications.sql';
  const allotmentDateMigration = '20261123180000_ipo_allotment_date.sql';
+ const savingsMigration = '20261123190000_savings_entries.sql';
+ const ipoResultsMigration = '20261123200000_ipo_realized_results.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration, allotmentDateMigration].includes(name)) continue; // Test each upgrade with existing data.
+  if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
+   allotmentDateMigration, savingsMigration, ipoResultsMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -540,10 +543,79 @@ test('IPO accounting on the complete application migration history', async (t) =
   assert.deepEqual(await readDates(), [null, null]);
   assert.equal(await ledger(bank), bankBalance);
  });
+ await t.test('savings edits and deletions persist independently of the transaction ledger', async () => {
+  const count = await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]);
+  const bankBalance = await ledger(bank);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(savingsMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const add = (amount, location, name) => scalar(
+   "INSERT INTO public.savings_entries (name, amount, saved_on, storage_type) VALUES ($1,$2,'2026-01-10',$3) RETURNING id",
+   [name, amount, location]);
+  const balances = async () => (await db.query('SELECT storage_type, balance FROM public.get_savings_balances() ORDER BY storage_type'))
+   .rows.map((entry) => [entry.storage_type, Number(entry.balance)]);
+  const bankSaving = await add('1200.50', 'bank', 'Emergency fund');
+  const cashSaving = await add(400, 'cash', 'Backup cash');
+  await assert.rejects(add('NaN', 'other', 'Invalid amount'), /check constraint/);
+  await assert.rejects(add(15, 'unsupported', 'Invalid location'), /check constraint/);
+  assert.deepEqual(await balances(), [['bank', 1200.50], ['cash', 400]]);
+
+  await db.query("UPDATE public.savings_entries SET amount=1300, storage_type='other' WHERE id=$1 RETURNING id", [bankSaving]);
+  await db.query('DELETE FROM public.savings_entries WHERE id=$1 RETURNING id', [cashSaving]);
+  assert.deepEqual(await balances(), [['other', 1300]]);
+  assert.equal((await row('savings_entries', bankSaving)).name, 'Emergency fund');
+  assert.equal(await ledger(bank), bankBalance);
+  assert.equal(await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]), count);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  assert.deepEqual(await balances(), []);
+  assert.equal((await db.query('DELETE FROM public.savings_entries WHERE id=$1 RETURNING id', [bankSaving])).rows.length, 0);
+  await assert.rejects(add(20, 'cash', 'Blocked session'), /row-level security/);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+  assert.deepEqual(await balances(), [['other', 1300]]);
+ });
+ await t.test('manual IPO results persist and booked sales remain the source for linked applications', async () => {
+  const bankBalance = await ledger(bank);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(ipoResultsMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const load = () => scalar('SELECT public.get_ipo_portfolio()');
+  const portfolio = await load();
+  const manual = portfolio.applications.filter((entry) => entry.company === 'Dated allotment IPO');
+  const booked = portfolio.applications.find((entry) => entry.id === application);
+  assert.equal(manual.length, 2);
+  assert.equal(manual[0].realized_profit_loss, null);
+  assert.equal(Number(booked.realized_profit_loss), -420);
+  assert.equal(Number(booked.invested_amount), 6010);
+
+  const save = (id, result, invested = null) => scalar('SELECT public.set_ipo_application_result($1,$2,$3)', [id, result, invested]);
+  await assert.rejects(save(booked.id, 1), /linked activity/);
+  await assert.rejects(save(manual[0].id, 123.456), /two decimal places/);
+  await assert.rejects(save(manual[0].id, 250.75, -75), /positive invested amount/);
+  await save(manual[0].id, 250.75, 1000);
+  await save(manual[0].id, 250.75, 1000);
+  await save(manual[1].id, -100.5);
+  const results = async () => (await load()).applications.filter((entry) => manual.some((item) => item.id === entry.id))
+   .map((entry) => entry.realized_profit_loss);
+  assert.deepEqual(await results(), [250.75, -100.5]);
+  assert.equal((await load()).applications.find((entry) => entry.id === manual[0].id).invested_amount, 1000);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_events WHERE application_id=$1 AND command='record_result'", [manual[0].id])), 1);
+
+  await save(manual[0].id, 0);
+  await save(manual[1].id, null);
+  assert.deepEqual(await results(), [0, null]);
+  await scalar('SELECT public.archive_ipo_portfolio_application($1)', [manual[0].id]);
+  assert.deepEqual(await results(), [null]);
+  await assert.rejects(save(manual[0].id, 20), /linked activity/);
+  assert.equal(await ledger(bank), bankBalance);
+ });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');
   await db.exec('RESET ROLE');
   assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events WHERE user_id=$1',[owner])),0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_entries WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM auth.users WHERE id=$1',[owner])),0);
   const replacement = randomUUID();
   await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[replacement,'bukkasaivinith@gmail.com']);

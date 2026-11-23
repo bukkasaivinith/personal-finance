@@ -3,7 +3,8 @@ import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lu
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
-import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
+import { GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
+import { SavingsView } from '@/components/savings-view';
 import { InvestmentsView } from '@/components/investments-view';
 import { IpoPortfolio } from '@/components/ipo-portfolio';
 import { AthleteHub } from '@/components/athlete-hub';
@@ -60,7 +61,7 @@ function NavigationGroup({
   activeView: View;
   onSelect: (view: View) => void;
 }) {
-  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-analysis' || activeView === 'ipo-demats' ? 'investments' : activeView;
+  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments' : activeView;
   return (
     <div className="nav-group">
       <span className="nav-label">{label}</span>
@@ -85,13 +86,12 @@ export default function App() {
   const profile = useCurrentFinanceProfile();
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
-  const isIpoAnalysis = activeView === 'ipo-analysis';
-  const isIpoApplicationPage = activeView === 'ipo-portfolio' || isIpoAnalysis;
+  const isIpoApplicationPage = activeView === 'ipo-portfolio';
   const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
   const finance = useFinanceData(activeOwnerId);
   const data = finance.data ?? emptyFinance;
-  const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments, investmentTypes } = data;
+  const { accounts, transactions, categories, transactionTypes, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -295,16 +295,8 @@ export default function App() {
         );
       case 'analytics':
         return <AnalyticsView transactions={transactions} />;
-      case 'budgets':
-        return (
-          <BudgetsView
-            budgets={budgets}
-            categories={categories}
-            transactions={transactions}
-            actions={actions}
-            onNotify={showToast}
-          />
-        );
+      case 'savings':
+        return <SavingsView key={activeOwnerId} ownerId={activeOwnerId ?? ''} onNotify={showToast} />;
       case 'goals':
         return <GoalsView onNotify={showToast} />;
       case 'recurring':
@@ -322,18 +314,16 @@ export default function App() {
       case 'investments':
         return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} navigation={investmentNavigation} />;
       case 'ipo-portfolio':
-      case 'ipo-analysis':
       case 'ipo-demats':
         return (
           <IpoPortfolio
             accounts={usableAccounts}
             ownerName={displayName}
             navigation={investmentNavigation}
-            section={isIpoDemats ? 'demats' : isIpoAnalysis ? 'analysis' : 'portfolio'}
+            section={isIpoDemats ? 'demats' : 'portfolio'}
             adding={isIpoDemats ? modal === 'ipo-demat' : modal === 'ipo'}
             onClose={closeModal}
             onBack={() => navigate('ipo-portfolio')}
-            onOpenAnalysis={() => navigate('ipo-analysis')}
             onManageDemats={() => navigate('ipo-demats')}
             onNotify={showToast}
           />
@@ -392,7 +382,7 @@ export default function App() {
             <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
             <h1>{pageCopy[activeView].title}</h1>
           </div>
-          {activeView !== 'transactions' && activeView !== 'athlete' ? (
+          {activeView !== 'transactions' && activeView !== 'athlete' && activeView !== 'savings' ? (
             <div className="top-actions">
               <button className={`primary-button header-action${isIpoApplicationPage ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoApplicationPage ? 'ipo' : isIpoDemats ? 'ipo-demat' : 'transaction')}>
                 <span className="header-action-icon" aria-hidden="true">

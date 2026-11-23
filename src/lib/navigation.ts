@@ -16,13 +16,12 @@ export type View =
   | 'overview'
   | 'transactions'
   | 'accounts'
-  | 'budgets'
+  | 'savings'
   | 'analytics'
   | 'goals'
   | 'recurring'
   | 'investments'
   | 'ipo-portfolio'
-  | 'ipo-analysis'
   | 'ipo-demats'
   | 'athlete'
   | 'setup'
@@ -42,7 +41,7 @@ export const workspaceNavigation: NavItem[] = [
   { id: 'overview', label: 'Overview', icon: Home },
   { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
   { id: 'accounts', label: 'Accounts', icon: Wallet },
-  { id: 'budgets', label: 'Budgets', icon: PiggyBank },
+  { id: 'savings', label: 'Savings', icon: PiggyBank },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'goals', label: 'Savings goals', icon: Target },
 ];
@@ -58,13 +57,12 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   overview: { title: 'Overview', eyebrow: todayLabel },
   transactions: { title: 'Transactions', eyebrow: 'Income, expenses and transfers' },
   accounts: { title: 'Accounts', eyebrow: 'Balances across your money' },
-  budgets: { title: 'Budgets', eyebrow: 'Spending limits by category' },
+  savings: { title: 'Savings', eyebrow: 'Set-aside money' },
   analytics: { title: 'Analytics', eyebrow: 'Insights for the selected month' },
   goals: { title: 'Savings goals', eyebrow: 'Track what you are saving toward' },
   recurring: { title: 'Recurring', eyebrow: 'Repeating income and bills' },
   investments: { title: 'Investments', eyebrow: 'Capital, returns and reinvestment' },
   'ipo-portfolio': { title: 'Portfolio', eyebrow: 'IPO' },
-  'ipo-analysis': { title: 'Analysis', eyebrow: 'IPO portfolio' },
   'ipo-demats': { title: 'Demat account holders', eyebrow: 'IPO' },
   athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },

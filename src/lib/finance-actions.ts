@@ -1,5 +1,4 @@
 import {
-  deleteBudget,
   deleteInvestment,
   deleteInvestmentType,
   deleteItemPermanently,
@@ -25,7 +24,6 @@ import {
   updateRecurringEntry,
   updateTransaction,
   updateTransactionType,
-  upsertBudget,
   type ItemTable,
 } from '@/lib/finance-api';
 import type { ItemState } from '@/lib/finance';
@@ -58,8 +56,6 @@ export function createFinanceActions(refresh: () => Promise<void>, workspaceOwne
     settleInvestment: (input: Parameters<typeof settleInvestment>[0]) => run(settleInvestment(input)),
     updateInvestmentTracking: (input: Parameters<typeof updateInvestmentTracking>[0]) => run(updateInvestmentTracking(input)),
     recordInvestmentWithdrawal: (input: Parameters<typeof recordInvestmentWithdrawal>[0]) => run(recordInvestmentWithdrawal(input)),
-    saveBudget: (input: Parameters<typeof upsertBudget>[0]) => run(upsertBudget(input, workspaceOwnerId)),
-    removeBudget: (id: string) => run(deleteBudget(id)),
     createRecurringEntry: (input: Parameters<typeof insertRecurringEntry>[0]) => run(insertRecurringEntry(input, workspaceOwnerId)),
     updateRecurringEntry: (id: string, input: Parameters<typeof updateRecurringEntry>[1]) => run(updateRecurringEntry(id, input)),
     setRecurringEntryActive: (id: string, isActive: boolean) => run(setRecurringEntryActive(id, isActive)),

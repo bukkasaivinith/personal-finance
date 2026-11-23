@@ -1,0 +1,21 @@
+.investment-overview-metrics {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 25px;
+  overflow-x: auto;
+  padding: 1px 1px 8px;
+}
+
+.investment-overview-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+  gap: 14px;
+}
+
+.investment-overview-row.ipo-overview-metrics {
+  grid-template-columns: repeat(3, minmax(145px, 1fr));
+}
+
+.investment-overview-row .metric-foot {
+  display: block;
+}

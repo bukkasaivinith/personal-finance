@@ -4,3 +4,7 @@
 - Use the existing authenticated APIs and owner-scoped row-level security. For a direct update or delete of one row, check that the database affected that row. Treat a missing or inaccessible row as an error unless the operation explicitly supports an idempotent retry.
 - Keep related writes atomic. Update or remove linked records and recompute derived views according to their actual relationships. Preserve the existing archive and audit behavior for records that need to remain traceable.
 - Verify edits and deletions through the feature's normal entry points, including persistence after a fresh read and what happens when the database rejects the write.
+
+# Commits
+
+- After verifying a change, commit the files changed for the task. Leave the push to the user unless they explicitly ask you to push it.
