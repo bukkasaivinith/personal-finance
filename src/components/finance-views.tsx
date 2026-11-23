@@ -34,6 +34,15 @@ import {
   type TransactionKind,
 } from '@/lib/finance';
 import type { View } from '@/lib/navigation';
+import {
+  analyzeTransactions,
+  emptyTransactionAnalysisFilters,
+  transactionAnalysisOptions,
+  transactionAnalysisRange,
+  type AnalysisPeriod,
+  type TransactionAnalysisFilters,
+} from '@/lib/transaction-analysis';
+import './transaction-analysis.css';
 
 const kindIcons: Record<TransactionKind, typeof Wallet> = {
   expense: FileText,
@@ -387,10 +396,161 @@ export function OverviewView({
   );
 }
 
+const transactionPageSize = 25;
+
+function PagedTransactionTable({
+  transactions,
+  page,
+  onPage,
+  onEdit,
+  onDelete,
+}: {
+  transactions: Transaction[];
+  page: number;
+  onPage: (page: number) => void;
+  onEdit?: (transaction: Transaction) => void;
+  onDelete?: (transaction: Transaction) => void;
+}) {
+  const pageCount = Math.max(1, Math.ceil(transactions.length / transactionPageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * transactionPageSize;
+  const end = Math.min(start + transactionPageSize, transactions.length);
+  return (
+    <>
+      <TransactionTable transactions={transactions.slice(start, end)} onEdit={onEdit} onDelete={onDelete} />
+      {pageCount > 1 ? (
+        <div className="table-pagination" aria-label="Transaction pages">
+          <span>Showing {start + 1}–{end} of {transactions.length}</span>
+          <div>
+            <button className="secondary-button" type="button" onClick={() => onPage(safePage - 1)} disabled={safePage === 0}>Previous</button>
+            <button className="secondary-button" type="button" onClick={() => onPage(safePage + 1)} disabled={safePage >= pageCount - 1}>Next</button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function TransactionAnalysis({ transactions }: { transactions: Transaction[] }) {
+  const [period, setPeriod] = useState<AnalysisPeriod>('month');
+  const [filters, setFilters] = useState(emptyTransactionAnalysisFilters);
+  const [page, setPage] = useState(0);
+  const { categories, accounts } = useMemo(() => transactionAnalysisOptions(transactions), [transactions]);
+  const { from, to } = period === 'custom' ? filters : transactionAnalysisRange(period);
+  const analysis = useMemo(
+    () => analyzeTransactions(transactions, { ...filters, from, to }),
+    [transactions, filters, from, to],
+  );
+
+  function updateFilter<Key extends keyof TransactionAnalysisFilters>(key: Key, value: TransactionAnalysisFilters[Key]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(0);
+  }
+
+  function reset() {
+    setPeriod('month');
+    setFilters(emptyTransactionAnalysisFilters);
+    setPage(0);
+  }
+
+  const periodLabel = from && to ? `${formatDate(from)} – ${formatDate(to)}`
+    : from ? `From ${formatDate(from)}`
+    : to ? `Through ${formatDate(to)}`
+    : 'All dates';
+
+  return (
+    <div className="transaction-analysis">
+      <div className="metrics-grid transaction-analysis-metrics" aria-live="polite">
+        <Metric label="Total income" value={analysis.error ? '—' : formatMoney(analysis.income)} foot="Matching income entries" icon={<ArrowDownLeft size={16} />} />
+        <Metric label="Total expenses" value={analysis.error ? '—' : formatMoney(analysis.expense)} foot="Matching expense entries" icon={<ArrowUpRight size={16} />} />
+        <Metric label="Money left" value={analysis.error ? '—' : formatMoney(analysis.balance)} foot="Income minus expenses" icon={<Wallet size={16} />} />
+      </div>
+      <section className="surface-card transaction-analysis-filters" aria-labelledby="transaction-filters-title">
+        <div className="card-title-row">
+          <div><h3 id="transaction-filters-title">Filters</h3><p>{periodLabel}</p></div>
+          <button type="button" className="text-button" onClick={reset}>Reset filters</button>
+        </div>
+        <div className="transaction-filter-grid">
+          <label className="transaction-filter-field">
+            <span>Period</span>
+            <Select aria-label="Period" value={period} onChange={(event) => { setPeriod(event.target.value as AnalysisPeriod); setPage(0); }}>
+              <option value="month">This month</option>
+              <option value="last-month">Last month</option>
+              <option value="week">This week</option>
+              <option value="all">All time</option>
+              <option value="custom">Custom date range</option>
+            </Select>
+          </label>
+          {period === 'custom' ? (
+            <>
+              <DatePicker label="From" value={filters.from} max={filters.to || undefined} onChange={(value) => updateFilter('from', value)} placeholder="Any start date" clearable />
+              <DatePicker label="To" value={filters.to} min={filters.from || undefined} onChange={(value) => updateFilter('to', value)} placeholder="Any end date" clearable />
+            </>
+          ) : null}
+          <label className="transaction-filter-field">
+            <span>Minimum amount (₹)</span>
+            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any minimum" value={filters.minAmount} onChange={(event) => updateFilter('minAmount', event.target.value)} />
+          </label>
+          <label className="transaction-filter-field">
+            <span>Maximum amount (₹)</span>
+            <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any maximum" value={filters.maxAmount} onChange={(event) => updateFilter('maxAmount', event.target.value)} />
+          </label>
+          <label className="transaction-filter-field">
+            <span>Category</span>
+            <Select aria-label="Category" value={filters.category} onChange={(event) => updateFilter('category', event.target.value)}>
+              <option value="">All categories</option>
+              {categories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </Select>
+          </label>
+          <label className="transaction-filter-field">
+            <span>Account</span>
+            <Select aria-label="Account" value={filters.account} onChange={(event) => updateFilter('account', event.target.value)}>
+              <option value="">All accounts</option>
+              {accounts.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </Select>
+          </label>
+          <label className="transaction-filter-field">
+            <span>Kind</span>
+            <Select aria-label="Kind" value={filters.kind} onChange={(event) => updateFilter('kind', event.target.value as TransactionAnalysisFilters['kind'])}>
+              <option value="all">All kinds</option>
+              <option value="income">Income</option>
+              <option value="expense">Expenses</option>
+              <option value="transfer">Transfers</option>
+            </Select>
+          </label>
+          <label className="transaction-filter-field">
+            <span>Source</span>
+            <Select aria-label="Source" value={filters.source} onChange={(event) => updateFilter('source', event.target.value as TransactionAnalysisFilters['source'])}>
+              <option value="all">All sources</option>
+              <option value="manual">Manual</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="investment">Investment</option>
+            </Select>
+          </label>
+          <label className="transaction-filter-field">
+            <span>Search</span>
+            <input type="search" placeholder="Search transactions" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
+          </label>
+        </div>
+        {analysis.error ? <p role="alert" className="form-error">{analysis.error}</p> : null}
+      </section>
+      <section className="surface-card" aria-labelledby="transaction-matches-title">
+        <div className="card-title-row">
+          <div>
+            <h3 id="transaction-matches-title">Matching transactions</h3>
+            {!analysis.error ? <p>{analysis.matches.length} {analysis.matches.length === 1 ? 'entry' : 'entries'}</p> : null}
+          </div>
+        </div>
+        {analysis.error ? <p className="card-note">Adjust the filters to see matching entries.</p> : <PagedTransactionTable transactions={analysis.matches} page={page} onPage={setPage} />}
+      </section>
+    </div>
+  );
+}
+
 export function TransactionsView({
   ipoMemos = [],
   transactions,
-  totalCount,
+  allTransactions,
   searchQuery,
   filter,
   onSearch,
@@ -401,7 +561,7 @@ export function TransactionsView({
 }: {
   ipoMemos?: IpoMemo[];
   transactions: Transaction[];
-  totalCount: number;
+  allTransactions: Transaction[];
   searchQuery: string;
   filter: 'all' | TransactionKind;
   onSearch: (value: string) => void;
@@ -410,28 +570,32 @@ export function TransactionsView({
   onEditTransaction?: (transaction: Transaction) => void;
   onDeleteTransaction?: (transaction: Transaction) => void;
 }) {
-  const pageSize = 25;
+  const pageSize = transactionPageSize;
+  const [section, setSection] = useState<'history' | 'analysis'>('history');
   const [page, setPage] = useState(0);
   const [memoPage, setMemoPage] = useState(0);
   const filteredMemos = ipoMemos.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase())).sort((a,b) => b.date.localeCompare(a.date));
   const memoPages = Math.max(1, Math.ceil(filteredMemos.length / pageSize));
   const safeMemoPage = Math.min(memoPage, memoPages - 1);
-  const pageCount = Math.max(1, Math.ceil(transactions.length / pageSize));
-  const safePage = Math.min(page, pageCount - 1);
-  const shownTransactions = transactions.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const analysisOpen = section === 'analysis';
   return (
     <>
       <SectionHeading
-        title="Transactions"
-        description="Every income, expense and transfer you have recorded."
+        title={analysisOpen ? 'Transaction analysis' : 'Transactions'}
+        description={analysisOpen ? 'Review your income, spending and money left for the records you select.' : 'Every income, expense and transfer you have recorded.'}
         action={onAddTransaction ? (
           <button className="primary-button" type="button" onClick={onAddTransaction}>
             <Plus size={16} /> Add transaction
           </button>
         ) : undefined}
       />
+      <nav className="analytics-tabs transaction-pages" aria-label="Transaction pages">
+        <button type="button" className={!analysisOpen ? 'active' : ''} aria-current={!analysisOpen ? 'page' : undefined} onClick={() => setSection('history')}>History</button>
+        <button type="button" className={analysisOpen ? 'active' : ''} aria-current={analysisOpen ? 'page' : undefined} onClick={() => setSection('analysis')}>Analysis</button>
+      </nav>
+      {analysisOpen ? <TransactionAnalysis transactions={allTransactions} /> : <>
       {ipoMemos.length ? <section className="surface-card ipo-memo-history"><h3>IPO application activity</h3><p className="form-hint">Memo records appear immediately. They do not change posted balances or income and expenses.</p><div className="table-scroll"><table><thead><tr><th>Activity</th><th>Date</th><th>Amount (INR)</th><th>Status</th></tr></thead><tbody>{filteredMemos.slice(safeMemoPage * pageSize, (safeMemoPage + 1) * pageSize).map(m => <tr key={m.id}><td>{m.name}</td><td>{formatDate(m.date)}</td><td>{formatMoney(m.amount)}</td><td>{m.reversed ? 'Reversed memo' : 'Memo · no cash movement'}</td></tr>)}</tbody></table></div>{memoPages > 1 ? <div className="ipo-pagination"><button className="secondary-button" disabled={!safeMemoPage} onClick={() => setMemoPage(safeMemoPage-1)}>Previous</button><span>Page {safeMemoPage+1} of {memoPages}</span><button className="secondary-button" disabled={safeMemoPage>=memoPages-1} onClick={() => setMemoPage(safeMemoPage+1)}>Next</button></div> : null}</section> : null}
-      {totalCount === 0 && !ipoMemos.length ? (
+      {allTransactions.length === 0 && !ipoMemos.length ? (
         <div className="surface-card">
           <EmptyPanel
             icon={<FileText size={20} />}
@@ -468,18 +632,10 @@ export function TransactionsView({
               <option value="transfer">Counts as transfer</option>
             </Select>
           </div>
-          <TransactionTable transactions={shownTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
-          {transactions.length > pageSize ? (
-            <div className="table-pagination" aria-label="Transaction pages">
-              <span>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, transactions.length)} of {transactions.length}</span>
-              <div>
-                <button className="secondary-button" type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={safePage === 0}>Previous</button>
-                <button className="secondary-button" type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={safePage >= pageCount - 1}>Next</button>
-              </div>
-            </div>
-          ) : null}
+          <PagedTransactionTable transactions={transactions} page={page} onPage={setPage} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
         </div>
       )}
+      </>}
     </>
   );
 }

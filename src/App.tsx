@@ -246,7 +246,7 @@ export default function App() {
           <TransactionsView
             ipoMemos={data?.ipoMemos}
             transactions={visibleTransactions}
-            totalCount={transactions.length}
+            allTransactions={sorted}
             searchQuery={searchQuery}
             filter={filter}
             onSearch={setSearchQuery}

@@ -120,8 +120,32 @@ function statusOf(row: StatusRow) {
   return { isActive: row.is_active, deletedAt: row.deleted_at };
 }
 
+async function loadWorkspaceTransactions(workspaceOwnerId: string): Promise<TransactionRow[]> {
+  const first = await supabase
+    .rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId }, { count: 'exact' })
+    .order('id')
+    .limit(1000);
+  if (first.error) failWith(first.error);
+  const rows = (first.data ?? []) as TransactionRow[];
+
+  // PostgREST caps each response. Use a stable ID cursor for any remaining rows.
+  while (rows.length > 0 && rows.length < (first.count ?? rows.length)) {
+    const next = await supabase
+      .rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId })
+      .gt('id', rows[rows.length - 1].id)
+      .order('id')
+      .limit(1000);
+    if (next.error) failWith(next.error);
+    const batch = (next.data ?? []) as TransactionRow[];
+    if (batch.length === 0) break;
+    rows.push(...batch);
+  }
+
+  return rows;
+}
+
 export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks] = await Promise.all([
     supabase
       .from('transaction_types')
       .select('id, name, kind, is_active, deleted_at')
@@ -138,7 +162,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
       .select('id, name, description, opening_balance, opening_balance_date, is_liability, is_active, deleted_at')
       .eq('user_id', workspaceOwnerId)
       .order('created_at', { ascending: true }),
-    supabase.rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId }),
+    loadWorkspaceTransactions(workspaceOwnerId),
     supabase.from('budgets').select('id, category_id, amount').eq('user_id', workspaceOwnerId).order('created_at', { ascending: true }),
     supabase
       .from('recurring_entries')
@@ -155,7 +179,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     loadIpoLinks(workspaceOwnerId),
   ]);
 
-  for (const result of [typeResult, categoryResult, linkResult, accountResult, transactionResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
+  for (const result of [typeResult, categoryResult, linkResult, accountResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -163,7 +187,6 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
   const categoryRows = (categoryResult.data ?? []) as CategoryRow[];
   const linkRows = (linkResult.data ?? []) as CategoryLinkRow[];
   const accountRows = (accountResult.data ?? []) as AccountRow[];
-  const transactionRows = (transactionResult.data ?? []) as TransactionRow[];
   const budgetRows = (budgetResult.data ?? []) as BudgetRow[];
   const recurringRows = (recurringResult.data ?? []) as RecurringEntryRow[];
   const investmentRows = (investmentResult.data ?? []) as InvestmentRow[];
