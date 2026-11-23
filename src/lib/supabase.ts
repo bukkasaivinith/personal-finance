@@ -9,11 +9,20 @@ const tabSessionStorage = {
   removeItem: (key: string) => window.sessionStorage.removeItem(key),
 };
 
-export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const authStorageKey = 'sb-' + new URL(supabaseUrl).hostname.split('.')[0] + '-auth-token';
+
+export const supabase = createClient(supabaseUrl, import.meta.env.VITE_SUPABASE_ANON_KEY, {
+  global: { fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }) },
   auth: {
     storage: tabSessionStorage,
+    storageKey: authStorageKey,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
   },
 });
+
+export function clearFinanceTabSession(): void {
+  for (const suffix of ['', '-user', '-code-verifier']) tabSessionStorage.removeItem(authStorageKey + suffix);
+}

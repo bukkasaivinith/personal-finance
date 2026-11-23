@@ -12,20 +12,26 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-export type View =
-  | 'overview'
-  | 'transactions'
-  | 'accounts'
-  | 'savings'
-  | 'analytics'
-  | 'goals'
-  | 'recurring'
-  | 'investments'
-  | 'ipo-portfolio'
-  | 'ipo-demats'
-  | 'athlete'
-  | 'setup'
-  | 'settings';
+export const viewPaths = {
+  overview: '/',
+  transactions: '/transactions',
+  accounts: '/accounts',
+  savings: '/savings',
+  analytics: '/analytics',
+  goals: '/goals',
+  recurring: '/recurring',
+  investments: '/investments',
+  'ipo-portfolio': '/investments/ipo',
+  'ipo-demats': '/investments/ipo/demats',
+  athlete: '/athlete-hub',
+  setup: '/setup',
+  settings: '/settings',
+} as const;
+
+export type View = keyof typeof viewPaths;
+
+export const financePageRoutes = Object.entries(viewPaths).map(([id, path]) => ({ id, path, element: null }));
+export const mobilePath = '/mobile';
 
 export type NavItem = { id: View; label: string; icon: LucideIcon };
 

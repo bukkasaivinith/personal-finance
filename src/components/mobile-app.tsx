@@ -1,6 +1,7 @@
 import { Select } from '@/components/select';
 import { RupeeInput } from '@/components/rupee-input';
 import { useMemo, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router';
 import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
 import { signOut } from '@/lib/auth-api';
@@ -17,8 +18,9 @@ const kinds: { value: TransactionKind; label: string }[] = [
 ];
 
 export function MobileApp() {
+  const navigate = useNavigate();
   const workspaceOwnerId = useCurrentFinanceProfile()?.id ?? null;
-  const finance = useFinanceData(workspaceOwnerId);
+  const finance = useFinanceData(workspaceOwnerId, 'forms');
   const actions = useMemo(() => createFinanceActions(finance.refresh, workspaceOwnerId ?? ''), [finance.refresh, workspaceOwnerId]);
   const [kind, setKind] = useState<TransactionKind>('expense');
   const [amount, setAmount] = useState('');
@@ -103,7 +105,7 @@ export function MobileApp() {
           <header className="mobile-header">
             <strong>My Finance</strong>
             <div className="mobile-header-actions">
-              <button className="mobile-icon-button" type="button" aria-label="Open dashboard" title="Open dashboard" onClick={() => window.location.assign('/')}>
+              <button className="mobile-icon-button" type="button" aria-label="Open dashboard" title="Open dashboard" onClick={() => void navigate('/')}>
                 <Settings2 size={19} />
               </button>
               <button className="mobile-icon-button" type="button" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>

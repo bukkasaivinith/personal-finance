@@ -21,6 +21,7 @@ import {
   isUsable,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
+import { publicApiError } from '@/lib/public-api-error';
 
 export type ItemTable = 'transaction_types' | 'categories' | 'accounts';
 
@@ -112,7 +113,7 @@ function failWith(error: PostgrestError): never {
   if (error.code === '23503') {
     throw new Error('This item is used by existing transactions, so it can only be deactivated or deleted.');
   }
-  throw new Error(error.message);
+  throw publicApiError(error, 'Could not complete the finance request. Please try again.');
 }
 
 function requireWrittenRecord({ data, error }: { data: { id: string } | null; error: PostgrestError | null }): void {
@@ -124,28 +125,59 @@ function statusOf(row: StatusRow) {
   return { isActive: row.is_active, deletedAt: row.deleted_at };
 }
 
-async function loadWorkspaceTransactions(workspaceOwnerId: string): Promise<TransactionRow[]> {
-  const first = await supabase
-    .rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId }, { count: 'exact' })
-    .order('id')
-    .limit(1000);
-  if (first.error) failWith(first.error);
-  const rows = (first.data ?? []) as TransactionRow[];
+export type FinanceScope = 'forms' | 'ledger' | 'recurring' | 'investments' | 'audit' | 'setup';
 
-  // PostgREST caps each response. Use a stable ID cursor for any remaining rows.
-  while (rows.length > 0 && rows.length < (first.count ?? rows.length)) {
-    const next = await supabase
-      .rpc('get_workspace_transactions', { p_owner_id: workspaceOwnerId })
-      .gt('id', rows[rows.length - 1].id)
-      .order('id')
-      .limit(1000);
-    if (next.error) failWith(next.error);
-    const batch = (next.data ?? []) as TransactionRow[];
-    if (batch.length === 0) break;
+const pageSize = 1000;
+
+async function loadWorkspaceTransactions(workspaceOwnerId: string, signal?: AbortSignal, scheduledOnly = false, lookup?: Pick<ActivityEvent, 'entityTable' | 'entityId'>): Promise<TransactionRow[]> {
+  const rows: TransactionRow[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    let request = supabase.rpc('get_finance_transaction_page', {
+      p_owner_id: workspaceOwnerId, p_limit: pageSize, p_after_id: cursor ?? null, p_scheduled_only: scheduledOnly,
+      p_transaction_id: lookup?.entityTable === 'transactions' ? lookup.entityId : null,
+      p_recurring_entry_id: lookup?.entityTable === 'recurring_entries' ? lookup.entityId : null,
+    }).order('id');
+    if (signal) request = request.abortSignal(signal);
+    const { data, error } = await request;
+    if (error) failWith(error);
+    const batch = (data ?? []) as TransactionRow[];
+    if (!batch.length) return rows;
     rows.push(...batch);
+    if (lookup?.entityTable === 'transactions') return rows;
+    cursor = batch[batch.length - 1].id;
   }
+}
 
-  return rows;
+export async function hasWorkspaceTransactions(ownerId: string, signal: AbortSignal): Promise<boolean> {
+  const { data, error } = await supabase.rpc('get_finance_transaction_page', { p_owner_id: ownerId, p_limit: 1 }).select('id').abortSignal(signal);
+  if (error) failWith(error);
+  return Boolean(data?.length);
+}
+
+async function loadTransactionUsage(ownerId: string, signal?: AbortSignal): Promise<FinanceData['transactionUsage']> {
+  const request = supabase.rpc('get_finance_transaction_usage', { p_owner_id: ownerId });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
+  if (error) failWith(error);
+  return data as FinanceData['transactionUsage'];
+}
+
+type RowPage = PromiseLike<{ data: unknown[] | null; error: PostgrestError | null; count?: number | null }> & {
+  range(from: number, to: number): RowPage;
+  abortSignal(signal: AbortSignal): RowPage;
+};
+
+async function readRows(enabled: boolean, request: RowPage, signal?: AbortSignal): Promise<unknown[]> {
+  if (!enabled) return [];
+  const rows: unknown[] = [];
+  if (signal) request = request.abortSignal(signal);
+  for (;;) {
+    const { data, error, count } = await request.range(rows.length, rows.length + pageSize - 1);
+    if (error) failWith(error);
+    if (!data?.length) return rows;
+    rows.push(...data);
+    if (count != null && rows.length >= count) return rows;
+  }
 }
 
 type LegacyIpoLinks = {
@@ -153,62 +185,70 @@ type LegacyIpoLinks = {
   investments?: { id: string }[];
 };
 
-async function loadLegacyIpoLinks(workspaceOwnerId: string): Promise<LegacyIpoLinks> {
+async function loadLegacyIpoLinks(workspaceOwnerId: string, signal?: AbortSignal): Promise<LegacyIpoLinks> {
   // Keep former custody accounts and managed holdings out of the regular finance screens.
-  const { data, error } = await supabase.rpc('ipo_finance_links', { p_owner_id: workspaceOwnerId });
+  const request = supabase.rpc('ipo_finance_links', { p_owner_id: workspaceOwnerId });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error?.code === 'PGRST202') return {};
   if (error) failWith(error);
   return (data ?? {}) as LegacyIpoLinks;
 }
 
-export async function loadFinanceData(workspaceOwnerId: string): Promise<FinanceData> {
-  const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks] = await Promise.all([
-    supabase
-      .from('transaction_types')
-      .select('id, name, kind, is_active, deleted_at')
-      .eq('user_id', workspaceOwnerId)
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('categories')
-      .select('id, name, emoji, parent_id, is_active, deleted_at')
-      .eq('user_id', workspaceOwnerId)
-      .order('created_at', { ascending: true }),
-    supabase.from('category_transaction_types').select('category_id, transaction_type_id').eq('user_id', workspaceOwnerId),
-    supabase
-      .from('accounts')
-      .select('id, name, description, opening_balance, opening_balance_date, is_liability, is_active, deleted_at')
-      .eq('user_id', workspaceOwnerId)
-      .order('created_at', { ascending: true }),
-    loadWorkspaceTransactions(workspaceOwnerId),
-    supabase.from('budgets').select('id, category_id, amount').eq('user_id', workspaceOwnerId).order('created_at', { ascending: true }),
-    supabase
-      .from('recurring_entries')
-      .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, interval_value, interval_unit, next_date, end_date, month_day, is_active')
-      .eq('user_id', workspaceOwnerId)
-      .order('next_date', { ascending: true }),
-    supabase
-      .from('investments')
-      .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode, current_estimated_value, value_updated_on, target_amount, maturity_date')
-      .eq('user_id', workspaceOwnerId)
-      .order('invested_on', { ascending: false }),
-    supabase.from('investment_types').select('id, name').eq('user_id', workspaceOwnerId).order('name', { ascending: true }),
-    supabase.from('investment_withdrawals').select('investment_id, amount_received, capital_return, profit_amount').eq('user_id', workspaceOwnerId),
-    loadLegacyIpoLinks(workspaceOwnerId),
+export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceScope, signal?: AbortSignal, lookup?: Pick<ActivityEvent, 'entityTable' | 'entityId'>): Promise<FinanceData> {
+  const recordId = (table: ActivityEvent['entityTable']) => scope === 'audit' && lookup?.entityTable === table ? lookup.entityId : null;
+  const investmentId = recordId('investments');
+  const investmentTypeId = recordId('investment_types');
+  const recurringId = recordId('recurring_entries');
+  const budgetId = recordId('budgets');
+  const budgetsQuery = supabase.from('budgets').select('id, category_id, amount', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('created_at').order('id');
+  const recurringQuery = supabase.from('recurring_entries')
+    .select('id, name, transaction_type_id, category_id, amount, account_id, to_account_id, frequency, interval_value, interval_unit, next_date, end_date, month_day, is_active', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('next_date').order('id');
+  const investmentsQuery = supabase.from('investments')
+    .select('id, name, investment_type, investment_type_id, notes, funding_account_id, capital_account_id, principal_amount, invested_on, status, final_amount, profit_amount, settled_on, accounting_mode, current_estimated_value, value_updated_on, target_amount, maturity_date', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('invested_on', { ascending: false }).order('id');
+  const investmentTypesQuery = supabase.from('investment_types').select('id, name', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('name').order('id');
+  const withdrawalsQuery = supabase.from('investment_withdrawals').select('investment_id, amount_received, capital_return, profit_amount', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('id');
+  if (budgetId) budgetsQuery.eq('id', budgetId);
+  if (recurringId) recurringQuery.eq('id', recurringId);
+  if (investmentId) {
+    investmentsQuery.eq('id', investmentId);
+    withdrawalsQuery.eq('investment_id', investmentId);
+  }
+  if (investmentTypeId) investmentTypesQuery.eq('id', investmentTypeId);
+  const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks, transactionUsage] = await Promise.all([
+    readRows(true, supabase.from('transaction_types').select('id, name, kind, is_active, deleted_at', { count: 'exact' })
+      .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
+    readRows(true, supabase.from('categories').select('id, name, emoji, parent_id, is_active, deleted_at', { count: 'exact' })
+      .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
+    readRows(true, supabase.from('category_transaction_types').select('category_id, transaction_type_id', { count: 'exact' })
+      .eq('user_id', workspaceOwnerId).order('category_id').order('transaction_type_id'), signal),
+    readRows(true, supabase.from('accounts').select('id, name, description, opening_balance, opening_balance_date, is_liability, is_active, deleted_at', { count: 'exact' })
+      .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
+    scope === 'ledger' || scope === 'recurring' || recurringId || recordId('transactions')
+      ? loadWorkspaceTransactions(workspaceOwnerId, signal, scope === 'recurring' || Boolean(recurringId), lookup)
+      : [],
+    readRows(Boolean(budgetId), budgetsQuery, signal),
+    readRows(scope === 'recurring' || Boolean(recurringId), recurringQuery, signal),
+    readRows(scope === 'investments' || Boolean(investmentId), investmentsQuery, signal),
+    readRows(scope === 'investments' || Boolean(investmentTypeId), investmentTypesQuery, signal),
+    readRows(scope === 'investments' || Boolean(investmentId), withdrawalsQuery, signal),
+    loadLegacyIpoLinks(workspaceOwnerId, signal),
+    scope === 'setup' ? loadTransactionUsage(workspaceOwnerId, signal) : undefined,
   ]);
 
-  for (const result of [typeResult, categoryResult, linkResult, accountResult, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult]) {
-    if (result.error) throw new Error(result.error.message);
-  }
-
-  const typeRows = (typeResult.data ?? []) as TransactionTypeRow[];
-  const categoryRows = (categoryResult.data ?? []) as CategoryRow[];
-  const linkRows = (linkResult.data ?? []) as CategoryLinkRow[];
-  const accountRows = (accountResult.data ?? []) as AccountRow[];
-  const budgetRows = (budgetResult.data ?? []) as BudgetRow[];
-  const recurringRows = (recurringResult.data ?? []) as RecurringEntryRow[];
-  const investmentRows = (investmentResult.data ?? []) as InvestmentRow[];
-  const investmentTypeRows = (investmentTypeResult.data ?? []) as InvestmentTypeRow[];
-  const withdrawalRows = (withdrawalResult.data ?? []) as InvestmentWithdrawalRow[];
+  const typeRows = typeResult as TransactionTypeRow[];
+  const categoryRows = categoryResult as CategoryRow[];
+  const linkRows = linkResult as CategoryLinkRow[];
+  const accountRows = accountResult as AccountRow[];
+  const budgetRows = budgetResult as BudgetRow[];
+  const recurringRows = recurringResult as RecurringEntryRow[];
+  const investmentRows = investmentResult as InvestmentRow[];
+  const investmentTypeRows = investmentTypeResult as InvestmentTypeRow[];
+  const withdrawalRows = withdrawalResult as InvestmentWithdrawalRow[];
 
   const transactionTypes: TransactionTypeOption[] = typeRows.map((row) => ({
     id: row.id,
@@ -347,7 +387,7 @@ export async function loadFinanceData(workspaceOwnerId: string): Promise<Finance
     .filter((row) => !legacyInvestmentTypeIds.has(row.id) || regularInvestmentTypeIds.has(row.id))
     .map((row) => ({ id: row.id, name: row.name }));
 
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes };
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes, transactionUsage };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {

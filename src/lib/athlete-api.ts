@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { publicApiError } from '@/lib/public-api-error';
 import type { WorkoutDetails } from '@/lib/athlete-workout';
 import type {
   AthleteActivity,
@@ -16,7 +17,7 @@ import type {
 } from '@/lib/athlete';
 
 function fail(error: { message: string }): never {
-  throw new Error(error.message);
+  throw publicApiError(error, 'Could not complete the Athlete Hub request. Please try again.');
 }
 
 function rows<T>(value: unknown): T[] {
@@ -27,8 +28,9 @@ function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
 }
 
-export async function loadAthleteHubData(): Promise<AthleteHubData> {
-  const { data, error } = await supabase.rpc('athlete_get_dashboard');
+export async function loadAthleteHubData(signal?: AbortSignal): Promise<AthleteHubData> {
+  const request = supabase.rpc('athlete_get_dashboard');
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error) fail(error);
   const result = (data ?? {}) as Record<string, unknown>;
   const settingsRow = (result.settings ?? {}) as Record<string, unknown>;

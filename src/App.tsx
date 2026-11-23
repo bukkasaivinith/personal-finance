@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useMatches, useNavigate } from 'react-router';
 import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
@@ -14,6 +15,8 @@ import { EmptyPanel } from '@/components/ui';
 import { WorkspaceSettings } from '@/components/workspace-settings';
 import { useCurrentFinanceProfile } from '@/lib/current-finance-profile';
 import { createFinanceActions } from '@/lib/finance-actions';
+import { hasWorkspaceTransactions, loadFinanceData } from '@/lib/finance-api';
+import { downloadReport } from '@/lib/report-export';
 import {
   formatMonth,
   isUsable,
@@ -27,7 +30,7 @@ import {
   type TransactionKind,
   type Transaction,
 } from '@/lib/finance';
-import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
+import { manageNavigation, pageCopy, viewPaths, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
 
 type ModalKind = 'transaction' | 'account' | 'ipo' | 'ipo-demat';
@@ -45,11 +48,6 @@ const emptyFinance: FinanceData = {
   investmentTypes: [],
 };
 
-function csvCell(value: string): string {
-  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
 function NavigationGroup({
   label,
   items,
@@ -59,7 +57,7 @@ function NavigationGroup({
   label: string;
   items: NavItem[];
   activeView: View;
-  onSelect: (view: View) => void;
+  onSelect: () => void;
 }) {
   const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments' : activeView;
   return (
@@ -67,15 +65,16 @@ function NavigationGroup({
       <span className="nav-label">{label}</span>
       <nav>
         {items.map((item) => (
-          <button
+          <Link
             key={item.id}
-            type="button"
+            to={viewPaths[item.id]}
+            aria-current={selectedView === item.id ? 'page' : undefined}
             className={`side-link ${selectedView === item.id ? 'active' : ''}`}
-            onClick={() => onSelect(item.id)}
+            onClick={onSelect}
           >
             <item.icon size={17} />
             {item.label}
-          </button>
+          </Link>
         ))}
       </nav>
     </div>
@@ -85,11 +84,16 @@ function NavigationGroup({
 export default function App() {
   const profile = useCurrentFinanceProfile();
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
-  const [activeView, setActiveView] = useState<View>('overview');
+  const routerNavigate = useNavigate();
+  const matches = useMatches();
+  const activeView = matches[matches.length - 1].id as View;
   const isIpoApplicationPage = activeView === 'ipo-portfolio';
   const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
-  const finance = useFinanceData(activeOwnerId);
+  const ledgerPage = activeView === 'overview' || activeView === 'transactions' || activeView === 'accounts' || activeView === 'analytics';
+  const scope = ledgerPage ? 'ledger' : activeView === 'investments' || activeView === 'recurring' || activeView === 'setup' ? activeView : 'forms';
+  const needsForms = activeView !== 'athlete' && activeView !== 'savings' && activeView !== 'ipo-demats';
+  const finance = useFinanceData(needsForms ? activeOwnerId : null, scope);
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
@@ -101,6 +105,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | TransactionKind>('all');
   const [recurringChecked, setRecurringChecked] = useState(false);
+  const [canExportCsv, setCanExportCsv] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportRequests = useRef(new Set<AbortController>());
   const selectedMonth = monthOptions[0];
 
   useEffect(() => { setRecurringChecked(false); }, [activeOwnerId]);
@@ -126,7 +133,7 @@ export default function App() {
   }, [sorted, searchQuery, filter]);
 
   const monthLabel = formatMonth(selectedMonth);
-  const hasTransactions = transactions.length > 0;
+
 
   const showToast = (message: string) => {
     setToast(message);
@@ -134,7 +141,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!finance.data || recurringChecked) return;
+    if (!activeOwnerId || (needsForms && !finance.data) || recurringChecked) return;
     setRecurringChecked(true);
     void actions.processDueRecurringEntries()
       .then((generated) => { if (generated) showToast(`${generated} due recurring ${generated === 1 ? 'entry was' : 'entries were'} added.`); })
@@ -142,12 +149,20 @@ export default function App() {
         // A recurring rule is optional. The Recurring page gives the user a
         // visible retry button if processing is temporarily unavailable.
       });
-  }, [actions, finance.data, recurringChecked]);
+  }, [actions, activeOwnerId, finance.data, needsForms, recurringChecked]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setModal((current) => {
+      const closeIpo = current === 'ipo' && activeView !== 'ipo-portfolio';
+      const closeDemat = current === 'ipo-demat' && activeView !== 'ipo-demats';
+      return closeIpo || closeDemat ? null : current;
+    });
+  }, [activeView]);
 
   const navigate = (view: View) => {
-    setActiveView(view);
     setMobileMenuOpen(false);
-    if ((modal === 'ipo' || modal === 'ipo-demat') && view !== activeView) setModal(null);
+    if (view !== activeView) void routerNavigate(viewPaths[view]);
   };
 
   const closeModal = () => setModal(null);
@@ -190,34 +205,51 @@ export default function App() {
     }
   };
 
-  const exportCsv = () => {
-    const rows = [
-      ['Date', 'Time', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'],
-      ...sorted.map((transaction) => [
-        transaction.date,
-        transaction.time ?? '',
-        transaction.name,
-        transaction.typeName,
-        transaction.kind,
-        transaction.categoryName ?? '',
-        transaction.accountName,
-        transaction.toAccountName ?? '',
-        String(transaction.amount),
-      ]),
-    ];
-    const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'personal-financing-transactions.csv';
-    link.click();
-    URL.revokeObjectURL(url);
-    showToast('CSV export downloaded.');
+  useEffect(() => {
+    if (activeView !== 'settings' || !activeOwnerId) return;
+    const controller = new AbortController();
+    void hasWorkspaceTransactions(activeOwnerId, controller.signal)
+      .then((hasData) => { if (!controller.signal.aborted) setCanExportCsv(hasData); })
+      .catch(() => { if (!controller.signal.aborted) setCanExportCsv(true); });
+    return () => { controller.abort(); setCanExportCsv(false); };
+  }, [activeView, activeOwnerId, finance.data]);
+
+  useEffect(() => {
+    const requests = exportRequests.current;
+    return () => { for (const request of requests) request.abort(); };
+  }, []);
+
+  const exportCsv = async () => {
+    if (!activeOwnerId || exportingCsv) return;
+    const request = new AbortController();
+    exportRequests.current.add(request);
+    setExportingCsv(true);
+    try {
+      const ledger = await loadFinanceData(activeOwnerId, 'ledger', request.signal);
+      if (request.signal.aborted) return;
+      const rows = sortByDate(ledger.transactions).map((transaction) => [
+        transaction.date, transaction.time ?? '', transaction.name, transaction.typeName, transaction.kind,
+        transaction.categoryName ?? '', transaction.accountName, transaction.toAccountName ?? '', transaction.amount,
+      ]);
+      await downloadReport({
+        title: 'Transactions', filename: 'personal-financing-transactions', summary: [],
+        headers: ['Date', 'Time', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'], rows,
+      }, 'csv');
+      showToast('CSV export downloaded.');
+    } catch {
+      if (!request.signal.aborted) showToast('Could not export transactions. Please try again.');
+    } finally {
+      exportRequests.current.delete(request);
+      if (!request.signal.aborted) setExportingCsv(false);
+    }
   };
 
   const exportAthleteData = async () => {
+    const request = new AbortController();
+    exportRequests.current.add(request);
     try {
-      const athleteData = await loadAthleteHubData();
+      const athleteData = await loadAthleteHubData(request.signal);
+      if (request.signal.aborted) return;
       const url = URL.createObjectURL(new Blob([JSON.stringify(athleteData, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;
@@ -226,7 +258,9 @@ export default function App() {
       URL.revokeObjectURL(url);
       showToast('Private Athlete Hub export downloaded.');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not export Athlete Hub data.');
+      if (!request.signal.aborted) showToast(error instanceof Error ? error.message : 'Could not export Athlete Hub data.');
+    } finally {
+      exportRequests.current.delete(request);
     }
   };
 
@@ -288,7 +322,7 @@ export default function App() {
           <SetupView
             transactionTypes={transactionTypes}
             categories={categories}
-            transactions={transactions}
+            transactionUsage={data.transactionUsage}
             actions={actions}
             onNotify={showToast}
           />
@@ -331,7 +365,7 @@ export default function App() {
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':
-        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} athletePreferences={<AthletePreferencesButton onNotify={showToast} />} />;
+        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={canExportCsv && !exportingCsv} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} athletePreferences={<AthletePreferencesButton onNotify={showToast} />} />;
     }
   };
 
@@ -351,17 +385,13 @@ export default function App() {
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}>
             <X size={18} />
           </button>
-          <NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={navigate} />
-          <NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={navigate} />
+          <NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={() => setMobileMenuOpen(false)} />
+          <NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={() => setMobileMenuOpen(false)} />
         </div>
         <div className="sidebar-bottom">
-          <button
-            className={`side-link ${activeView === 'settings' ? 'active' : ''}`}
-            type="button"
-            onClick={() => navigate('settings')}
-          >
+          <Link className={`side-link ${activeView === 'settings' ? 'active' : ''}`} to={viewPaths.settings} aria-current={activeView === 'settings' ? 'page' : undefined} onClick={() => setMobileMenuOpen(false)}>
             <Settings size={17} /> Settings
-          </button>
+          </Link>
           <button className="side-link" type="button" onClick={() => void signOut()}>
             <LogOut size={17} /> Sign out
           </button>
@@ -394,7 +424,7 @@ export default function App() {
           ) : null}
         </header>
 
-        {finance.data ? (
+        {!needsForms || finance.data ? (
           renderView()
         ) : (
           <div className="surface-card">
@@ -416,15 +446,12 @@ export default function App() {
 
       <nav className="mobile-nav" aria-label="Primary">
         {[workspaceNavigation[0], workspaceNavigation[1], workspaceNavigation[2], workspaceNavigation[4]].map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={activeView === item.id ? 'active' : ''}
-            onClick={() => navigate(item.id)}
+          <Link key={item.id} to={viewPaths[item.id]} className={activeView === item.id ? 'active' : ''}
+            aria-current={activeView === item.id ? 'page' : undefined} onClick={() => setMobileMenuOpen(false)}
           >
             <item.icon size={18} />
             {item.label}
-          </button>
+          </Link>
         ))}
         <button type="button" onClick={() => setMobileMenuOpen(true)}>
           <MoreHorizontal size={18} />

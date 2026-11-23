@@ -5,7 +5,7 @@ import { ItemActions, StatusTag } from '@/components/item-actions';
 import { kindChoices } from '@/components/transaction-pickers';
 import { EmptyPanel, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
-import { isLegacyIpoTransactionType, stateOf, type CategoryOption, type ItemState, type Transaction, type TransactionTypeOption } from '@/lib/finance';
+import { isLegacyIpoTransactionType, stateOf, type CategoryOption, type ItemState, type TransactionTypeOption, type TransactionUsage } from '@/lib/finance';
 
 const stateRank: Record<ItemState, number> = { active: 0, inactive: 1, deleted: 2 };
 
@@ -14,13 +14,13 @@ const kindLabel = (kind: TransactionTypeOption['kind']) => kindChoices.find((cho
 export function SetupView({
   transactionTypes,
   categories,
-  transactions,
+  transactionUsage,
   actions,
   onNotify,
 }: {
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
-  transactions: Transaction[];
+  transactionUsage?: TransactionUsage;
   actions: FinanceActions;
   onNotify: (message: string) => void;
 }) {
@@ -77,7 +77,7 @@ export function SetupView({
           <div className="setup-list">
             {orderedTypes.map((type) => {
               const state = stateOf(type);
-              const usage = transactions.filter((t) => t.typeId === type.id).length;
+              const usage = transactionUsage?.types[type.id] ?? 0;
               return (
                 <div className="setup-row" key={type.id}>
                   <div className="setup-info">
@@ -133,7 +133,7 @@ export function SetupView({
           <div className="setup-list">
             {orderedCategories.map((category) => {
               const state = stateOf(category);
-              const usage = transactions.filter((t) => t.categoryId === category.id).length;
+              const usage = transactionUsage?.categories[category.id] ?? 0;
               const parent = categoryName(category.parentId);
               const types = category.transactionTypeIds.map(typeName).filter(Boolean).join(', ');
               return (
