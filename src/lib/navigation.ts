@@ -21,6 +21,7 @@ export type View =
   | 'goals'
   | 'recurring'
   | 'investments'
+  | 'ipo-portfolio'
   | 'athlete'
   | 'setup'
   | 'settings';
@@ -60,6 +61,7 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   goals: { title: 'Savings goals', eyebrow: 'Track what you are saving toward' },
   recurring: { title: 'Recurring', eyebrow: 'Repeating income and bills' },
   investments: { title: 'Investments', eyebrow: 'Capital, returns and reinvestment' },
+  'ipo-portfolio': { title: 'Portfolio', eyebrow: 'IPO' },
   athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },
   settings: { title: 'Settings', eyebrow: 'Preferences and data' },

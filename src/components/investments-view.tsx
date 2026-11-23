@@ -189,7 +189,7 @@ function WithdrawalModal({ investment, onClose, onSubmit }: { investment: Invest
   return <ModalShell eyebrow="Investments" title="Record partial return" labelId="investment-withdrawal-title" onClose={onClose}><form className="modal-form" onSubmit={submit}><p className="modal-description">Record money that came back while the investment remains active. The website automatically creates a capital-return credit first, then a separate profit credit if the received amount exceeds outstanding capital.</p><div className="investment-settlement-summary"><span>Outstanding capital <b>{formatMoney(remainingCapital)}</b></span><span>In this return <b>{capitalPart === null ? '—' : `${formatMoney(capitalPart)} capital${profitPart ? ` + ${formatMoney(profitPart)} profit` : ''}`}</b></span></div><div className="form-grid"><label className="full-field">Amount received (₹)<input autoFocus type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 5000" /></label><div className="full-field"><DatePicker label="Return date" value={withdrawnOn} onChange={setWithdrawnOn} min={investment.investedOn} /></div></div>{error ? <p className="form-error">{error}</p> : null}<div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Record return'}</button></div></form></ModalShell>;
 }
 
-export function InvestmentsView({ investments, investmentTypes, accounts, actions, onNotify }: { investments: Investment[]; investmentTypes: InvestmentType[]; accounts: Account[]; actions: FinanceActions; onNotify: (message: string) => void }) {
+export function InvestmentsView({ investments, investmentTypes, accounts, actions, onNotify, onOpenIpo }: { investments: Investment[]; investmentTypes: InvestmentType[]; accounts: Account[]; actions: FinanceActions; onNotify: (message: string) => void; onOpenIpo: () => void }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Investment | null>(null);
   const [settling, setSettling] = useState<Investment | null>(null);
@@ -252,7 +252,7 @@ export function InvestmentsView({ investments, investmentTypes, accounts, action
       description="Track stocks, funds, gold, a business, money lent to friends, or any money you commit."
       action={
         <>
-          <button className="primary-button" type="button" onClick={() => onNotify('IPO tracking is currently disabled.')}>
+          <button className="primary-button" type="button" onClick={onOpenIpo}>
             <Plus size={16} /> IPO
           </button>
           <button className="primary-button" type="button" onClick={() => setAdding(true)}>

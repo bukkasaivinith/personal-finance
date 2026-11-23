@@ -19,8 +19,9 @@ test('IPO accounting on the complete application migration history', async (t) =
  const directory = new URL('../supabase/migrations/', import.meta.url);
  const ownerMigration = '20261123100000_single_owner_workspace.sql';
  const disableIpoMigration = '20261123120000_disable_ipo_feature.sql';
+ const portfolioMigration = '20261123130000_ipo_portfolio_applications.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
-  if (name === ownerMigration || name === disableIpoMigration) continue; // Test each upgrade with existing data.
+  if ([ownerMigration, disableIpoMigration, portfolioMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -276,6 +277,56 @@ test('IPO accounting on the complete application migration history', async (t) =
   const legacy = await scalar('SELECT public.ipo_finance_links($1)', [owner]);
   assert.ok(legacy.accounts.some((account) => account.custody));
   assert.ok(legacy.investments.some((link) => link.id === investment));
+ });
+ await t.test('the new portfolio saves whole lots and scheduled listings without reopening legacy commands', async () => {
+  const bankBalance = await ledger(bank);
+  const transactionCount = await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]);
+  await db.exec('RESET ROLE');
+  const migration = await readFile(new URL(portfolioMigration, directory), 'utf8');
+  await db.exec(migration);
+  await db.exec(migration);
+  await db.exec('SET ROLE authenticated');
+
+  const draft = {
+   company_name: 'New portfolio IPO', classification: 'SME', application_date: '2026-01-20', listing_date: '2099-01-23',
+   issue_price: '33.33', lot_size: '3', amount: '299.97', account_id: bank,
+   demat_id: '', holder_name: 'Portfolio test holder', designation: 'friend',
+  };
+  const save = (input, key = randomUUID()) =>
+   scalar('SELECT public.save_ipo_portfolio_application($1, $2)', [key, JSON.stringify(input)]);
+
+  await assert.rejects(save({ ...draft, amount: '300.00' }), /whole number of lots/);
+  await assert.rejects(save({ ...draft, listing_date: '2026-01-19' }), /on or after the application date/);
+  await assert.rejects(save({ ...draft, account_id: randomUUID() }), /active bank or cash account/);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_companies WHERE name=$1', [draft.company_name])), 0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_applicants WHERE name=$1', [draft.holder_name])), 0);
+
+  const key = randomUUID();
+  const id = await save(draft, key);
+  assert.equal(await save(draft, key), id);
+  await assert.rejects(save({ ...draft, amount: '99.99' }, key), /already used for different details/);
+  const data = await scalar('SELECT public.get_ipo_portfolio()');
+  const application = data.applications.find((entry) => entry.id === id);
+  assert.deepEqual({
+   company: application.company, date: application.application_date, listing: application.listing_date,
+   holder: application.holder, amount: Number(application.amount), lotSize: application.lot_size, lots: application.lots,
+  }, {
+   company: draft.company_name, date: draft.application_date, listing: draft.listing_date,
+   holder: draft.holder_name, amount: 299.97, lotSize: 3, lots: 3,
+  });
+  const demat = data.demat_accounts.find((entry) => entry.holder === draft.holder_name);
+  assert.ok(demat);
+  const second = await save({ ...draft, amount: '99.99', demat_id: demat.id, holder_name: '' });
+  assert.equal((await row('ipo_applications', second)).company_id, application.company_id);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_companies WHERE name=$1', [draft.company_name])), 1);
+  assert.equal(await ledger(bank), bankBalance);
+  assert.equal(await scalar('SELECT count(*) FROM public.get_workspace_transactions($1)', [owner]), transactionCount);
+  await assert.rejects(command('company', { name: 'Legacy still disabled' }), /permission denied/);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  await assert.rejects(scalar('SELECT public.get_ipo_portfolio()'), /session|workspace owner/i);
+  await assert.rejects(save(draft), /session|workspace owner/i);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');

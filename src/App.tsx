@@ -5,6 +5,7 @@ import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/compon
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
 import { BudgetsView, GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
 import { InvestmentsView } from '@/components/investments-view';
+import { IpoPortfolio } from '@/components/ipo-portfolio';
 import { AthleteHub } from '@/components/athlete-hub';
 import { loadAthleteHubData } from '@/lib/athlete-api';
 import { SetupView } from '@/components/setup-views';
@@ -28,7 +29,7 @@ import {
 import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
 
-type ModalKind = 'transaction' | 'account';
+type ModalKind = 'transaction' | 'account' | 'ipo';
 
 const monthOptions = recentMonthKeys(6);
 
@@ -59,6 +60,7 @@ function NavigationGroup({
   activeView: View;
   onSelect: (view: View) => void;
 }) {
+  const selectedView = activeView === 'ipo-portfolio' ? 'investments' : activeView;
   return (
     <div className="nav-group">
       <span className="nav-label">{label}</span>
@@ -67,7 +69,7 @@ function NavigationGroup({
           <button
             key={item.id}
             type="button"
-            className={`side-link ${activeView === item.id ? 'active' : ''}`}
+            className={`side-link ${selectedView === item.id ? 'active' : ''}`}
             onClick={() => onSelect(item.id)}
           >
             <item.icon size={17} />
@@ -83,6 +85,7 @@ export default function App() {
   const profile = useCurrentFinanceProfile();
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
+  const isIpoPortfolio = activeView === 'ipo-portfolio';
   const activeOwnerId = profile?.id ?? null;
   const finance = useFinanceData(activeOwnerId);
   const data = finance.data ?? emptyFinance;
@@ -142,6 +145,7 @@ export default function App() {
   const navigate = (view: View) => {
     setActiveView(view);
     setMobileMenuOpen(false);
+    if (modal === 'ipo' && view !== 'ipo-portfolio') setModal(null);
   };
 
   const closeModal = () => setModal(null);
@@ -303,7 +307,9 @@ export default function App() {
           />
         );
       case 'investments':
-        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} />;
+        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onOpenIpo={() => navigate('ipo-portfolio')} />;
+      case 'ipo-portfolio':
+        return <IpoPortfolio accounts={usableAccounts} ownerName={displayName} adding={modal === 'ipo'} onClose={closeModal} onBack={() => navigate('investments')} onNotify={showToast} />;
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':
@@ -360,11 +366,11 @@ export default function App() {
           </div>
           {activeView !== 'transactions' && activeView !== 'athlete' ? (
             <div className="top-actions">
-              <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
+              <button className={`primary-button header-action${isIpoPortfolio ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoPortfolio ? 'ipo' : 'transaction')}>
                 <span className="header-action-icon" aria-hidden="true">
                   <Plus size={15} strokeWidth={2} />
                 </span>
-                <span>Add transaction</span>
+                <span>{isIpoPortfolio ? 'Add IPO' : 'Add transaction'}</span>
               </button>
             </div>
           ) : null}
