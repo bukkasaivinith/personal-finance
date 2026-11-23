@@ -4,11 +4,16 @@ import { build } from 'esbuild';
 const financeCompiled = await build({entryPoints:['src/lib/finance.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const { netPosition, signedBalance } = await import(`data:text/javascript;base64,${Buffer.from(financeCompiled.outputFiles[0].text).toString('base64')}`);
 const allocationsCompiled = await build({ entryPoints: ['src/lib/ipo-lot-allocations.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
-const { groupIpoLots } = await import(`data:text/javascript;base64,${Buffer.from(allocationsCompiled.outputFiles[0].text).toString('base64')}`);
+const { groupIpoLots, ipoLotPricePaise } = await import(`data:text/javascript;base64,${Buffer.from(allocationsCompiled.outputFiles[0].text).toString('base64')}`);
 const summaryCompiled = await build({ entryPoints: ['src/lib/ipo-portfolio-summary.ts'], bundle: true, write: false, format: 'esm', platform: 'node', tsconfig: 'tsconfig.app.json' });
 const { defaultIpoCustomRange, ipoPortfolioRange, summarizeIpoPortfolio } = await import(`data:text/javascript;base64,${Buffer.from(summaryCompiled.outputFiles[0].text).toString('base64')}`);
 const rupeeCompiled = await build({ entryPoints: ['src/lib/rupee-input.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
 const { formatRupeeInput, parseRupeeInput } = await import(`data:text/javascript;base64,${Buffer.from(rupeeCompiled.outputFiles[0].text).toString('base64')}`);
+
+test('one lot price uses the saved issue price and exact paise', () => {
+ assert.equal(ipoLotPricePaise(187, 80), 1496000);
+ assert.equal(ipoLotPricePaise(187.03, 80), 1496240);
+});
 
 test('one holder selection per lot combines repeated accounts for saving', () => {
  assert.deepEqual(groupIpoLots(3, '', new Map([[0, 'first'], [1, 'second'], [2, 'first']])), [

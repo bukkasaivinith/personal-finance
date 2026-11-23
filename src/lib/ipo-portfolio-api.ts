@@ -8,16 +8,20 @@ export type IpoDematAccount = {
   designation: 'self' | 'friend';
 };
 
-export type IpoApplication = {
+export type IpoApplicationResult = {
+  realized_profit_loss: number | null;
+  invested_amount: number | null;
+  present_total_value: number | null;
+  not_allotted: boolean;
+};
+
+export type IpoApplication = Partial<IpoApplicationResult> & {
   id: string;
   company_id: string;
   company: string;
   application_date: string;
   allotment_date?: string | null;
   listing_date: string | null;
-  realized_profit_loss?: number | null;
-  invested_amount?: number | null;
-  present_total_value?: number | null;
   holder: string;
   demat: string;
   broker?: string;
@@ -93,11 +97,12 @@ export async function removeIpoApplication(id: string): Promise<void> {
   if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
 }
 
-export async function saveIpoApplicationResult(id: string, profitLoss: number | null, presentTotalValue: number | null): Promise<void> {
-  const { error } = await supabase.rpc('save_ipo_portfolio_result', {
-    p_application_id: id, p_profit_loss: profitLoss, p_present_total_value: presentTotalValue,
+export async function saveIpoApplicationResult(id: string, profitLoss: number | null, presentTotalValue: number | null, notAllotted: boolean): Promise<IpoApplicationResult> {
+  const { data, error } = await supabase.rpc('save_ipo_portfolio_result', {
+    p_application_id: id, p_profit_loss: profitLoss, p_present_total_value: presentTotalValue, p_not_allotted: notAllotted,
   });
   if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  return data as IpoApplicationResult;
 }
 
 export async function saveIpoDematAccount(holder: string, nickname: string, designation: IpoDematAccount['designation'], broker: string): Promise<void> {

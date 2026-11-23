@@ -2,23 +2,26 @@ import { useRef, useState, type FormEvent } from 'react';
 import { ModalShell } from '@/components/ui';
 import { Select } from '@/components/select';
 import { RupeeInput } from '@/components/rupee-input';
-import { formatDematAccount, saveIpoApplicationResult, type IpoApplication } from '@/lib/ipo-portfolio-api';
+import { formatMoney } from '@/lib/finance';
+import { ipoLotPricePaise } from '@/lib/ipo-lot-allocations';
+import { formatDematAccount, saveIpoApplicationResult, type IpoApplication, type IpoApplicationResult } from '@/lib/ipo-portfolio-api';
 
-type ResultKind = 'profit' | 'loss' | 'even' | 'unrecorded';
+type ResultKind = 'profit' | 'loss' | 'even' | 'unrecorded' | 'not_allotted';
 const rupeeAmount = /^[0-9]{1,12}(\.[0-9]{0,2})?$/;
 
 export function IpoResultForm({ application, onClose, onSaved }: {
   application: IpoApplication;
   onClose: () => void;
-  onSaved: (profitLoss: number | null, presentTotalValue: number | null) => void;
+  onSaved: (result: IpoApplicationResult) => void;
 }) {
   const initial = application.realized_profit_loss;
-  const [kind, setKind] = useState<ResultKind>(initial == null ? 'unrecorded' : initial > 0 ? 'profit' : initial < 0 ? 'loss' : 'even');
+  const [kind, setKind] = useState<ResultKind>(application.not_allotted ? 'not_allotted' : initial == null ? 'unrecorded' : initial > 0 ? 'profit' : initial < 0 ? 'loss' : 'even');
   const [amount, setAmount] = useState(initial ? String(Math.abs(initial)) : '');
   const [presentValue, setPresentValue] = useState(application.present_total_value == null ? '' : String(application.present_total_value));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const pending = useRef(false);
+  const notAllotted = kind === 'not_allotted';
   const needsAmount = kind === 'profit' || kind === 'loss';
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -29,19 +32,18 @@ export function IpoResultForm({ application, onClose, onSaved }: {
       setError('Enter an amount greater than zero with up to two decimal places.');
       return;
     }
-    if (presentValue && !rupeeAmount.test(presentValue)) {
+    if (!notAllotted && presentValue && !rupeeAmount.test(presentValue)) {
       setError('Enter a present total value of zero or more with up to two decimal places.');
       return;
     }
 
-    const result = kind === 'unrecorded' ? null : kind === 'even' ? 0 : Number(text) * (kind === 'loss' ? -1 : 1);
-    const total = presentValue ? Number(presentValue) : null;
+    const result = needsAmount ? Number(text) * (kind === 'loss' ? -1 : 1) : kind === 'even' ? 0 : null;
+    const total = !notAllotted && presentValue ? Number(presentValue) : null;
     pending.current = true;
     setSaving(true);
     setError('');
     try {
-      await saveIpoApplicationResult(application.id, result, total);
-      onSaved(result, total);
+      onSaved(await saveIpoApplicationResult(application.id, result, total, notAllotted));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save the IPO result.');
     } finally {
@@ -57,8 +59,9 @@ export function IpoResultForm({ application, onClose, onSaved }: {
         <p className="modal-description">{application.company} · {formatDematAccount(application.holder, application.demat, application.broker)}</p>
         <div className="form-grid">
           <label className={needsAmount ? undefined : 'full-field'}>Result
-            <Select value={kind} onChange={(event) => setKind(event.target.value as ResultKind)} disabled={saving}>
+            <Select value={kind} onChange={(event) => { setKind(event.target.value as ResultKind); setError(''); }} disabled={saving}>
               <option value="unrecorded">No profit or loss recorded</option>
+              <option value="not_allotted">Not allotted</option>
               <option value="profit">Profit</option>
               <option value="loss">Loss</option>
               <option value="even">Break even</option>
@@ -67,9 +70,11 @@ export function IpoResultForm({ application, onClose, onSaved }: {
           {needsAmount ? <label>Net amount (₹)
             <RupeeInput value={amount} onValueChange={setAmount} disabled={saving} />
           </label> : null}
-          <label className="full-field">Present total value (₹, optional)
+          {notAllotted ? <label className="full-field">Amount (₹ per lot)
+            <input value={formatMoney(ipoLotPricePaise(application.issue_price, application.lot_size) / 100)} readOnly />
+          </label> : <label className="full-field">Present total value (₹, optional)
             <RupeeInput value={presentValue} onValueChange={setPresentValue} disabled={saving} />
-          </label>
+          </label>}
         </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="modal-actions">

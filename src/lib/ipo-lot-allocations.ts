@@ -1,5 +1,9 @@
 import type { IpoLotAllocation } from '@/lib/ipo-portfolio-api';
 
+export function ipoLotPricePaise(issuePrice: number, sharesPerLot: number) {
+  return Math.round(issuePrice * 100) * sharesPerLot;
+}
+
 export function groupIpoLots(totalLots: number, defaultAccount: string, selections: ReadonlyMap<number, string>): IpoLotAllocation[] {
   const counts = new Map<string, number>();
   if (defaultAccount) counts.set(defaultAccount, totalLots);

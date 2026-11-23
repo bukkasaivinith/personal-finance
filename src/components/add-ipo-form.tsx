@@ -5,7 +5,7 @@ import { RupeeInput } from '@/components/rupee-input';
 import { Select } from '@/components/select';
 import { ModalShell } from '@/components/ui';
 import { formatMoney, todayKey, type Account } from '@/lib/finance';
-import { groupIpoLots } from '@/lib/ipo-lot-allocations';
+import { groupIpoLots, ipoLotPricePaise } from '@/lib/ipo-lot-allocations';
 import { formatDematAccount, saveIpoApplications, updateIpoApplication, type IpoApplication, type IpoApplicationDraft, type IpoDematAccount } from '@/lib/ipo-portfolio-api';
 
 const maxShares = 2_147_483_647;
@@ -50,8 +50,8 @@ export function AddIpoForm({ accounts, demats, application, allotmentDateSupport
 
   const lots = wholeNumber(totalLots);
   const sharesPerLot = wholeNumber(draft.lot_size);
-  const issuePaise = inrPattern.test(draft.issue_price) ? Math.round(Number(draft.issue_price) * 100) : 0;
-  const lotPaise = issuePaise * sharesPerLot;
+  const issuePrice = inrPattern.test(draft.issue_price) ? Number(draft.issue_price) : 0;
+  const lotPaise = ipoLotPricePaise(issuePrice, sharesPerLot);
   const totalPaise = lotPaise * lots + Math.round((application?.adjustment ?? 0) * 100);
   const totalShares = sharesPerLot * lots;
   const validAmount = lotPaise > 0 && lots > 0 && totalPaise > 0 && totalPaise <= maxAmountPaise && totalShares <= maxShares;
