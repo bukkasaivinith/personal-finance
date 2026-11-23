@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Loader2 } from 'lucide-react';
 import { CompleteProfileForm, CreateAccountForm, ForgotPasswordForm, NewPasswordForm, SignInForm, AuthShell } from '@/components/auth-forms';
-import { claimWorkspace, loadCurrentFinanceProfile, type CurrentFinanceProfile } from '@/lib/auth-api';
+import { claimWorkspace, loadCurrentFinanceProfile, requireFinanceOwner, type CurrentFinanceProfile } from '@/lib/auth-api';
 import { CurrentFinanceProfileContext } from '@/lib/current-finance-profile';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession, SESSION_REPLACED_NOTICE, validateCurrentSingleDeviceSession } from '@/lib/session-api';
 import { supabase } from '@/lib/supabase';
@@ -62,6 +62,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setError('');
     (async () => {
       try {
+        await requireFinanceOwner();
+        if (!active) return;
         await activateCurrentSingleDeviceSession();
         await claimWorkspace();
         const nextProfile = await loadCurrentFinanceProfile();
@@ -117,7 +119,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <SignInForm notice={notice} onForgot={() => setForgot(true)} onCreateAccount={() => setCreating(true)} />;
   }
   if (error) return <AuthShell><BrandlessError message={error} /></AuthShell>;
-  if (!ready || !profile) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Opening your workspace</p></AuthShell>;
+  if (!ready || !profile || profile.id !== session.user.id) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Opening your workspace</p></AuthShell>;
   if (profileNeedsName(profile)) return <CompleteProfileForm email={profile.email} onComplete={(firstName, lastName) => setProfile((current) => current ? { ...current, firstName, lastName } : current)} />;
   return <CurrentFinanceProfileContext.Provider value={profile}>{children}</CurrentFinanceProfileContext.Provider>;
 }

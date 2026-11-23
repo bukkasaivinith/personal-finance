@@ -1,5 +1,4 @@
 import { supabase } from '@/lib/supabase';
-import { openFinanceWorkspace } from '@/lib/workspace-api';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession } from '@/lib/session-api';
 
 export const PASSWORD_MIN_LENGTH = 12;
@@ -56,16 +55,6 @@ export async function createAccount(email: string, password: string, firstName: 
     options: { data: { first_name: firstName.trim(), last_name: lastName.trim() } },
   });
   if (!error) {
-    if (data.session) {
-      try {
-        await activateCurrentSingleDeviceSession();
-        await supabase.auth.signOut({ scope: 'others' });
-        await recordAuthenticatedActivity('signed_in');
-      } catch (caught) {
-        await supabase.auth.signOut({ scope: 'local' });
-        throw caught;
-      }
-    }
     return Boolean(data.session);
   }
   if (error.status === 429) throw new AuthEmailRateLimitError();
@@ -100,6 +89,7 @@ export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (!error) {
     try {
+      await requireFinanceOwner();
       await activateCurrentSingleDeviceSession();
       // Supabase revokes every older refresh token while the database guard
       // immediately blocks old access tokens from finance data.
@@ -140,5 +130,19 @@ export async function signOut(): Promise<void> {
 }
 
 export async function claimWorkspace(): Promise<void> {
-  await openFinanceWorkspace();
+  const { error } = await supabase.rpc('open_finance_workspace');
+  if (error) throw new Error(error.message);
+}
+
+export async function requireFinanceOwner(): Promise<void> {
+  const { data, error } = await supabase.rpc('is_finance_workspace_owner');
+  if (error?.code === 'PGRST202') throw new Error('The single-owner workspace setup is pending in Supabase.');
+  if (error) throw new Error(error.message);
+  if (data !== true) throw new Error('Only the owner can open this finance workspace.');
+}
+
+export async function deleteCurrentFinanceAccount(): Promise<void> {
+  const { error } = await supabase.rpc('delete_my_finance_account');
+  if (error) throw new Error(error.message);
+  await supabase.auth.signOut({ scope: 'local' });
 }

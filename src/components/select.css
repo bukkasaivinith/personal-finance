@@ -22,17 +22,13 @@
 .calendar-period-controls > .ui-select:first-child { max-width: 136px; }
 .calendar-period-controls > .ui-select { flex: 1; }
 .calendar-period-controls .ui-select-trigger { min-height: 32px; }
-.workspace-switcher > .ui-select { max-width: 260px; }
-.workspace-switcher .ui-select-trigger { min-height: 28px; }
 .mobile-field > .ui-select { grid-column: 2; grid-row: 1; justify-self: end; max-width: min(220px, 58vw); }
 .mobile-field .ui-select-trigger { gap: 7px; justify-content: flex-end; min-height: 38px; padding: 3px 0; }
 .mobile-field .ui-select-value { color: inherit; font-size: inherit; }
 .mobile-field > .ui-select + svg { display: none; }
 .mobile-shell .ui-select-chevron { color: #b8cec1; }
 .mobile-shell .ui-select-trigger:focus-visible, .mobile-shell .ui-select-trigger[aria-expanded="true"] { box-shadow: 0 0 0 2px #466a58; }
-.mobile-workspace-picker > .ui-select { min-width: 0; }
-.mobile-workspace-picker .ui-select-trigger { background: #292929; border-color: #454545; color: #f5f5f5; }
 .ui-select-menu-dark { --panel: #292929; --line: #454545; --ink: #f5f5f5; --muted: #adbaaf; --green: #c1dfcc; --green-soft: #2d493c; scrollbar-color: #5a6b60 transparent; }
 .ui-select-menu-dark .ui-select-option.is-highlighted { background: #34483c; }
-@media (max-width: 760px) { .workspace-switcher > .ui-select { max-width: 190px; }.ui-select-option { min-height: 44px; }.ui-select-menu { font-size: 13px; } }
+@media (max-width: 760px) {.ui-select-option { min-height: 44px; }.ui-select-menu { font-size: 13px; } }
 @media (prefers-reduced-motion: reduce) { .ui-select-trigger, .ui-select-chevron { transition: none; } }

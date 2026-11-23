@@ -17,12 +17,14 @@ test('IPO accounting on the complete application migration history', async (t) =
  GRANT USAGE ON SCHEMA public,auth TO authenticated,anon;
  `);
  const directory = new URL('../supabase/migrations/', import.meta.url);
+ const ownerMigration = '20261123100000_single_owner_workspace.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
+  if (name === ownerMigration) continue; // Test the upgrade after creating existing users and financial records.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
  const owner=randomUUID(), other=randomUUID(), session=randomUUID();
- await db.query('INSERT INTO auth.users(id,email) VALUES ($1,$2),($3,$4)',[owner,'ipo-owner@example.test',other,'ipo-other@example.test']);
+ await db.query('INSERT INTO auth.users(id,email) VALUES ($1,$2),($3,$4)',[owner,'bukkasaivinith@gmail.com',other,'ipo-other@example.test']);
  await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)',[session,owner]);
  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
  await db.exec('SELECT public.activate_current_single_device_session(); SET ROLE authenticated;');
@@ -181,10 +183,63 @@ test('IPO accounting on the complete application migration history', async (t) =
   await db.exec(await readFile(new URL('../docs/IPO-VERIFY.sql',import.meta.url),'utf8'));
   await db.exec('SET ROLE authenticated');
  });
- await t.test('existing intentional account deletion also removes private IPO records',async()=>{
+ await t.test('single-owner upgrade preserves records and blocks existing shared and admin sessions',async()=>{
+  const migration = await readFile(new URL(ownerMigration, directory), 'utf8');
+  await db.exec('RESET ROLE');
+  const otherSession = await scalar('SELECT id FROM auth.sessions WHERE user_id=$1',[other]);
+  const originalBalance = await ledger(bank);
+  const originalEventCount = await scalar('SELECT count(*) FROM public.ipo_events');
+  const originalShares = await scalar('SELECT count(*) FROM public.account_shares');
+  await db.query('UPDATE auth.users SET email_confirmed_at=NULL WHERE id=$1',[owner]);
+  await assert.rejects(db.exec(migration),/Expected one active, verified account/);
+  await db.exec('ROLLBACK');
+  assert.equal(await scalar("SELECT to_regclass('public.finance_workspace_owner')"),null);
+  await db.query('UPDATE auth.users SET email_confirmed_at=now() WHERE id=$1',[owner]);
+  await db.exec(migration);
+  assert.equal(Number(await scalar('SELECT count(*) FROM auth.users')),2);
+  assert.equal(await scalar('SELECT count(*) FROM public.account_shares'),originalShares);
+  assert.equal(await scalar('SELECT count(*) FROM public.ipo_events'),originalEventCount);
+
+  await db.exec('SET ROLE authenticated');
+  assert.equal(await scalar('SELECT public.is_finance_workspace_owner()'),true);
+  await db.exec('SELECT public.activate_current_single_device_session(); SELECT public.open_finance_workspace();');
+  assert.equal(await scalar('SELECT id FROM public.get_current_finance_profile()'),owner);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.list_accessible_workspaces()')),1);
+  assert.equal(await ledger(bank),originalBalance);
+  assert.equal((await scalar('SELECT public.ipo_dashboard()')).companies.length,1);
+  await assert.rejects(scalar('SELECT account_id FROM public.account_shares'),/permission denied/);
+  await assert.rejects(scalar('SELECT public.get_workspace_sharing($1)',[owner]),/permission denied/);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:other,session_id:otherSession,email:'bukkasaivinith@gmail.com'})]);
+  assert.equal(await scalar('SELECT public.is_finance_workspace_owner()'),false);
+  assert.equal(await scalar('SELECT public.is_platform_admin()'),false);
+  assert.equal(await scalar('SELECT public.validate_current_single_device_session()'),false);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.accounts')),0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.get_current_finance_profile()')),0);
+  await assert.rejects(scalar('SELECT public.activate_current_single_device_session()'),/only to its owner/);
+  await assert.rejects(scalar('SELECT * FROM public.get_workspace_transactions($1)',[owner]),/unavailable/);
+  await assert.rejects(scalar('SELECT public.ipo_dashboard()'),/session/);
+  await assert.rejects(scalar('SELECT public.athlete_get_dashboard()'),/session/);
+  await assert.rejects(scalar('SELECT * FROM public.list_platform_users()'),/permission denied/);
+  await assert.rejects(scalar('SELECT public.delete_platform_user($1)',[owner]),/permission denied/);
+
+  await db.exec('RESET ROLE');
+  const newUser = randomUUID();
+  await db.query('INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES($1,$2,$3)',[newUser,'bukkasaivinith2@gmail.com',JSON.stringify({first_name:'New',last_name:'Account'})]);
+  assert.equal(await scalar('SELECT first_name FROM public.profiles WHERE id=$1',[newUser]),'New');
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.platform_administrators WHERE user_id=$1',[newUser])),0);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
+  await db.exec('SET ROLE authenticated');
+ });
+ await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');
   await db.exec('RESET ROLE');
   assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM auth.users WHERE id=$1',[owner])),0);
+  const replacement = randomUUID();
+  await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[replacement,'bukkasaivinith@gmail.com']);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:replacement})]);
+  await db.exec('SET ROLE authenticated');
+  assert.equal(await scalar('SELECT public.is_finance_workspace_owner()'),false);
  });
 });

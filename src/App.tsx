@@ -1,6 +1,5 @@
-import { Select } from '@/components/select';
 import { useEffect, useMemo, useState } from 'react';
-import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, Users, X } from 'lucide-react';
+import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
 import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
@@ -28,13 +27,10 @@ import {
 } from '@/lib/finance';
 import { manageNavigation, pageCopy, workspaceNavigation, type NavItem, type View } from '@/lib/navigation';
 import { useFinanceData } from '@/lib/use-finance-data';
-import { useWorkspaceAccess } from '@/lib/use-workspace-access';
-import { supabase } from '@/lib/supabase';
 
 type ModalKind = 'transaction' | 'account';
 
 const monthOptions = recentMonthKeys(6);
-const adminNavigation: NavItem[] = [{ id: 'settings', label: 'User management', icon: Users }];
 
 const emptyFinance: FinanceData = {
   transactionTypes: [],
@@ -50,10 +46,6 @@ const emptyFinance: FinanceData = {
 function csvCell(value: string): string {
   const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
-}
-
-function SharedWorkspaceNotice({ title }: { title: string }) {
-  return <div className="surface-card"><EmptyPanel icon={<IndianRupee size={20} />} title={`${title} stay with the workspace owner`} description="Your shared access is limited to the accounts the owner selected. You can view or edit those account transactions according to your permission." /></div>;
 }
 
 function NavigationGroup({
@@ -91,11 +83,8 @@ export default function App() {
   const profile = useCurrentFinanceProfile();
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const [activeView, setActiveView] = useState<View>('overview');
-  const workspaceAccess = useWorkspaceAccess();
-  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState('');
-  const isAdminOnly = workspaceAccess.isPlatformAdmin;
-  const finance = useFinanceData(isAdminOnly ? null : activeOwnerId);
+  const activeOwnerId = profile?.id ?? null;
+  const finance = useFinanceData(activeOwnerId);
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, budgets, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
@@ -109,28 +98,7 @@ export default function App() {
   const [recurringChecked, setRecurringChecked] = useState(false);
   const selectedMonth = monthOptions[0];
 
-  const activeWorkspace = workspaceAccess.workspaces.find((workspace) => workspace.ownerId === activeOwnerId) ?? null;
-  const isWorkspaceOwner = activeWorkspace?.role === 'owner';
-  const canEditSharedWorkspace = activeWorkspace?.role === 'editor';
-  const canEditTransactions = Boolean(isWorkspaceOwner || canEditSharedWorkspace);
-
-  useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? ''));
-  }, []);
-
-  useEffect(() => {
-    if (!workspaceAccess.workspaces.length) {
-      setActiveOwnerId(null);
-      return;
-    }
-    setActiveOwnerId((current) => {
-      if (current && workspaceAccess.workspaces.some((workspace) => workspace.ownerId === current)) return current;
-      return workspaceAccess.workspaces.find((workspace) => workspace.role === 'owner')?.ownerId ?? workspaceAccess.workspaces[0].ownerId;
-    });
-  }, [workspaceAccess.workspaces]);
-
   useEffect(() => { setRecurringChecked(false); }, [activeOwnerId]);
-  useEffect(() => { if (isAdminOnly) { setActiveView('settings'); setMobileMenuOpen(false); } }, [isAdminOnly]);
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
   const usableTypes = useMemo(() => transactionTypes.filter(isUsable), [transactionTypes]);
@@ -161,7 +129,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!finance.data || recurringChecked || !isWorkspaceOwner) return;
+    if (!finance.data || recurringChecked) return;
     setRecurringChecked(true);
     void actions.processDueRecurringEntries()
       .then((generated) => { if (generated) showToast(`${generated} due recurring ${generated === 1 ? 'entry was' : 'entries were'} added.`); })
@@ -169,7 +137,7 @@ export default function App() {
         // A recurring rule is optional. The Recurring page gives the user a
         // visible retry button if processing is temporarily unavailable.
       });
-  }, [actions, finance.data, recurringChecked, isWorkspaceOwner]);
+  }, [actions, finance.data, recurringChecked]);
 
   const navigate = (view: View) => {
     setActiveView(view);
@@ -268,8 +236,8 @@ export default function App() {
             position={position}
             monthLabel={monthLabel}
             userName={profile?.firstName ?? undefined}
-            onAddAccount={isWorkspaceOwner ? () => setModal('account') : undefined}
-            onAddTransaction={canEditTransactions ? () => setModal('transaction') : undefined}
+            onAddAccount={() => setModal('account')}
+            onAddTransaction={() => setModal('transaction')}
             onNavigate={navigate}
           />
         );
@@ -283,9 +251,9 @@ export default function App() {
             filter={filter}
             onSearch={setSearchQuery}
             onFilter={setFilter}
-            onAddTransaction={canEditTransactions ? () => { setEditingTransaction(null); setModal('transaction'); } : undefined}
-            onEditTransaction={canEditTransactions ? (transaction) => { setEditingTransaction(transaction); setModal('transaction'); } : undefined}
-            onDeleteTransaction={canEditTransactions ? (transaction) => void deleteTransaction(transaction) : undefined}
+            onAddTransaction={() => { setEditingTransaction(null); setModal('transaction'); }}
+            onEditTransaction={transaction => { setEditingTransaction(transaction); setModal('transaction'); }}
+            onDeleteTransaction={transaction => void deleteTransaction(transaction)}
           />
         );
       case 'accounts':
@@ -296,12 +264,12 @@ export default function App() {
             transactions={transactions}
             position={position}
             actions={actions}
-            onAddAccount={isWorkspaceOwner ? () => setModal('account') : undefined}
-            onEditAccount={isWorkspaceOwner ? setEditingAccount : undefined}
+            onAddAccount={() => setModal('account')}
+            onEditAccount={setEditingAccount}
           />
         );
       case 'setup':
-        return isWorkspaceOwner ? (
+        return (
           <SetupView
             transactionTypes={transactionTypes}
             categories={categories}
@@ -309,11 +277,11 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        ) : <SharedWorkspaceNotice title="Types & categories" />;
+        );
       case 'analytics':
         return <AnalyticsView transactions={transactions} />;
       case 'budgets':
-        return isWorkspaceOwner ? (
+        return (
           <BudgetsView
             budgets={budgets}
             categories={categories}
@@ -321,11 +289,11 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        ) : <SharedWorkspaceNotice title="Budgets" />;
+        );
       case 'goals':
         return <GoalsView onNotify={showToast} />;
       case 'recurring':
-        return isWorkspaceOwner ? (
+        return (
           <RecurringView
             entries={recurringEntries}
             transactions={transactions}
@@ -335,18 +303,18 @@ export default function App() {
             actions={actions}
             onNotify={showToast}
           />
-        ) : <SharedWorkspaceNotice title="Recurring" />;
+        );
       case 'investments':
-        return isWorkspaceOwner ? <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onRefresh={finance.refresh} /> : <SharedWorkspaceNotice title="Investments" />;
+        return <InvestmentsView key={activeOwnerId} investments={investments} investmentTypes={investmentTypes} accounts={accounts} actions={actions} onNotify={showToast} onRefresh={finance.refresh} />;
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
       case 'settings':
-        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={activeWorkspace && currentUserId ? <WorkspaceSettings ownerId={activeWorkspace.ownerId} isOwner={Boolean(isWorkspaceOwner)} isPlatformAdmin={workspaceAccess.isPlatformAdmin} currentUserId={currentUserId} accounts={accounts} onWorkspaceChanged={async () => { await workspaceAccess.refresh(); await finance.refresh(); }} onDeleteOwnAccount={async () => { await supabase.auth.signOut({ scope: 'local' }); }} /> : undefined} />;
+        return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={hasTransactions} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} />;
     }
   };
 
   return (
-    <div className={`app-shell ${isAdminOnly ? 'admin-only-shell' : ''}`}>
+    <div className="app-shell">
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-visible' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
@@ -361,16 +329,17 @@ export default function App() {
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}>
             <X size={18} />
           </button>
-          {isAdminOnly ? <NavigationGroup label="Administration" items={adminNavigation} activeView={activeView} onSelect={navigate} /> : <><NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={navigate} /><NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={navigate} /></>}
+          <NavigationGroup label="Workspace" items={workspaceNavigation} activeView={activeView} onSelect={navigate} />
+          <NavigationGroup label="Manage" items={manageNavigation} activeView={activeView} onSelect={navigate} />
         </div>
         <div className="sidebar-bottom">
-          {!isAdminOnly ? <button
+          <button
             className={`side-link ${activeView === 'settings' ? 'active' : ''}`}
             type="button"
             onClick={() => navigate('settings')}
           >
             <Settings size={17} /> Settings
-          </button> : null}
+          </button>
           <button className="side-link" type="button" onClick={() => void signOut()}>
             <LogOut size={17} /> Sign out
           </button>
@@ -388,18 +357,10 @@ export default function App() {
             <Menu size={18} />
           </button>
           <div>
-            <div className="eyebrow">{isAdminOnly ? 'Platform administration' : pageCopy[activeView].eyebrow}</div>
-            <h1>{isAdminOnly ? 'User management' : pageCopy[activeView].title}</h1>
-            {!isAdminOnly && workspaceAccess.workspaces.length > 1 ? (
-              <label className="workspace-switcher">
-                <span>Workspace</span>
-                <Select value={activeOwnerId ?? ''} onChange={(event) => { setActiveOwnerId(event.target.value); setRecurringChecked(false); }}>
-                  {workspaceAccess.workspaces.map((workspace) => <option key={workspace.ownerId} value={workspace.ownerId}>{workspace.role === 'owner' ? 'My private workspace' : `${workspace.ownerEmail} · shared (${workspace.role})`}</option>)}
-                </Select>
-              </label>
-            ) : null}
+            <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
+            <h1>{pageCopy[activeView].title}</h1>
           </div>
-          {!isAdminOnly && activeView !== 'transactions' && activeView !== 'athlete' && canEditTransactions ? (
+          {activeView !== 'transactions' && activeView !== 'athlete' ? (
             <div className="top-actions">
               <button className="primary-button header-action" type="button" onClick={() => setModal('transaction')}>
                 <span className="header-action-icon" aria-hidden="true">
@@ -411,9 +372,7 @@ export default function App() {
           ) : null}
         </header>
 
-        {isAdminOnly ? (
-          <WorkspaceSettings ownerId="" isOwner={false} isPlatformAdmin currentUserId={currentUserId} accounts={[]} onWorkspaceChanged={workspaceAccess.refresh} onDeleteOwnAccount={async () => { await supabase.auth.signOut({ scope: 'local' }); }} adminOnly />
-        ) : finance.data ? (
+        {finance.data ? (
           renderView()
         ) : (
           <div className="surface-card">
@@ -434,7 +393,7 @@ export default function App() {
       </main>
 
       <nav className="mobile-nav" aria-label="Primary">
-        {isAdminOnly ? <><button type="button" className="active" onClick={() => navigate('settings')}><Users size={18} />User management</button><button type="button" onClick={() => void signOut()}><LogOut size={18} />Sign out</button></> : <>{[workspaceNavigation[0], workspaceNavigation[1], workspaceNavigation[2], workspaceNavigation[4]].map((item) => (
+        {[workspaceNavigation[0], workspaceNavigation[1], workspaceNavigation[2], workspaceNavigation[4]].map((item) => (
           <button
             key={item.id}
             type="button"
@@ -449,7 +408,6 @@ export default function App() {
           <MoreHorizontal size={18} />
           More
         </button>
-        </>}
       </nav>
 
       {modal === 'transaction' ? (
