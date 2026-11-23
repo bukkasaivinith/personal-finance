@@ -115,6 +115,11 @@ function failWith(error: PostgrestError): never {
   throw new Error(error.message);
 }
 
+function requireWrittenRecord({ data, error }: { data: { id: string } | null; error: PostgrestError | null }): void {
+  if (error) failWith(error);
+  if (!data) throw new Error('This record is no longer available. Refresh the page and try again.');
+}
+
 function statusOf(row: StatusRow) {
   return { isActive: row.is_active, deletedAt: row.deleted_at };
 }
@@ -388,30 +393,35 @@ export async function insertCategory(input: {
 export async function updateCategory(
   id: string,
   input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] },
-  workspaceOwnerId: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('categories')
-    .update({ name: input.name, emoji: input.emoji, parent_id: input.parentId, updated_at: new Date().toISOString() })
-    .eq('id', id);
+  const { error } = await supabase.rpc('update_finance_category', {
+    p_category_id: id,
+    p_name: input.name,
+    p_emoji: input.emoji,
+    p_parent_id: input.parentId,
+    p_transaction_type_ids: input.transactionTypeIds,
+  });
   if (error) failWith(error);
-  await replaceCategoryLinks(id, input.transactionTypeIds, workspaceOwnerId);
 }
 
 export async function updateTransactionType(id: string, input: { name: string; kind: TransactionKind }): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from('transaction_types')
     .update({ name: input.name, kind: input.kind, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) failWith(error);
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function updateAccount(id: string, input: { name: string; description: string }): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from('accounts')
     .update({ name: input.name, description: input.description || null, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) failWith(error);
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
+  requireWrittenRecord(result);
 }
 
 const statusPatch: Record<ItemState, { is_active: boolean; deleted_at: string | null }> = {
@@ -422,13 +432,13 @@ const statusPatch: Record<ItemState, { is_active: boolean; deleted_at: string | 
 
 export async function setItemState(table: ItemTable, id: string, state: ItemState): Promise<void> {
   const patch = { ...statusPatch[state], updated_at: new Date().toISOString() };
-  const { error } = await supabase.from(table).update(patch).eq('id', id);
-  if (error) failWith(error);
+  const result = await supabase.from(table).update(patch).eq('id', id).select('id').maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function deleteItemPermanently(table: ItemTable, id: string): Promise<void> {
-  const { error } = await supabase.from(table).delete().eq('id', id);
-  if (error) failWith(error);
+  const result = await supabase.from(table).delete().eq('id', id).select('id').maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function insertAccount(input: {
@@ -470,7 +480,7 @@ export async function insertTransaction(draft: TransactionDraft, workspaceOwnerI
 }
 
 export async function updateTransaction(id: string, draft: TransactionDraft): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from('transactions')
     .update({
       name: draft.name,
@@ -482,8 +492,10 @@ export async function updateTransaction(id: string, draft: TransactionDraft): Pr
       account_id: draft.accountId,
       to_account_id: draft.toAccountId,
     })
-    .eq('id', id);
-  if (error) failWith(error);
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
@@ -577,8 +589,8 @@ export async function upsertBudget(input: { categoryId: string; amount: number }
 }
 
 export async function deleteBudget(id: string): Promise<void> {
-  const { error } = await supabase.from('budgets').delete().eq('id', id);
-  if (error) failWith(error);
+  const result = await supabase.from('budgets').delete().eq('id', id).select('id').maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function insertRecurringEntry(input: RecurringEntryDraft, workspaceOwnerId: string): Promise<string> {
@@ -606,7 +618,7 @@ export async function insertRecurringEntry(input: RecurringEntryDraft, workspace
 }
 
 export async function updateRecurringEntry(id: string, input: RecurringEntryDraft): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from('recurring_entries')
     .update({
       name: input.name,
@@ -623,21 +635,25 @@ export async function updateRecurringEntry(id: string, input: RecurringEntryDraf
       month_day: input.monthDay,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
-  if (error) failWith(error);
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function setRecurringEntryActive(id: string, isActive: boolean): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from('recurring_entries')
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) failWith(error);
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function deleteRecurringEntry(id: string): Promise<void> {
-  const { error } = await supabase.from('recurring_entries').delete().eq('id', id);
-  if (error) failWith(error);
+  const result = await supabase.from('recurring_entries').delete().eq('id', id).select('id').maybeSingle();
+  requireWrittenRecord(result);
 }
 
 export async function processDueRecurringEntries(): Promise<number> {
