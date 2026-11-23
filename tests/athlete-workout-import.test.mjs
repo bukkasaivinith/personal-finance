@@ -1,0 +1,69 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { Encoder, Profile } from '@garmin/fitsdk';
+
+const bundle = await build({
+  stdin: { contents: "export * from './src/lib/athlete-samsung'; export * from './src/lib/athlete-recognition'; export * from './src/lib/athlete-workout'; export * from './src/lib/athlete-fit'; export * from './src/lib/athlete-recovery';", resolveDir: process.cwd() },
+  bundle: true, write: false, format: 'esm', platform: 'node',
+});
+const { readSamsungWorkout, recognizeSamsungScreenshots, personalBests, parseFitWorkout, recognizeWhoopRecovery } = await import(
+  'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64')
+);
+const reading = (text) => ({ text, layoutText: '', confidence: 90, pass: 'original' });
+
+test('Samsung workout bundle keeps workout duration, elapsed time, zones and conflicts distinct', () => {
+  const screens = [
+    { readings: [reading("15:58\nWorkout duration\n50:11\nTotal duration\n52:52\n6.24 km\nWorkout calories\n507 kcal\nTotal calories\n511 kcal")] },
+    { readings: [reading("Avg. heart rate\nMax. heart rate\n169 bpm\n182 bpm\nZone 5: Maximum 182-202 bpm\n00:25 0.8%")] },
+    { readings: [reading("Zone 5: Maximum 182-202 bpm\n00:25 8%")] },
+    { readings: [{ ...reading('Laps'), laps: [{ number: 1, seconds: 461, meters: 1000, heartRate: 156 }] }] },
+    { readings: [{ ...reading('Laps'), laps: [{ number: 1, seconds: 461, meters: 1000, heartRate: 157 }] }] },
+  ];
+  const { route, details } = recognizeSamsungScreenshots(screens, 'km', new Date('2026-11-23T12:00:00'));
+  assert.equal(route.date, '');
+  assert.equal(route.activity.durationSeconds, 3011);
+  assert.equal(route.activity.averageHeartRate, 169);
+  assert.equal(details.metrics.maxHeartRate, 182);
+  assert.equal(details.metrics.elapsedSeconds, 3172);
+  assert.equal(details.metrics.totalCalories, 511);
+  assert.equal(details.zones[0].percent, 0.8);
+  assert.equal(details.laps[0].heartRate, undefined);
+  assert.ok(route.warnings.some((warning) => warning.includes('Lap 1 heart rate')));
+  assert.equal(readSamsungWorkout([{ readings: [reading('Heart rate recovery chart 00:56 142 161')] }]), null);
+});
+
+test('WHOOP supports a zero score without replacing it with a missing value', () => {
+  const result = recognizeWhoopRecovery([reading("WHOOP\nRecovery\n0%\nHRV\n56 ms\nResting heart rate\n48 bpm\nSleep duration\n7:15")], 'km', 'Asia/Kolkata');
+  assert.equal(result.recovery.score, 0);
+  assert.equal(result.recovery.metrics.hrv, 56);
+  assert.equal(result.recovery.metrics.sleepMinutes, 435);
+  assert.equal(result.recovery.recoveryDate, '');
+});
+
+test('personal bests use real standalone finish times and restrict distance', () => {
+  const on = (id, distanceMeters, durationSeconds, kind = 'run') => ({ id, distanceMeters, durationSeconds, kind, activityDate: '2026-11-23' });
+  const result = personalBests([on('short', 4999, 1450), on('long', 6000, 1300), on('valid', 5030, 1530), on('cycle', 5010, 1200, 'cycle')]);
+  assert.equal(result.find((entry) => entry.label === '5K').activity.id, 'valid');
+  assert.equal(result.find((entry) => entry.label === '1K').activity, undefined);
+});
+
+test('checks a real encoded FIT session, splits and timestamped measurements', () => {
+  const start = new Date('2026-11-23T20:00:00Z');
+  const end = new Date('2026-11-23T20:07:00Z');
+  const encoder = new Encoder();
+  encoder.onMesg(Profile.MesgNum.FILE_ID, { manufacturer: 'development', product: 1, timeCreated: start, type: 'activity' });
+  encoder.onMesg(Profile.MesgNum.RECORD, { timestamp: start, heartRate: 152, speed: 2.5, positionLat: 100, positionLong: 200 });
+  encoder.onMesg(Profile.MesgNum.RECORD, { timestamp: end, heartRate: 156, speed: 3, positionLat: 180, positionLong: 280 });
+  encoder.onMesg(Profile.MesgNum.LAP, { timestamp: end, startTime: start, totalTimerTime: 410, totalElapsedTime: 420, totalDistance: 1000, avgHeartRate: 154 });
+  encoder.onMesg(Profile.MesgNum.SESSION, { timestamp: end, startTime: start, sport: 'running', totalTimerTime: 410, totalElapsedTime: 420, totalDistance: 1000, avgHeartRate: 154 });
+  const bytes = Uint8Array.from(encoder.close());
+  const result = parseFitWorkout(bytes.buffer, 'Asia/Kolkata');
+  assert.equal(result.draft.activityDate, '2026-11-24');
+  assert.equal(result.draft.durationSeconds, 410);
+  assert.equal(result.details.laps[0].elapsedSeconds, 420);
+  assert.equal(result.details.samples[1].seconds, 420);
+  assert.equal(result.details.samples[1].heartRate, 156);
+  bytes[bytes.length - 1] ^= 1;
+  assert.throws(() => parseFitWorkout(bytes.buffer, 'Asia/Kolkata'), /integrity/);
+});

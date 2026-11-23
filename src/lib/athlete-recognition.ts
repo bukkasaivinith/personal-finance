@@ -1,6 +1,8 @@
+import { readSamsungWorkout } from './athlete-samsung';
+import type { WorkoutLap } from './athlete-workout';
 import { routeVoiceAthleteRecord, type AthleteActivity, type DistanceUnit, type VoiceAthleteRoute } from './athlete';
 
-export type ScreenshotReading = { text: string; layoutText: string; confidence: number; pass: string };
+export type ScreenshotReading = { text: string; layoutText: string; confidence: number; pass: string; laps?: WorkoutLap[] };
 export const recognitionDestinations: Array<{ value: VoiceAthleteRoute['destination']; label: string }> = [
   { value: 'activity', label: 'Completed activity' }, { value: 'plan', label: 'Planned workout' },
   { value: 'recovery', label: 'Recovery score' }, { value: 'race', label: 'Race event' },
@@ -87,6 +89,21 @@ export function recognizeScreenshot(readings: ScreenshotReading[], unit: Distanc
   return route;
 }
 
+export function recognizeSamsungScreenshots(images: Parameters<typeof readSamsungWorkout>[0], unit: DistanceUnit, referenceDate: Date) {
+  const result = readSamsungWorkout(images);
+  if (!result) return null;
+  const drafts = images.map(({ readings }) => recognizeScreenshot(readings, unit, referenceDate));
+  const dates = [...new Set(drafts.flatMap((draft) => draft?.date ? [draft.date] : []))];
+  const route = routeVoiceAthleteRecord('', unit, referenceDate, { source: 'image' });
+  route.date = dates.length === 1 ? dates[0] : '';
+  route.destination = 'activity';
+  route.activity = { ...result.activity, activityDate: route.date, kind: 'run', notes: '', source: 'samsung_health' };
+  route.warnings = [...result.warnings, ...(dates.length > 1 ? ['Screenshots contain different dates. Confirm that they are from the same workout.'] : [])];
+  route.transcript = images.flatMap(({ readings }) => readings[0]?.text ? [readings[0].text] : []).join('\n\n').slice(0, 12000);
+  route.missingFields = missingRecognitionFields(route);
+  return { route, details: result.details };
+}
+
 export function missingRecognitionFields(route: VoiceAthleteRoute): string[] {
   const missing: string[] = [];
   if (!route.date && route.destination !== 'goal') missing.push('What date is this for?');
@@ -94,7 +111,7 @@ export function missingRecognitionFields(route: VoiceAthleteRoute): string[] {
     if (!route.activity.distanceMeters) missing.push('What distance did you cover?');
     if (!route.activity.durationSeconds) missing.push('What was the total activity duration?');
   } else if (route.destination === 'plan' && !route.plan.targetDistanceMeters) missing.push('What is your planned distance?');
-  else if (route.destination === 'recovery' && !route.recovery.score) missing.push('What is your recovery score (1–100)?');
+  else if (route.destination === 'recovery' && route.recovery.score === undefined) missing.push('What is your recovery score (0–100)?');
   else if (route.destination === 'goal') {
     if (!route.goal.targetDistanceMeters) missing.push('What distance are you aiming for?');
     if (!route.goal.startsOn || !route.goal.endsOn) missing.push('When does the goal start and end?');

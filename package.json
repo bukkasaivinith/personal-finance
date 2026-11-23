@@ -16,10 +16,13 @@
     "test:ipo": "node --test tests/ipo-*.test.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@garmin/fitsdk": "^21.222.0",
+    "@huggingface/transformers": "^4.3.2",
     "@supabase/supabase-js": "^2.57.4",
     "@tesseract.js-data/eng": "1.0.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.446.0",
+    "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tesseract.js": "^7.0.0"
@@ -40,5 +43,10 @@
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.3.0",
     "vite": "^7.3.7"
+  },
+  "overrides": {
+    "@supabase/realtime-js": {
+      "ws": "8.21.0"
+    }
   }
 }

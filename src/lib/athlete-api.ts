@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import type { WorkoutDetails } from '@/lib/athlete-workout';
 import type {
   AthleteActivity,
   AthleteActivityDraft,
@@ -48,7 +49,7 @@ export async function loadAthleteHubData(): Promise<AthleteHubData> {
     targetDistanceMeters: nullableNumber(row.target_distance_meters), notes: String(row.notes ?? ''), status: row.status as PlannedWorkout['status'],
   }));
   const recoveryScores = rows<Record<string, unknown>>(result.recovery_scores).map((row): RecoveryScore => ({
-    id: String(row.id), recoveryDate: String(row.recovery_date), score: Number(row.score), notes: String(row.notes ?? ''), source: row.source as RecoveryScore['source'],
+    id: String(row.id), recoveryDate: String(row.recovery_date), score: Number(row.score), notes: String(row.notes ?? ''), source: row.source as RecoveryScore['source'], metrics: (row.metrics ?? {}) as RecoveryScore['metrics'],
   }));
   const races = rows<Record<string, unknown>>(result.races).map((row): Race => ({
     id: String(row.id), name: String(row.name), raceDate: String(row.race_date), distanceMeters: nullableNumber(row.distance_meters),
@@ -64,14 +65,24 @@ export async function loadAthleteHubData(): Promise<AthleteHubData> {
   return { settings, activities, plannedWorkouts, recoveryScores, races, gymSessions, goals };
 }
 
-export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: string): Promise<string> {
-  const { data, error } = await supabase.rpc('athlete_save_activity', { p_activity_id: id ?? null, p_payload: {
+export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails): Promise<string> {
+  const payload = {
     kind: draft.kind, activity_date: draft.activityDate, duration_seconds: draft.durationSeconds, distance_meters: draft.distanceMeters,
     average_heart_rate: draft.averageHeartRate, calories: draft.calories, elevation_meters: draft.elevationMeters,
     cadence: draft.cadence, effort: draft.effort, notes: draft.notes, source: draft.source,
-  } });
+  };
+  const args = { p_activity_id: id ?? null, p_payload: payload };
+  const { data, error } = details
+    ? await supabase.rpc('athlete_save_workout', { ...args, p_details: details })
+    : await supabase.rpc('athlete_save_activity', args);
   if (error) fail(error);
   return String(data);
+}
+
+export async function loadWorkoutDetails(id: string): Promise<WorkoutDetails | null> {
+  const { data, error } = await supabase.rpc('athlete_get_workout_details', { p_activity_id: id });
+  if (error) fail(error);
+  return data as WorkoutDetails | null;
 }
 
 export async function deleteAthleteActivity(id: string): Promise<void> {
@@ -94,10 +105,15 @@ export async function savePlannedWorkout(draft: PlannedWorkoutDraft, id?: string
 
 export async function saveRecoveryScore(input: Omit<RecoveryScore, 'id'>): Promise<string> {
   const { data, error } = await supabase.rpc('athlete_save_recovery', { p_payload: {
-    recovery_date: input.recoveryDate, score: input.score, notes: input.notes, source: input.source,
+    recovery_date: input.recoveryDate, score: input.score, notes: input.notes, source: input.source, metrics: input.metrics,
   } });
   if (error) fail(error);
   return String(data);
+}
+
+export async function deleteRecoveryScore(id: string): Promise<void> {
+  const { error } = await supabase.rpc('athlete_delete_recovery', { p_id: id });
+  if (error) fail(error);
 }
 
 export async function saveRace(input: Omit<Race, 'id'>, id?: string): Promise<string> {

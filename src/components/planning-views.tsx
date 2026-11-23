@@ -583,13 +583,13 @@ function ActivityLogRow({ event, data, expanded, onToggle }: { event: ActivityEv
   );
 }
 
-export function SettingsView({ onExport, onExportAthleteData, hasData, data, workspaceOwnerId, workspaceControls }: { onExport: () => void; onExportAthleteData: () => Promise<void>; hasData: boolean; data: FinanceData; workspaceOwnerId: string; workspaceControls?: ReactNode }) {
+export function SettingsView({ onExport, onExportAthleteData, hasData, data, workspaceOwnerId, workspaceControls, athletePreferences }: { onExport: () => void; onExportAthleteData: () => Promise<void>; hasData: boolean; data: FinanceData; workspaceOwnerId: string; workspaceControls?: ReactNode; athletePreferences?: ReactNode }) {
   return (
     <>
       <SectionHeading title="Settings" description="Preferences and your data." />
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Settings size={16} /> Currency</h3><p>All amounts are shown in Indian Rupees (₹).</p></div></div></div>
       <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Download size={16} /> Export data</h3><p>Download every transaction as a spreadsheet-ready CSV file.</p></div><button className="secondary-button" type="button" onClick={onExport} disabled={!hasData}><Download size={16} /> Export CSV</button></div></div>
-      <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Download size={16} /> Athlete Hub data</h3><p>Download a private JSON copy of your activities, plans, races, recovery, strength sessions and goals.</p></div><button className="secondary-button" type="button" onClick={() => void onExportAthleteData()}><Download size={16} /> Export Athlete Hub</button></div></div>
+      <div className="surface-card settings-card"><div className="card-title-row"><div><h3><Download size={16} /> Athlete Hub data</h3><p>Download a private JSON copy of your activities, plans, races, recovery, strength sessions and goals.</p></div><button className="secondary-button" type="button" onClick={() => void onExportAthleteData()}><Download size={16} /> Export Athlete Hub</button>{athletePreferences}</div></div>
       {workspaceControls}
       <ActivityLog data={data} workspaceOwnerId={workspaceOwnerId} />
     </>

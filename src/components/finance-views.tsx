@@ -43,7 +43,9 @@ import {
   type AnalysisPeriod,
   type TransactionAnalysisFilters,
 } from '@/lib/transaction-analysis';
+import { type TableReport, downloadReport } from '@/lib/report-export';
 import './transaction-analysis.css';
+import './finance-analytics.css';
 
 const kindIcons: Record<TransactionKind, typeof Wallet> = {
   expense: FileText,
@@ -713,7 +715,7 @@ export function AccountsView({
   );
 }
 
-type AnalyticsRange = 'daily' | 'weekly' | 'monthly' | 'custom';
+type AnalyticsRange = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
 
 function dateOffset(date: Date, days: number): string {
   const copy = new Date(date);
@@ -724,6 +726,7 @@ function dateOffset(date: Date, days: number): string {
 function rangeForPreset(range: Exclude<AnalyticsRange, 'custom'>) {
   const now = new Date();
   const end = dateOffset(now, 0);
+  if (range === 'yearly') return { from: end.slice(0, 4) + '-01-01', to: end };
   if (range === 'daily') return { from: end, to: end };
   if (range === 'weekly') {
     const mondayOffset = (now.getDay() + 6) % 7;
@@ -737,84 +740,129 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
   const monthly = rangeForPreset('monthly');
   const [customFrom, setCustomFrom] = useState(monthly.from);
   const [customTo, setCustomTo] = useState(monthly.to);
+  const [filters, setFilters] = useState({ account: '', category: '', typeId: '', kind: 'all' as 'all' | TransactionKind });
+  const [compare, setCompare] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [exporting, setExporting] = useState(false);
   const activeRange = range === 'custom' ? { from: customFrom, to: customTo } : rangeForPreset(range);
-  const analytics = useMemo(() => {
-    const filtered = transactions.filter((transaction) => transaction.date >= activeRange.from && transaction.date <= activeRange.to);
-    let income = 0;
-    let expense = 0;
-    const categories = new Map<string, number>();
-    const daily = new Map<string, { income: number; expense: number }>();
-    for (const transaction of filtered) {
-      if (!daily.has(transaction.date)) daily.set(transaction.date, { income: 0, expense: 0 });
-      const flow = daily.get(transaction.date)!;
-      if (transaction.kind === 'income') { income += transaction.amount; flow.income += transaction.amount; }
+  const { from, to } = activeRange;
+  const prepared = useMemo(() => filters.typeId ? transactions.filter((transaction) => transaction.typeId === filters.typeId) : transactions, [filters.typeId, transactions]);
+  const options = useMemo(() => transactionAnalysisOptions(transactions), [transactions]);
+  const types = useMemo(() => [...new Map(transactions.map((transaction) => [transaction.typeId, transaction.typeName])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [transactions]);
+  const analytics = useMemo(() => analyzeTransactions(prepared, { ...emptyTransactionAnalysisFilters, ...filters, from, to }), [prepared, filters, from, to]);
+  const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 || 1);
+  const months = Math.max(1, ((Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1) || 1);
+  const previousRange = useMemo(() => {
+    const anchor = new Date(from + 'T12:00:00');
+    return { from: dateOffset(anchor, -days), to: dateOffset(anchor, -1) };
+  }, [from, days]);
+  const previous = useMemo(() => compare && !analytics.error && from && to ? analyzeTransactions(prepared, { ...emptyTransactionAnalysisFilters, ...filters, ...previousRange }) : null,
+    [compare, analytics.error, from, to, prepared, filters, previousRange]);
+  const rollups = useMemo(() => {
+    const categories = new Map<string, { name: string; amount: number }>();
+    const types = new Map<string, { name: string; amount: number }>();
+    const accounts = new Map<string, { name: string; amount: number }>();
+    const trend = new Map<string, { income: number; expense: number }>();
+    let largestExpense: Transaction | undefined;
+    let largestIncome: Transaction | undefined;
+    const add = (groups: typeof categories, key: string, name: string, paise: number) => groups.set(key, { name, amount: (groups.get(key)?.amount ?? 0) + paise });
+    for (const transaction of analytics.matches) {
+      if (transaction.kind === 'transfer') continue;
+      const paise = Math.round(transaction.amount * 100);
+      const key = days > 62 ? transaction.date.slice(0, 7) : transaction.date;
+      const bucket = trend.get(key) ?? { income: 0, expense: 0 };
+      bucket[transaction.kind] += paise;
+      trend.set(key, bucket);
       if (transaction.kind === 'expense') {
-        expense += transaction.amount;
-        flow.expense += transaction.amount;
-        const label = transaction.categoryName || 'Uncategorised';
-        categories.set(label, (categories.get(label) ?? 0) + transaction.amount);
-      }
+        if (!largestExpense || transaction.amount > largestExpense.amount) largestExpense = transaction;
+        add(categories, transaction.categoryId ?? 'uncategorised', transaction.categoryName ?? 'Uncategorised', paise);
+      } else if (!largestIncome || transaction.amount > largestIncome.amount) largestIncome = transaction;
+      add(types, transaction.typeId, transaction.typeName, paise);
+      add(accounts, transaction.accountId, transaction.accountName, transaction.kind === 'income' ? paise : -paise);
     }
-    const categoryTotals = [...categories].map(([name, total]) => ({ name, total, share: expense ? Math.round((total / expense) * 100) : 0 })).sort((a, b) => b.total - a.total);
-    const trend = [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, ...value }));
-    return { filtered, income, expense, categoryTotals, trend };
-  }, [transactions, activeRange.from, activeRange.to]);
-  const peak = Math.max(1, ...analytics.trend.flatMap((point) => [point.income, point.expense]));
-  const days = Math.max(1, Math.round((new Date(`${activeRange.to}T12:00:00`).getTime() - new Date(`${activeRange.from}T12:00:00`).getTime()) / 86_400_000) + 1);
-  const savingsRate = analytics.income ? Math.round(((analytics.income - analytics.expense) / analytics.income) * 100) : null;
-  return (
-    <>
-      <SectionHeading title="Analytics" description="Understand how money moves across the period you choose." />
-      <div className="analytics-controls surface-card">
-        <div className="analytics-tabs" role="tablist" aria-label="Analytics period">
-          {(['daily', 'weekly', 'monthly', 'custom'] as AnalyticsRange[]).map((option) => (
-            <button key={option} type="button" className={range === option ? 'active' : ''} onClick={() => setRange(option)}>{option[0].toUpperCase() + option.slice(1)}</button>
-          ))}
-        </div>
-        {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
-        <p>{formatDate(activeRange.from)} – {formatDate(activeRange.to)}</p>
+    return { categories, types, accounts, trend: [...trend].sort(([a], [b]) => a.localeCompare(b)), largestExpense, largestIncome };
+  }, [analytics.matches, days]);
+  const statement = useMemo(() => [...analytics.matches].sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '')), [analytics.matches]);
+  const peak = rollups.trend.reduce((maximum, [, entry]) => Math.max(maximum, entry.income, entry.expense), 1);
+  const savingsRate = analytics.income ? Math.round((analytics.balance / analytics.income) * 100) : null;
+  const invalid = analytics.error || (!from || !to ? 'Choose both dates.' : '');
+
+  const exportStatement = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    setExporting(true);
+    setExportError('');
+    const account = options.accounts.find(([id]) => id === filters.account)?.[1] ?? 'All accounts';
+    const category = options.categories.find(([id]) => id === filters.category)?.[1] ?? 'All categories';
+    const type = types.find(([id]) => id === filters.typeId)?.[1] ?? 'All types';
+    const report: TableReport = {
+      title: 'Financial transaction statement', filename: 'transactions-' + from + '-to-' + to,
+      summary: [
+        formatDate(from) + ' – ' + formatDate(to), [account, category, type, filters.kind === 'all' ? 'All classifications' : filters.kind].join(' · '),
+        'Income ' + formatMoney(analytics.income) + ' · Expenses ' + formatMoney(analytics.expense) + ' · Net movement ' + formatMoney(analytics.balance),
+      ],
+      headers: ['Date', 'Description', 'Category', 'Type', 'Account', 'Classification', 'Amount (INR)'],
+      rows: statement.map((row) => [row.date, row.name, row.categoryName ?? '', row.typeName, row.toAccountName ? row.accountName + ' → ' + row.toAccountName : row.accountName, row.kind, row.amount]),
+      amountColumn: 6,
+    };
+    try { await downloadReport(report, format); }
+    catch (error) { setExportError(error instanceof Error ? error.message : 'Could not export this statement.'); }
+    finally { setExporting(false); }
+  };
+
+  return <>
+    <SectionHeading title="Analytics" description="See income, expenses and cash flow in your selected period." />
+    <div className="analytics-controls surface-card">
+      <div className="analytics-tabs" aria-label="Analytics period">
+        {(['daily', 'weekly', 'monthly', 'yearly', 'custom'] as const).map((option) => (
+          <button key={option} type="button" className={range === option ? 'active' : ''} aria-pressed={range === option} onClick={() => setRange(option)}>{option[0].toUpperCase() + option.slice(1)}</button>
+        ))}
       </div>
+      {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
+      <p>{formatDate(from)} – {formatDate(to)}</p>
+      <div className="form-grid finance-analytics-filters">
+        {([['account', 'Account', options.accounts], ['typeId', 'Transaction type', types], ['category', 'Category', options.categories]] as const).map(([key, label, values]) =>
+          <label key={key}>{label}<Select value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}><option value="">All</option>{values.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</Select></label>)}
+        <label>Classification<Select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value as typeof filters.kind })}><option value="all">All</option><option value="income">Income</option><option value="expense">Expense</option><option value="transfer">Transfer</option></Select></label>
+      </div>
+      <label className="recognition-check"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} /> Compare with the previous period of equal length</label>
+    </div>
+    {invalid ? <p className="form-error" role="alert">{invalid}</p> : <>
       <div className="metrics-grid">
-        <Metric
-          label="Savings rate"
-          value={savingsRate === null ? '—' : `${savingsRate}%`}
-          foot="Share of income left over"
-          icon={<PiggyBank size={16} />}
-        />
-        <Metric
-          label="Largest expense"
-          value={analytics.categoryTotals[0]?.name ?? '—'}
-          foot={analytics.categoryTotals[0] ? formatMoney(analytics.categoryTotals[0].total) : 'No expenses yet'}
-          icon={<ArrowUpRight size={16} />}
-        />
-        <Metric
-          label="Daily average spend"
-          value={formatMoney(analytics.expense / days)}
-          foot="Expenses divided by selected days"
-          icon={<FileText size={16} />}
-        />
-        <Metric
-          label="Transactions"
-          value={String(analytics.filtered.length)}
-          foot="Recorded in this period"
-          icon={<ArrowLeftRight size={16} />}
-        />
+        <Metric label="Income" value={formatMoney(analytics.income)} foot={previous ? 'Previous ' + formatMoney(previous.income) : 'Selected period'} icon={<ArrowDownLeft size={16} />} />
+        <Metric label="Expenses" value={formatMoney(analytics.expense)} foot={previous ? 'Previous ' + formatMoney(previous.expense) : 'Selected period'} icon={<ArrowUpRight size={16} />} />
+        <Metric label="Net cash flow" value={formatMoney(analytics.balance)} foot={previous ? 'Previous ' + formatMoney(previous.balance) : 'Income minus expenses'} icon={<Wallet size={16} />} />
+        <Metric label="Savings rate" value={savingsRate === null ? '—' : savingsRate + '%'} foot="Share of income left over" icon={<PiggyBank size={16} />} />
+        <Metric label="Largest expense" value={rollups.largestExpense ? formatMoney(rollups.largestExpense.amount) : '—'} foot={rollups.largestExpense?.name ?? 'No expenses in this period'} icon={<ArrowUpRight size={16} />} />
+        <Metric label="Largest income" value={rollups.largestIncome ? formatMoney(rollups.largestIncome.amount) : '—'} foot={rollups.largestIncome?.name ?? 'No income in this period'} icon={<ArrowDownLeft size={16} />} />
+        <Metric label="Daily average spend" value={formatMoney(analytics.expense / days)} foot={days + ' calendar days'} icon={<FileText size={16} />} />
+        <Metric label="Monthly average spend" value={formatMoney(analytics.expense / months)} foot={months + ' calendar months in range'} icon={<FileText size={16} />} />
+      </div>
+      {previous ? <p className="form-hint">Comparison period · {formatDate(previousRange.from)} – {formatDate(previousRange.to)}
+        {previous.expense > 0 ? ' · Spending changed by ' + new Intl.NumberFormat('en-IN', { style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 1 }).format((analytics.expense - previous.expense) / previous.expense) : null}
+      </p> : null}
+      <div className="content-grid analytics-grid">
+        <div className="card-title-row"><div><h3>Cash-flow trend</h3><p>{days > 62 ? 'Income and spending by month' : 'Income and spending by day'}</p></div></div>
+        <div className="surface-card analytics-trend" role="img" aria-label="Income and expense trend for the selected dates">
+          {rollups.trend.length ? <div className="analytics-bars">{rollups.trend.map(([date, point]) => <div className="analytics-bar-pair" key={date} title={date + ' · income ' + formatMoney(point.income / 100) + ' · expense ' + formatMoney(point.expense / 100)}><i className="expense-bar" style={{ height: point.expense / peak * 100 + '%' }} /><i className="income-bar" style={{ height: point.income / peak * 100 + '%' }} /><small>{date.length === 7 ? date.slice(5) : date.slice(8)}</small></div>)}</div> : <p className="card-note">No income or expenses in this view.</p>}
+        </div>
       </div>
       <div className="content-grid analytics-grid">
-        <div className="card-title-row">
-          <div>
-            <h3>Cash-flow trend</h3>
-            <p>Income and spending by day</p>
+        {([['Expenses by category', 'category', rollups.categories], ['Transactions by type', 'typeId', rollups.types], ['Net cash flow by account', 'account', rollups.accounts]] as const).map(([title, key, groups]) =>
+          <section className="surface-card" key={key}><h3>{title}</h3>
+            {[...groups].sort((a, b) => Math.abs(b[1].amount) - Math.abs(a[1].amount)).map(([id, entry]) =>
+              <button className="text-button finance-drilldown" key={id} type="button" aria-pressed={filters[key] === id} onClick={() => setFilters({ ...filters, [key]: filters[key] === id ? '' : id })}><span>{entry.name}</span><strong>{formatMoney(entry.amount / 100)}</strong></button>)}
+            {!groups.size ? <p className="card-note">No matching income or expenses.</p> : null}
+          </section>)}
+      </div>
+      <section className="surface-card">
+        <div className="card-title-row"><div><h3>Transaction statement</h3><p>{statement.length} transactions in your filtered view</p></div>
+          <div className="finance-export-actions">
+            {([['csv', 'CSV'], ['xlsx', 'Excel'], ['pdf', 'Print / PDF']] as const).map(([format, label]) => <button className="secondary-button" key={format} type="button" disabled={exporting} onClick={() => void exportStatement(format)}>{label}</button>)}
           </div>
         </div>
-        <div className="surface-card analytics-trend" role="img" aria-label="Income and expense trend for the selected dates">
-          {analytics.trend.length ? <div className="analytics-bars">{analytics.trend.map((point) => <div className="analytics-bar-pair" key={point.date} title={`${formatDate(point.date)} · income ${formatMoney(point.income)} · expense ${formatMoney(point.expense)}`}><i className="expense-bar" style={{ height: `${(point.expense / peak) * 100}%` }} /><i className="income-bar" style={{ height: `${(point.income / peak) * 100}%` }} /><small>{point.date.slice(8)}</small></div>)}</div> : <p className="card-note">Record transactions in this period to see your trend.</p>}
-        </div>
-        <div className="surface-card">
-          <div className="card-title-row"><div><h3>Expenses by category</h3><p>Share of selected spending</p></div></div>
-          {analytics.categoryTotals.length ? <CategoryBreakdown categories={analytics.categoryTotals} /> : <p className="card-note">No expenses in this period.</p>}
-        </div>
-      </div>
-    </>
-  );
+        {exportError ? <p className="form-error" role="alert">{exportError}</p> : null}
+        {statement.length ? <div className="workout-table"><table className="finance-analytics-table"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Amount</th></tr></thead>
+          <tbody>{statement.map((row) => <tr key={row.id}><td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td><td>{row.accountName}{row.toAccountName ? ' → ' + row.toAccountName : ''}</td><td>{formatMoney(row.amount)}</td></tr>)}</tbody></table></div> : <p className="card-note">No transactions match these filters.</p>}
+      </section>
+    </>}
+  </>;
 }

@@ -1,4 +1,8 @@
 import { env, pipeline, LogitsProcessor, LogitsProcessorList, type Tensor, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
+import asyncWasm from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
+import asyncFactory from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
+import basicWasm from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
+import basicFactory from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
 import type { AthleteVoiceWorkerRequest, AthleteVoiceWorkerResponse } from './athlete-voice';
 import { applyWhisperLanguagePrefix, type WhisperLanguageConfig } from './athlete-voice-language';
 
@@ -8,7 +12,11 @@ env.useBrowserCache = true;
 if (env.backends.onnx.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
-  env.backends.onnx.wasm.wasmPaths = `${new URL(import.meta.env.BASE_URL, self.location.origin).href}athlete-voice/`;
+  const runtime = String(env.backends.onnx.wasm.wasmPaths instanceof Object ? env.backends.onnx.wasm.wasmPaths.wasm : '');
+  const local = (path: string) => new URL(path, self.location.origin).href;
+  env.backends.onnx.wasm.wasmPaths = runtime.includes('.asyncify.')
+    ? { wasm: local(asyncWasm), mjs: local(asyncFactory) }
+    : { wasm: local(basicWasm), mjs: local(basicFactory) };
 }
 
 const model = 'onnx-community/whisper-base';
@@ -25,7 +33,7 @@ const createSpeechPipeline = pipeline as unknown as (
 let recognizer: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
 let busy = false;
 
-// Transformers.js 3.8 defaults to English when language is omitted. Supply the
+// Supply the
 // Whisper start token alone and constrain only its three prefix positions so
 // language detection really runs, independently for each overlapping chunk.
 class AutomaticLanguagePrefix extends LogitsProcessor {

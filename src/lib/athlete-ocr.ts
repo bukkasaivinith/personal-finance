@@ -1,4 +1,6 @@
 import type { Page, Worker } from 'tesseract.js';
+import { samsungLapsFromWords } from './athlete-samsung';
+import type { WorkoutLap } from './athlete-workout';
 
 export type ScreenshotReading = {
   text: string;
@@ -6,6 +8,7 @@ export type ScreenshotReading = {
   confidence: number;
   pass: 'original' | 'enhanced' | 'sparse';
   fields: OcrMetricEvidence[];
+  laps?: WorkoutLap[];
 };
 export type ScreenshotReadResult = {
   fileName: string;
@@ -18,7 +21,7 @@ export type OcrBox = { x0: number; y0: number; x1: number; y1: number };
 export type OcrFragment = { text: string; confidence: number; bbox: OcrBox };
 export type OcrMetricEvidence = { label: string; value: string; text: string; confidence: number };
 
-export const screenshotLimits = { files: 8, bytes: 10 * 1024 * 1024, pixels: 24_000_000, side: 10_000 } as const;
+export const screenshotLimits = { files: 16, bytes: 10 * 1024 * 1024, pixels: 24_000_000, side: 10_000 } as const;
 const metricLabels = [
   /^(?:total\s+)?distance(?:\s*\((?:km|mi|miles?|meters?|metres?)\))?$/i,
   /^(?:(?:total|moving|elapsed|exercise|workout|running)\s+)?(?:duration|time)$/i,
@@ -267,7 +270,7 @@ export async function readAthleteScreenshots(files: File[], options: { onProgres
           await bounded(current.setParameters({ tessedit_pageseg_mode: pass.psm, preserve_interword_spaces: '1', user_defined_dpi: '300' }), 10_000, signal);
           const { data } = await bounded(current.recognize(pass.canvas, { rotateAuto: true }, { text: true, blocks: true }), 60_000, signal);
           const fields = metricEvidenceFromFragments(fragmentsFromPage(data));
-          if (data.text.trim() || fields.length) result.readings.push({ text: data.text.trim(), layoutText: fields.map((field) => field.text).join('\n'), confidence: data.confidence, fields, pass: pass.name });
+          if (data.text.trim() || fields.length) result.readings.push({ text: data.text.trim(), layoutText: fields.map((field) => field.text).join('\n'), confidence: data.confidence, fields, pass: pass.name, laps: samsungLapsFromWords((data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.flatMap((line) => line.words)))) });
         }
         if (!result.readings.length) result.error = 'No readable text was found. Try a closer, clearer crop of the metrics.';
       } catch (error) {
