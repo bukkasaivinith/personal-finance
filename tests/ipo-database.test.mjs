@@ -27,9 +27,10 @@ test('IPO accounting on the complete application migration history', async (t) =
  const savingsMigration = '20261123190000_savings_entries.sql';
  const ipoResultsMigration = '20261123200000_ipo_realized_results.sql';
  const savingsHistoryMigration = '20261123210000_savings_account_history.sql';
+ const ipoPresentValueMigration = '20261123220000_ipo_present_total_value.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
-   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration].includes(name)) continue; // Test each upgrade with existing data.
+   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -659,6 +660,38 @@ test('IPO accounting on the complete application migration history', async (t) =
   assert.deepEqual(await accounts(), []);
   assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements')), 0);
   await assert.rejects(move('deposit', 25), /Sign in again/);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('IPO present value persists independently of invested capital and realised results', async () => {
+  const bankBalance = await ledger(bank);
+  const load = () => scalar('SELECT public.get_ipo_portfolio()');
+  const target = (await load()).applications.find((entry) => entry.company === 'Dated allotment IPO');
+  await scalar('SELECT public.set_ipo_application_result($1,$2,$3)', [target.id, 150, 1000]);
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(ipoPresentValueMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const save = (result, value) => scalar('SELECT public.save_ipo_portfolio_result($1,$2,$3)', [target.id, result, value]);
+  const read = async () => (await load()).applications.find((entry) => entry.id === target.id);
+  assert.equal((await read()).present_total_value, null);
+  await assert.rejects(save(150, -1), /present total value/);
+  await assert.rejects(save(150, 123.456), /two decimal places/);
+  await save(150, 1250.75);
+  await save(150, 1250.75);
+  const updated = await read();
+  assert.equal(updated.invested_amount, 1000);
+  assert.equal(updated.realized_profit_loss, 150);
+  assert.equal(updated.present_total_value, 1250.75);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_events WHERE application_id=$1 AND payload ? 'present_total_value'", [target.id])), 1);
+  await save(150, 0);
+  assert.equal((await read()).present_total_value, 0);
+  await save(150, null);
+  assert.equal((await read()).present_total_value, null);
+  assert.equal((await read()).invested_amount, 1000);
+  assert.equal(await ledger(bank), bankBalance);
+
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  await assert.rejects(save(150, 200), /session|workspace owner/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{

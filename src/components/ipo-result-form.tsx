@@ -5,17 +5,17 @@ import { RupeeInput } from '@/components/rupee-input';
 import { formatDematAccount, saveIpoApplicationResult, type IpoApplication } from '@/lib/ipo-portfolio-api';
 
 type ResultKind = 'profit' | 'loss' | 'even' | 'unrecorded';
-const positiveRupees = (value: string) => /^[0-9]{1,12}(\.[0-9]{0,2})?$/.test(value) && Number(value) > 0;
+const rupeeAmount = /^[0-9]{1,12}(\.[0-9]{0,2})?$/;
 
 export function IpoResultForm({ application, onClose, onSaved }: {
   application: IpoApplication;
   onClose: () => void;
-  onSaved: (profitLoss: number | null, investedAmount: number | null) => void;
+  onSaved: (profitLoss: number | null, presentTotalValue: number | null) => void;
 }) {
   const initial = application.realized_profit_loss;
   const [kind, setKind] = useState<ResultKind>(initial == null ? 'unrecorded' : initial > 0 ? 'profit' : initial < 0 ? 'loss' : 'even');
   const [amount, setAmount] = useState(initial ? String(Math.abs(initial)) : '');
-  const [invested, setInvested] = useState(application.invested_amount == null ? '' : String(application.invested_amount));
+  const [presentValue, setPresentValue] = useState(application.present_total_value == null ? '' : String(application.present_total_value));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const pending = useRef(false);
@@ -25,24 +25,23 @@ export function IpoResultForm({ application, onClose, onSaved }: {
     event.preventDefault();
     if (pending.current) return;
     const text = amount.trim();
-    if (needsAmount && !positiveRupees(text)) {
+    if (needsAmount && (!rupeeAmount.test(text) || Number(text) <= 0)) {
       setError('Enter an amount greater than zero with up to two decimal places.');
       return;
     }
-    const investedText = invested.trim();
-    if (investedText && !positiveRupees(investedText)) {
-      setError('Enter a positive invested amount with up to two decimal places.');
+    if (presentValue && !rupeeAmount.test(presentValue)) {
+      setError('Enter a present total value of zero or more with up to two decimal places.');
       return;
     }
 
     const result = kind === 'unrecorded' ? null : kind === 'even' ? 0 : Number(text) * (kind === 'loss' ? -1 : 1);
-    const investedAmount = investedText ? Number(investedText) : null;
+    const total = presentValue ? Number(presentValue) : null;
     pending.current = true;
     setSaving(true);
     setError('');
     try {
-      await saveIpoApplicationResult(application.id, result, investedAmount);
-      onSaved(result, investedAmount);
+      await saveIpoApplicationResult(application.id, result, total);
+      onSaved(result, total);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save the IPO result.');
     } finally {
@@ -68,8 +67,8 @@ export function IpoResultForm({ application, onClose, onSaved }: {
           {needsAmount ? <label>Net amount (₹)
             <RupeeInput value={amount} onValueChange={setAmount} disabled={saving} />
           </label> : null}
-          <label className="full-field">Invested in allotted shares (₹, optional)
-            <RupeeInput value={invested} onValueChange={setInvested} disabled={saving} />
+          <label className="full-field">Present total value (₹, optional)
+            <RupeeInput value={presentValue} onValueChange={setPresentValue} disabled={saving} />
           </label>
         </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
