@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Loader2 } from 'lucide-react';
-import { CompleteProfileForm, CreateAccountForm, ForgotPasswordForm, NewPasswordForm, SignInForm, AuthShell } from '@/components/auth-forms';
+import { CompleteProfileForm, ForgotPasswordForm, NewPasswordForm, SignInForm, AuthShell } from '@/components/auth-forms';
 import { claimWorkspace, loadCurrentFinanceProfile, requireFinanceOwner, type CurrentFinanceProfile } from '@/lib/auth-api';
 import { CurrentFinanceProfileContext } from '@/lib/current-finance-profile';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession, SESSION_REPLACED_NOTICE, validateCurrentSingleDeviceSession } from '@/lib/session-api';
@@ -17,7 +17,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<CurrentFinanceProfile | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [forgot, setForgot] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -114,9 +113,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (!checked) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Checking your session</p></AuthShell>;
   if (recovering) return <NewPasswordForm onComplete={async () => { try { await endCurrentSingleDeviceSession(); } finally { await supabase.auth.signOut({ scope: 'global' }); } setRecovering(false); setNotice('Your password has been updated. Sign in with your new password.'); }} />;
   if (!session) {
-    if (creating) return <CreateAccountForm onBack={() => setCreating(false)} />;
     if (forgot) return <ForgotPasswordForm onBack={() => setForgot(false)} />;
-    return <SignInForm notice={notice} onForgot={() => setForgot(true)} onCreateAccount={() => setCreating(true)} />;
+    return <SignInForm notice={notice} onForgot={() => setForgot(true)} />;
   }
   if (error) return <AuthShell><BrandlessError message={error} /></AuthShell>;
   if (!ready || !profile || profile.id !== session.user.id) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Opening your workspace</p></AuthShell>;
