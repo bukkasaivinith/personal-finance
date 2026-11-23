@@ -52,6 +52,50 @@ export function filterIpo(rows: IpoRow[], filters: IpoFilters, friends: Map<stri
 export function summaryIpo(rows: IpoRow[]) {
  return { companies: new Set(rows.map(x => x.company_id)).size, applications: rows.length, applied: sum(rows, r => r.amount), blocked: sum(rows, r => r.blocked), allotted: rows.filter(r => (r.allotment?.shares ?? 0) > 0).length, unsuccessful: rows.filter(r => r.allotment && !r.allotment.shares).length, invested: sum(rows, r => r.remainingCost), profit: sum(rows, r => r.profit), proceeds: sum(rows, r => r.proceeds), unsettled: sum(rows, r => r.unsettled), originalCost: sum(rows, r => r.allotment?.cost ?? 0), shares: sum(rows, r => r.remainingShares), refund: sum(rows, r => r.refund_due) };
 }
+const ipoDateFormatter = new Intl.DateTimeFormat('en-IN', {
+ timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+export function ipoDateKey(date = new Date()): string {
+ const parts = ipoDateFormatter.formatToParts(date);
+ return ['year', 'month', 'day'].map(part => parts.find(value => value.type === part)?.value).join('-');
+}
+
+export function ipoPortfolioRange(period: 'all' | 'week' | 'month' | 'custom', today: string, custom: { start: string; end: string }) {
+ if (period === 'all') return { start: '', end: '' };
+ if (period === 'custom') return custom;
+ if (period === 'month') return { start: today.slice(0, 7) + '-01', end: today };
+
+ const monday = new Date(today + 'T00:00:00Z');
+ monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+ return { start: monday.toISOString().slice(0, 10), end: today };
+}
+
+export function ipoPortfolioSummary(rows: IpoRow[], { start, end }: { start: string; end: string }) {
+ const inRange = (date: string) => (!start || date >= start) && (!end || date <= end);
+ const applications = rows.filter(row => inRange(row.application_date));
+ const allotments = rows.flatMap(row => row.allotment && inRange(row.allotment.allotted_on) ? [row.allotment] : []);
+ const sales = rows.flatMap(row => row.sales.filter(sale => inRange(sale.sold_on)));
+ const profit = sum(sales, sale => Math.max(0, sale.profit));
+ const loss = sum(sales, sale => Math.max(0, -sale.profit));
+ return {
+  companies: new Set(applications.map(row => row.company_id)).size,
+  applications: applications.length,
+  allotted: allotments.filter(result => result.shares > 0).length,
+  notAllotted: allotments.filter(result => result.result === 'none').length,
+  profit, loss, net: money(profit - loss),
+ };
+}
+
+export function ipoApplicationLots(amount: string, price: string, sharesPerLot: string, minimumLots: string): number | null {
+ const toPaise = (value: string) => /^\d+(?:\.\d{1,2})?$/.test(value) ? Math.round(Number(value) * 100) : NaN;
+ const appliedPaise = toPaise(amount);
+ const lotPaise = toPaise(price) * Number(sharesPerLot);
+ const lots = appliedPaise / lotPaise;
+ return Number.isSafeInteger(appliedPaise) && Number.isSafeInteger(lotPaise) &&
+  Number.isInteger(lots) && lots > 0 && lots <= 2_147_483_647 && lots >= Number(minimumLots) ? lots : null;
+}
+
 export function ipoLotsResult(application: Pick<IpoApplication, 'lots' | 'lot_size'>, allotted: number, notAllotted: number) {
  if (!Number.isInteger(allotted) || !Number.isInteger(notAllotted) || allotted < 0 || notAllotted < 0 || allotted + notAllotted !== application.lots) return null;
  return {

@@ -249,7 +249,7 @@ export function InvestmentsView({ investments, investmentTypes, accounts, action
     try { await actions.deleteInvestment(investment.id); onNotify('Investment and its linked transaction entries were deleted.'); } catch (caught) { onNotify(errorMessage(caught)); } finally { setBusyId(''); }
   };
 
-  const tabs = <nav className="ipo-tabs" aria-label="Investment pages"><button aria-current={!ipoPage ? "page" : undefined} onClick={() => setIpoPage(false)}>Investment overview</button><button aria-current={ipoPage ? "page" : undefined} onClick={() => { setIpoApplication(''); setIpoPage(true); }}>IPO</button></nav>;
+  const tabs = <nav className="investment-page-switch" aria-label="Investment pages"><button aria-current={!ipoPage ? "page" : undefined} onClick={() => setIpoPage(false)}>Investment overview</button><button aria-current={ipoPage ? "page" : undefined} onClick={() => { setIpoApplication(''); setIpoPage(true); }}>IPO</button></nav>;
   if (ipoPage) return <>{tabs}<IpoView accounts={accounts} initialApplication={ipoApplication} onUpdated={onRefresh} onNotify={onNotify} /></>;
   return <>
     {tabs}

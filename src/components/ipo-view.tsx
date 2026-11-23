@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import '@/components/ipo.css';
-import { Building2, Download, Plus, RefreshCw, Users } from 'lucide-react';
+import { Building2, ChevronRight, Download, Plus, RefreshCw } from 'lucide-react';
 import { Select } from '@/components/select';
 import { DatePicker } from '@/components/date-picker';
 import { SectionHeading, EmptyPanel } from '@/components/ui';
@@ -8,7 +8,7 @@ import { IpoForm, type IpoFormSpec } from '@/components/ipo-form';
 import { IpoCalendar } from '@/components/ipo-calendar';
 import { formatDate, formatMoney, todayKey, type Account } from '@/lib/finance';
 import { loadIpo } from '@/lib/ipo-api';
-import { emptyFilters, eventLabel, filterIpo, indexIpo, ipoCalendar, ipoCsv, money, sum, summaryIpo, type CsvCell, type IpoData, type IpoFilters, type IpoRow } from '@/lib/ipo';
+import { emptyFilters, eventLabel, filterIpo, indexIpo, ipoCalendar, ipoCsv, ipoDateKey, ipoPortfolioRange, ipoPortfolioSummary, money, sum, summaryIpo, type CsvCell, type IpoData, type IpoFilters, type IpoRow } from '@/lib/ipo';
 
 const allotmentLabels: Record<string, string> = {
  applied: 'Awaiting result',
@@ -25,6 +25,39 @@ function Table({ headings, rows }: { headings: string[]; rows: (string | number)
 function Stats({ items }: { items: [string,string,string][] }) {
  return <div className="ipo-stats">{items.map(([label,value,hint])=><div key={label} title={hint}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div>;
 }
+function PortfolioSummary({ rows }: { rows: IpoRow[] }) {
+ const [period, setPeriod] = useState<'all' | 'week' | 'month' | 'custom'>('all');
+ const [custom, setCustom] = useState({ start: '', end: '' });
+ const today = ipoDateKey();
+ const range = ipoPortfolioRange(period, today, custom);
+ const totals = ipoPortfolioSummary(rows, range);
+
+ return <section className="surface-card ipo-portfolio-summary">
+  <div className="card-title-row">
+   <div><h3>Portfolio summary</h3><p>Applications, allotment results and realised returns by date.</p></div>
+   <Select aria-label="IPO portfolio date range" value={period} onChange={event => setPeriod(event.target.value as typeof period)}>
+    <option value="all">All time</option>
+    <option value="week">This week</option>
+    <option value="month">This month</option>
+    <option value="custom">Custom range</option>
+   </Select>
+  </div>
+  {period === 'custom' ? <div className="ipo-calendar-filters">
+   <DatePicker label="From" value={custom.start} onChange={start => setCustom(current => ({ ...current, start }))} max={custom.end || today} clearable />
+   <DatePicker label="To" value={custom.end} onChange={end => setCustom(current => ({ ...current, end }))} min={custom.start} max={today} clearable />
+  </div> : null}
+  <Stats items={[
+   ['Companies applied', String(totals.companies), 'Distinct companies by application date'],
+   ['Applications', String(totals.applications), 'Applications submitted'],
+   ['Allotted', String(totals.allotted), 'Full or partial results by allotment date'],
+   ['Not allotted', String(totals.notAllotted), 'Unsuccessful results by allotment date'],
+   ['Total profit', formatMoney(totals.profit), 'Profitable sales in the period'],
+   ['Total loss', formatMoney(totals.loss), 'Losses on sales in the period'],
+   ['Net profit / loss', formatMoney(totals.net), 'Total profit less total loss'],
+  ]} />
+ </section>;
+}
+
 function Reports({ data, rows, friends, filters }: { data: IpoData; rows: IpoRow[]; friends: Map<string,number>; filters: IpoFilters }) {
  const [group,setGroup]=useState('company'); const [exportKind,setExportKind]=useState('applications');
  const ids=new Set(rows.map(r=>r.id)); const people=new Set(rows.map(r=>r.person.id)); const companyIds=new Set(rows.map(r=>r.company_id));
@@ -84,7 +117,6 @@ export function IpoView({ accounts, initialApplication, onUpdated, onNotify }: {
  };
  const updateFilter=(key:keyof IpoFilters,value:string)=>{setFilters(f=>({...f,[key]:value}));setPage(0);};
  if(!data||!indexed)return <section className="surface-card"><EmptyPanel icon={<Building2 size={24}/>} title={loading?'Loading your IPO portfolio…':'IPO portfolio unavailable'} description={error||'Reading your private workspace records.'} action={!loading?<button className="secondary-button" onClick={()=>void refresh()}>Try again</button>:undefined}/></section>;
- const totals=summaryIpo(indexed.rows);const custody=sum([...indexed.friendBalances.values()],n=>n);
  const selectedApp=indexed.rows.find(a=>a.id===appId);const selectedCompany=indexed.companies.get(selectedApp?.company_id??companyId);
  const allotment = selectedApp?.allotment;
  const lotsReceived = allotment && selectedApp ? allotment.shares / selectedApp.lot_size : null;
@@ -108,9 +140,33 @@ export function IpoView({ accounts, initialApplication, onUpdated, onNotify }: {
  return <div className="ipo-workspace"><SectionHeading title="IPO portfolio" description="Your capital, every applicant, one connected history." action={<><button className="secondary-button" onClick={()=>open('fund_friend','Send funds to applicant')} disabled={!data.applicants.length}>Send funds</button><button className="primary-button" onClick={()=>open('company','Add IPO company')}><Plus size={16}/> Add IPO</button></>}/>
  {error?<p role="alert" className="form-error">{error} <button className="text-button" onClick={()=>void refresh()}>Refresh</button></p>:null}
  <nav className="ipo-tabs" aria-label="IPO sections">{[['portfolio','Portfolio'],['calendar','Calendar'],['reports','Reports'],['applicants','Applicants']].map(([id,label])=><button key={id} aria-current={tab===id?'page':undefined} onClick={()=>{setTab(id);setCompanyId('');setAppId('');}}>{label}</button>)}<button className="ipo-refresh" aria-label="Refresh IPO data" disabled={loading} onClick={()=>void refresh()}><RefreshCw size={16}/></button></nav>
- {tab==='portfolio'&&!selectedCompany?<><Stats items={[[ 'Companies applied',String(totals.companies),'Distinct companies with applications'],['Applications',String(totals.applications),'Lifetime submitted records'],['Capital applied',formatMoney(totals.applied),'Lifetime cumulative applications'],['Blocked / reserved',formatMoney(totals.blocked),'Still in bank or applicant custody'],['Allotted accounts',String(totals.allotted),'Applications receiving shares'],['Unsuccessful accounts',String(totals.unsuccessful),'Not allotted, rejected or cancelled'],['Current invested cost',formatMoney(totals.invested),'Cost basis of shares still held'],['Realised profit / loss',formatMoney(totals.profit),'Net proceeds less sold share cost'],['Applicant custody',formatMoney(custody),'Your funds held outside your banks'],['Awaiting sale receipt',formatMoney(totals.unsettled),'Sold proceeds not yet settled']]}/></>:null}
+ {tab === 'portfolio' && !selectedCompany ? <PortfolioSummary rows={indexed.rows} /> : null}
  {(tab==='reports'||tab==='portfolio')&&!selectedCompany?<section className="surface-card ipo-filter-card"><div className="ipo-filter-top"><input aria-label="Search IPOs" placeholder="Search company, applicant or reference" value={filters.search} onChange={e=>updateFilter('search',e.target.value)}/><button className="secondary-button" onClick={()=>setShowFilters(!showFilters)} aria-expanded={showFilters}>Filters</button>{tab==='portfolio'?<Select aria-label="Sort IPOs" value={sort} onChange={e=>setSort(e.target.value)}><option value="recent">Opening date</option><option value="name">Company name</option><option value="capital">Applied capital</option></Select>:null}</div>{showFilters?<div className="ipo-filters"><label>Applicant<Select value={filters.applicant} onChange={e=>updateFilter('applicant',e.target.value)}><option value="">All applicants</option>{data.applicants.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</Select></label><DatePicker label="Application from" value={filters.start} onChange={v=>updateFilter('start',v)} clearable/><DatePicker label="Application to" value={filters.end} onChange={v=>updateFilter('end',v)} min={filters.start} clearable/>{([['classification','Classification',['Mainboard','SME']],['status','Application status',['applied','full','partial','none','rejected','cancelled']],['result','Allotment',['pending','full','partial','none','rejected','cancelled']],['funding','Funding',['direct','friend']],['holding','Outstanding / holdings',['open','sold','refund','friend']]] as [keyof IpoFilters,string,string[]][]).map(([key,label,opts])=><label key={key}>{label}<Select value={filters[key]} onChange={e=>updateFilter(key,e.target.value)}><option value="">All</option>{opts.map(o=><option key={o}>{o}</option>)}</Select></label>)}<button className="text-button" onClick={()=>{setFilters(emptyFilters);setPage(0);}}>Clear filters</button></div>:null}</section>:null}
- {tab==='portfolio'&&!selectedCompany?<><div className="ipo-company-list">{companyList.slice(shownPage*12,shownPage*12+12).map(c=>{const rs=filtered.filter(r=>r.company_id===c.id);const s=summaryIpo(rs);return <article key={c.id} className="surface-card ipo-company-card"><button className="ipo-company-heading" onClick={()=>setCompanyId(c.id)}><span className="ipo-company-icon"><Building2 size={22}/></span><span><h3>{c.name}</h3><small>{c.classification}{c.symbol?` · ${c.symbol}`:''}{c.archived?' · Archived':''} · {s.shares?'Holding shares':rs.some(r=>r.status==='applied')?'Applications pending':rs.length?'Completed results':'Ready for applications'}</small></span><strong>{formatMoney(s.applied)}<small>capital applied</small></strong></button><p className="form-hint">{c.dates.opening?`Opens ${formatDate(c.dates.opening)}`:'Opening date not recorded'}{c.dates.actual_listing?` · Listed ${formatDate(c.dates.actual_listing)}`:''}</p><div className="ipo-company-summary"><span>{s.applications} applications</span><span>{s.allotted} allotted</span><span>{sum(rs,r=>r.allotment?.shares??0)} shares allotted</span><span>{formatMoney(s.originalCost)} allotted cost</span><span>{s.shares} shares held</span><span className={s.profit<0?'negative':''}>{formatMoney(s.profit)} realised P/L</span></div><details><summary>Applicant accounts ({rs.length})</summary>{rs.map(r=><button className="ipo-event-row" key={r.id} onClick={()=>setAppId(r.id)}><span><b>{r.label}</b><small>{allotmentLabels[r.status] ?? r.status} · {r.lots*r.lot_size} shares applied</small></span><strong>{formatMoney(r.amount)}</strong></button>)}</details></article>;})}</div>{!companyList.length?<section className="surface-card"><EmptyPanel icon={<Building2 size={24}/>} title={data.companies.length?'No matching IPOs':'Your IPO portfolio starts here'} description="Create applicant profiles and a company, then record applications and actual movements." action={<button className="primary-button" onClick={()=>setTab('applicants')}><Users size={16}/> Manage applicants</button>}/></section>:null}<div className="ipo-pagination"><button className="secondary-button" disabled={!shownPage} onClick={()=>setPage(shownPage-1)}>Previous</button><span>{companyList.length} companies · Page {shownPage+1} of {maxPage+1}</span><button className="secondary-button" disabled={shownPage>=maxPage} onClick={()=>setPage(shownPage+1)}>Next</button></div></>:null}
+ {tab === 'portfolio' && !selectedCompany ? <>
+  <div className="ipo-company-list">
+   {companyList.slice(shownPage * 12, shownPage * 12 + 12).map(company => {
+    const sold = indexed.rows.filter(row => row.company_id === company.id && row.sales.length > 0);
+    const profit = sum(sold, row => row.profit);
+    return <button key={company.id} type="button" className="surface-card ipo-company-heading" onClick={() => setCompanyId(company.id)}>
+     <span className="ipo-company-name">{company.name}</span>
+     {sold.length ? <strong className={profit < 0 ? 'negative' : profit > 0 ? 'positive' : ''}>
+      {formatMoney(profit)} {profit < 0 ? 'loss' : profit > 0 ? 'profit' : 'break-even'}
+     </strong> : null}
+     <ChevronRight size={16} aria-hidden="true" />
+    </button>;
+   })}
+  </div>
+  {!companyList.length ? <section className="surface-card">
+   <EmptyPanel icon={<Building2 size={24} />} title={data.companies.length ? 'No matching IPOs' : 'Your IPO portfolio starts here'}
+    description={data.companies.length ? 'Adjust your search or filters.' : 'Add a company to record applications and track results.'}
+    action={!data.companies.length ? <button className="primary-button" onClick={() => open('company', 'Add IPO company')}><Plus size={16} /> Add IPO</button> : undefined} />
+  </section> : null}
+  {maxPage > 0 ? <div className="ipo-pagination">
+   <button className="secondary-button" disabled={!shownPage} onClick={() => setPage(shownPage - 1)}>Previous</button>
+   <span>{companyList.length} companies · Page {shownPage + 1} of {maxPage + 1}</span>
+   <button className="secondary-button" disabled={shownPage >= maxPage} onClick={() => setPage(shownPage + 1)}>Next</button>
+  </div> : null}
+ </> : null}
  {tab==='portfolio'&&selectedCompany?<><button className="text-button" onClick={()=>{if(selectedApp){setCompanyId(selectedCompany.id);setAppId('');}else setCompanyId('');}}>{selectedApp?'Back to company':'Back to portfolio'}</button><SectionHeading title={selectedApp?selectedApp.label:selectedCompany.name} description={selectedApp?`${selectedCompany.name} · Applied ${formatDate(selectedApp.application_date)} · Reference ${selectedApp.reference||'not recorded'}`:`${selectedCompany.classification} · ${formatMoney(selectedCompany.issue_price)} per share · ${selectedCompany.lot_size} shares per lot`} action={<><button className="secondary-button" onClick={()=>open('company','Edit IPO company',{...selectedCompany})}>Edit company</button><button className="primary-button" disabled={selectedCompany.archived||!data.applicant_accounts.length} onClick={()=>open('application','Add application',{company_id:selectedCompany.id})}><Plus size={16}/> Add application</button></>}/>
  {selectedApp?<section className="surface-card">
   <div className="card-title-row">

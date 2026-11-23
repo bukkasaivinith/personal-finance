@@ -231,6 +231,31 @@ test('IPO accounting on the complete application migration history', async (t) =
   await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,session_id:session})]);
   await db.exec('SET ROLE authenticated');
  });
+ await t.test('a new IPO and its demat applications save atomically without posting cash', async () => {
+  const companyDraft = { name: 'New IPO with two applications', classification: 'Mainboard', issue_price: 33.33, lot_size: 3, minimum_lots: 1 };
+  const existingDemat = (await db.query("SELECT id FROM public.ipo_applicant_accounts WHERE nickname='Personal'")).rows[0].id;
+  const defaults = { date: '2026-01-16', funding_method: 'direct', account_id: bank };
+  const applicationDraft = { ...defaults, applicant_account_id: existingDemat, amount: '299.97' };
+  const newHolder = { ...defaults, holder_name: 'New holder', designation: 'friend', nickname: 'Other demat', amount: '99.99' };
+  const insert = (drafts, key = randomUUID()) => scalar('SELECT public.ipo_create_with_applications($1,$2,$3)', [
+   key, JSON.stringify(companyDraft), JSON.stringify(drafts),
+  ]);
+  const originalBalance = await ledger(bank);
+  await assert.rejects(insert([applicationDraft, { ...newHolder, amount: '100' }]), /must match whole lots/);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_companies WHERE name=$1', [companyDraft.name])), 0);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_applicants WHERE name='New holder'")), 0);
+
+  const key = randomUUID();
+  const saved = await insert([applicationDraft, newHolder], key);
+  assert.deepEqual(await insert([applicationDraft, newHolder], key), saved);
+  await assert.rejects(insert([applicationDraft], key), /different details/);
+  const applications = (await db.query(
+   'SELECT lots, amount FROM public.ipo_applications WHERE company_id=$1 ORDER BY lots', [saved.id],
+  )).rows;
+  assert.deepEqual(applications.map(record => [record.lots, Number(record.amount)]), [[1, 99.99], [3, 299.97]]);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.ipo_applicants WHERE name='New holder'")), 1);
+  assert.equal(await ledger(bank), originalBalance);
+ });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');
   await db.exec('RESET ROLE');

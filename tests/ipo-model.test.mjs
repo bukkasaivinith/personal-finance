@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const compiled = await build({entryPoints:['src/lib/ipo.ts'],bundle:true,write:false,format:'esm',platform:'node'});
-const { indexIpo,filterIpo,summaryIpo,emptyFilters,ipoCalendar,ipoCsv,ipoLotsResult } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+const { indexIpo,filterIpo,summaryIpo,emptyFilters,ipoCalendar,ipoCsv,ipoLotsResult,ipoApplicationLots,ipoDateKey,ipoPortfolioRange,ipoPortfolioSummary } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const financeCompiled = await build({entryPoints:['src/lib/finance.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const { netPosition, signedBalance } = await import(`data:text/javascript;base64,${Buffer.from(financeCompiled.outputFiles[0].text).toString('base64')}`);
 const data={applicants:[{id:'p',name:'Renamed person'}],applicant_accounts:[{id:'d',applicant_id:'p',nickname:'First demat'},{id:'d2',applicant_id:'p',nickname:'Second demat'}],companies:[{id:'c',name:'Company',classification:'SME',dates:{expected_allotment:'2026-02-10',actual_listing:'2026-02-14'}}],applications:[{id:'a',company_id:'c',applicant_account_id:'d',application_date:'2026-02-01',amount:10000,funding_method:'friend',status:'partial',blocked:4000,refund_due:0,reference:''},{id:'b',company_id:'c',applicant_account_id:'d2',application_date:'2026-02-02',amount:10000,funding_method:'friend',status:'none',blocked:0,refund_due:0,reference:''}],allotments:[{application_id:'a',shares:60,cost:6010,voided:false},{application_id:'b',shares:0,cost:0,result:'none',voided:false}],sales:[{id:'s',application_id:'a',shares:20,cost_basis:2003.33,net:2395,profit:391.67,voided:false},{id:'reversed-sale',application_id:'a',shares:40,cost_basis:4006.67,net:0,profit:-4006.67,voided:true}],settlements:[{applicant_id:'p',kind:'funding',amount:20000,voided:false},{applicant_id:'p',sale_id:'s',kind:'receipt',amount:1000,voided:false},{applicant_id:'p',kind:'repayment',amount:500,voided:false},{applicant_id:'p',kind:'repayment',amount:2000,voided:true}],events:[{id:'e',command:'application',application_id:'a',company_id:'c',applicant_id:'p',event_date:'2026-02-01',amount:10000,expected:false,reversed:false,details:{},payload:{}},{id:'old',command:'sale',event_date:'2026-02-02',reversed:true,details:{},payload:{}}],cash_accounts:[]};
@@ -65,4 +65,39 @@ test('IPO funds remain visible in their own accounts but stay outside total asse
 test('CSV quotes text, protects formula injection and preserves numeric losses',()=>{
  const csv=ipoCsv([['=CMD()', '\t+formula', '@SUM(1)', '-text','quoted "name"','two\nlines',-12.5,0]]);
  assert.ok(csv.includes('"\'=CMD()"'));assert.ok(csv.includes('"\'\t+formula"'));assert.ok(csv.includes('"\'@SUM(1)"'));assert.ok(csv.includes('"\'-text"'));assert.ok(csv.includes('"quoted ""name"""'));assert.ok(csv.includes('"two\nlines"'));assert.ok(csv.includes('"-12.5"'));assert.ok(csv.includes('"0"'));
+});
+test('portfolio periods use submission, result and sale dates independently', () => {
+ const { rows } = indexIpo({
+  ...data,
+  allotments: [
+   { ...data.allotments[0], result: 'partial', allotted_on: '2026-02-16' },
+   { ...data.allotments[1], allotted_on: '2026-02-18' },
+  ],
+  sales: [
+   { ...data.sales[0], sold_on: '2026-02-16' },
+   { ...data.sales[1], sold_on: '2026-02-16' },
+   { ...data.sales[0], id: 'loss', sold_on: '2026-02-18', profit: -100 },
+   { ...data.sales[0], id: 'old', sold_on: '2026-01-31', profit: 20 },
+  ],
+ });
+ const week = ipoPortfolioRange('week', '2026-02-19', {});
+ assert.deepEqual(week, { start: '2026-02-16', end: '2026-02-19' });
+ assert.deepEqual(ipoPortfolioSummary(rows, week), {
+  companies: 0, applications: 0, allotted: 1, notAllotted: 1, profit: 391.67, loss: 100, net: 291.67,
+ });
+ const month = ipoPortfolioRange('month', '2026-02-19', {});
+ assert.deepEqual(ipoPortfolioSummary(rows, month), {
+  companies: 1, applications: 2, allotted: 1, notAllotted: 1, profit: 391.67, loss: 100, net: 291.67,
+ });
+ const custom = { start: '2026-02-18', end: '2026-02-18' };
+ assert.equal(ipoPortfolioSummary(rows, ipoPortfolioRange('custom', '2026-02-19', custom)).net, -100);
+ assert.equal(ipoDateKey(new Date('2026-02-18T20:00:00Z')), '2026-02-19');
+});
+
+test('each applied amount must buy whole lots at the exact issue price', () => {
+ assert.equal(ipoApplicationLots('299.97', '33.33', '3', '1'), 3);
+ assert.equal(ipoApplicationLots('15000', '100', '50', '1'), 3);
+ assert.equal(ipoApplicationLots('299.98', '33.33', '3', '1'), null);
+ assert.equal(ipoApplicationLots('299.97', '33.33', '3', '4'), null);
+ assert.equal(ipoApplicationLots('', '0', '3', '1'), null);
 });

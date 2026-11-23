@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { DatePicker } from '@/components/date-picker';
+import { IpoSetupApplications, type IpoApplicationDraft } from '@/components/ipo-setup-applications';
 import { Select } from '@/components/select';
 import { ModalShell } from '@/components/ui';
-import { formatMoney, isUsable, todayKey, type Account } from '@/lib/finance';
-import { commandIpo } from '@/lib/ipo-api';
-import { ipoLotsResult, type IpoData } from '@/lib/ipo';
+import { formatDate, formatMoney, isUsable, type Account } from '@/lib/finance';
+import { commandIpo, createIpoWithApplications } from '@/lib/ipo-api';
+import { ipoApplicationLots, ipoDateKey, ipoLotsResult, type IpoData } from '@/lib/ipo';
 
 export type IpoFormSpec = { command: string; title: string; seed?: Record<string, unknown> };
 type Field = { key: string; label: string; type?: 'number' | 'date' | 'text' | 'textarea' | 'select'; optional?: boolean; options?: [string,string][]; step?: string; min?: number; max?: number; minDate?: string; maxDate?: string };
@@ -18,10 +19,12 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
  const application = data.applications.find(a => a.id === seed.application_id);
  const demat = data.applicant_accounts.find(account => account.id === application?.applicant_account_id);
  const holder = data.applicants.find(person => person.id === demat?.applicant_id);
- const todayParts = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
- const ipoToday = ['year', 'month', 'day'].map(part => todayParts.find(value => value.type === part)?.value).join('-');
+ const ipoToday = ipoDateKey();
+ const isNewCompany = command === 'company' && !seed.id;
+ const allotmentDate = company?.dates.actual_allotment || ipoToday;
+ const [drafts, setDrafts] = useState<IpoApplicationDraft[]>([]);
  const [values, setValues] = useState<Record<string, unknown>>({
-  date: command === 'allot' || command === 'event' ? ipoToday : todayKey(),
+  date: ipoToday,
   designation: 'self',
   classification: 'Mainboard',
   minimum_lots: 1,
@@ -80,7 +83,6 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
   fields = [
    { key: 'allotted_lots', label: 'Allotted lots', type: 'number', min: 0, max: lotsApplied, step: '1' },
    { key: 'not_allotted_lots', label: 'Non-allotted lots', type: 'number', min: 0, max: lotsApplied, step: '1' },
-   { ...date, label: 'Allotment date', minDate: application?.application_date, maxDate: ipoToday },
   ];
  }
  if (command === 'sale') fields = [{key:'shares',label:'Shares sold',type:'number',min:1,step:'1'},{key:'price',label:'Sale price per share (₹)',type:'number',min:0},{key:'charges',label:'Total sale charges (₹)',type:'number',min:0},date,notes];
@@ -124,17 +126,46 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
     setError(`Allotted and non-allotted lots must add up to the ${lotsApplied} applied.`);
     return;
    }
-   Object.assign(payload, allotmentResult);
+   if (application && allotmentDate < application.application_date) {
+    setError('The company allotment date is before this application. Update it in Edit company.');
+    return;
+   }
+   Object.assign(payload, allotmentResult, { date: allotmentDate });
   }
   payload.archived=String(values.archived)==='true';
-  const serialized=JSON.stringify(payload);
+  const applications = isNewCompany ? drafts.map(draft => ({
+   amount: draft.amount,
+   date: draft.date,
+   funding_method: draft.funding_method,
+   account_id: draft.account_id,
+   ...(draft.applicant_account_id === 'new'
+    ? { holder_name: draft.holder_name.trim(), nickname: draft.nickname.trim(), designation: draft.designation }
+    : { applicant_account_id: draft.applicant_account_id }),
+  })) : [];
+  const invalidApplication = drafts.findIndex(draft => !draft.date || draft.date > ipoToday || !draft.account_id ||
+   !draft.applicant_account_id || (draft.applicant_account_id === 'new' && (!draft.holder_name.trim() || !draft.nickname.trim())));
+  if (invalidApplication !== -1) {
+   setError('Complete the account details and date for application ' + (invalidApplication + 1) + '.');
+   return;
+  }
+  const invalidAmount = applications.findIndex(draft => ipoApplicationLots(draft.amount, String(values.issue_price), String(values.lot_size), String(values.minimum_lots)) === null);
+  if (invalidAmount !== -1) {
+   setError('The amount in application ' + (invalidAmount + 1) + ' must match whole lots and meet the company minimum.');
+   return;
+  }
+  const serialized=JSON.stringify({ payload, applications });
   if (retry.current.payload!==serialized) retry.current={payload:serialized,id:crypto.randomUUID()};
   inFlight.current=true; setBusy(true); setError('');
-  try { const saved = await commandIpo(command,payload,retry.current.id); onSaved(saved.id); }
+  try {
+   const saved = applications.length
+    ? await createIpoWithApplications(payload, applications, retry.current.id)
+    : await commandIpo(command, payload, retry.current.id);
+   onSaved(saved.id);
+  }
   catch(caught) { setError(caught instanceof Error ? caught.message : 'Could not save. Retry with the same details.'); inFlight.current=false; setBusy(false); }
  };
  const hint: Record<string,string> = {
-  company: seed.id ? 'Company dates are for the calendar. Record each applicant’s result from their application.' : 'Save the company and issue details, then add your application. You can record the allotment result when it comes in.',
+  company: seed.id ? 'Company dates are for the calendar. Record each applicant’s result from their application.' : 'Save the company and any applications you have made. Enter the results later from the company page.',
   application: 'Save your application now and return to it to record the result. Any block or payment is recorded separately.',
   edit_application: 'Amounts and references can be corrected before allotment once any reserved or prepaid funds have been released.',
   block: 'Money stays in its account. This records the portion currently unavailable to spend.',
@@ -183,6 +214,10 @@ export function IpoForm({ spec, data, accounts, onClose, onSaved }: { spec: IpoF
       </div>
      ))}
     </div>
+    {isNewCompany ? <IpoSetupApplications drafts={drafts} data={data} accounts={accounts} today={ipoToday}
+     price={String(values.issue_price)} lotSize={String(values.lot_size)} minimumLots={String(values.minimum_lots)}
+     busy={busy} onChange={next => { setError(''); setDrafts(next); }} /> : null}
+    {command === 'allot' ? <p className="form-hint">Allotment date {formatDate(allotmentDate)}. Set an earlier date in Edit company if needed.</p> : null}
     {command === 'allot' && allotmentResult && application ? (
      <p className="ipo-preview">{allotmentResult.shares} shares allotted · {formatMoney(allotmentResult.shares * application.issue_price)} allotted cost</p>
     ) : null}

@@ -1,6 +1,6 @@
 # IPO portfolio: features and usage
 
-The feature lives in **Investments → IPO** on the `ipo` testing branch. It uses the existing signed-in user's private Supabase workspace. It does not contact a broker, place an application, trade shares, or transfer real money. Record movements after they happen.
+The feature lives in **Investments → IPO** on `main`. It uses the existing signed-in user's private Supabase workspace. It does not contact a broker, place an application, trade shares, or transfer real money. Record movements after they happen.
 
 Complete [database setup](IPO-SETUP.md) before using it with saved records.
 
@@ -9,7 +9,7 @@ Complete [database setup](IPO-SETUP.md) before using it with saved records.
 - Portfolio, Calendar, Reports and Applicants sections inside Investments.
 - Reusable self/friend profiles, multiple demat accounts per person, optional broker/account nicknames, renaming and archival without deleting history.
 - Manual Mainboard/SME company records with issue price, lot size, minimum lots and optional opening and closing dates. Record each applicant's result later from their application. You can update actual company dates for the calendar under **Edit company**.
-- Company cards containing their application accounts, allotted capital, shares held and realised profit/loss, with search, combined filters, sorting and pagination.
+- Compact company rows show the company name and any realised profit or loss. Open a company to see its applications and recorded history.
 - Application amounts calculated from lots × shares per lot × issue price, with an optional explained adjustment.
 - Immediate application activity in Transactions, marked as a memo so it never creates a fictitious bank debit.
 - Separate mandate, bank-block, block-release, actual prepayment, applicant funding and repayment records.
@@ -17,18 +17,17 @@ Complete [database setup](IPO-SETUP.md) before using it with saved records.
 - Partial/final share sales, purchase/sale charges, exact cost allocation and realised profit/loss.
 - Sale settlement to a bank or applicant account, partial receipts and partial repayments. Outstanding money stays visible until actually received.
 - Accounts → IPO balances: remaining invested capital, funds pending receipt, prepayments awaiting result, blocked funds and expandable custody-account details. IPO holdings and custody are excluded from total assets/net position; genuine bank receipts return to the bank balance normally.
-- Ten portfolio summary metrics, calendar navigation and date details, company/account/funding/classification reports, daily/monthly/yearly profit views and custom date ranges.
+- The portfolio shows companies applied, applications, allotment outcomes, total realised profit, total realised loss and net profit or loss. Select All time, This week, This month or Custom range.
 - Eight CSV exports: applications, companies, applicants, allotments, sales, profit, outstanding funds/repayments and calendar. Exports quote text and protect against spreadsheet formula injection.
 - Detailed IPO history plus entries in the existing Activity log, including reasons and reversing movements for corrections.
 - Database ownership checks, active-session checks, protected automatic records, atomic commands and duplicate-request protection.
 
 ## First application
 
-1. Open **Investments → IPO → Applicants → Add applicant**. Choose your account or a friend's account and save a display name.
-2. Choose **Add account** on that profile. Give the demat account a recognizable nickname. No PAN, passwords or full account numbers are needed.
-3. Choose **Add IPO**, enter the company and issue terms, and select **Save IPO**. The company page opens.
-4. Choose **Add application**. Select the applicant/demat account, date, lots, price and your funding account. Review the calculated amount and save. The application shows **Awaiting allotment result**.
-5. An application memo appears immediately on Transactions. Record its actual funding state using **Record an event…** on the application.
+1. Open **Investments → IPO → Add IPO** and enter the company name, issue price, shares per lot and minimum lots.
+2. Select **Add demat application** for each application. Choose a saved demat account or enter the new holder's name and an account nickname. Enter the actual date, amount and funding account.
+3. Check the calculated lots and total. Each amount must equal a whole number of lots at the issue price. Select **Save IPO**.
+4. The company page opens with its applications. You can add another application later from this page. Application memos appear on Transactions.
 
 ## Choose the correct funding workflow
 
@@ -48,7 +47,7 @@ Blocked funds remain until you explicitly record their release. A failed allotme
 
 ## Allotment and sales
 
-Once you know the result, open the company and choose **Enter results** beside the application. Enter allotted lots, non-allotted lots and the actual allotment date. The two counts must add up to the lots applied for that demat account. The app converts allotted lots to shares using the application's saved lot size. Positive allotments appear automatically in the Investments overview with a **View IPO** button.
+Once you know the result, open the company and choose **Enter results** beside the application. Enter allotted lots and non-allotted lots, then select **Save result**. The result uses the company allotment date from **Edit company**, or today in India if that date is blank. The two counts must add up to the lots applied for that demat account. The app converts allotted lots to shares using the application's saved lot size. Positive allotments appear automatically in the Investments overview with a **View IPO** button.
 
 To sell, choose **Sell shares** and enter quantity, price, sale charges and date. The app recognises profit/loss on the shares sold and retains the remaining shares at cost. A reference listing price is informational and does not create profit. The linked investment stays active until all shares are sold.
 
@@ -71,7 +70,7 @@ IPO cash movements remain visible in Transactions and existing cash-flow views. 
 
 ## Reports and calendar
 
-Portfolio/Reports filters combine company/applicant search, applicant, application start/end dates, classification, status, allotment result, funding and outstanding/holding state. Use the date pickers to select a month, year or custom application period. Profit reports additionally filter by **sale date** and group daily, monthly or yearly.
+The Portfolio summary counts companies and applications by application date, outcomes by allotment date and profit or loss by sale date. The company rows show all-time realised results. Portfolio/Reports filters combine company/applicant search, applicant, application start/end dates, classification, status, allotment result, funding and outstanding/holding state. Use the date pickers to select a month, year or custom application period. Profit reports additionally filter by **sale date** and group daily, monthly or yearly.
 
 Company and applicant reports use the matching applications. A friend's balance is a shared funding pool across IPOs; it is labelled as a whole-person pool instead of pretending to allocate it to a particular company. People funded before their first application are included in the unfiltered outstanding report.
 

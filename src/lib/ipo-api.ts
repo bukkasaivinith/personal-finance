@@ -11,6 +11,14 @@ export async function commandIpo(command: string, input: Record<string, unknown>
  if (error) throw new Error(error.message);
  return data as { id: string | null; event_id: string };
 }
+export async function createIpoWithApplications(company: Record<string, unknown>, applications: Record<string, unknown>[], requestId: string) {
+ const { data, error } = await supabase.rpc('ipo_create_with_applications', {
+  p_request_id: requestId, p_company: company, p_applications: applications,
+ });
+ if (error) throw new Error(error.code === 'PGRST202' ? 'Apply the IPO company applications migration before saving applications with a new company.' : error.message);
+ return data as { id: string; event_id: string };
+}
+
 export async function loadIpoLinks(owner: string): Promise<IpoFinanceLinks> {
  const { data, error } = await supabase.rpc('ipo_finance_links', { p_owner_id: owner });
  // Older deployments remain usable until the additive migrations are installed.

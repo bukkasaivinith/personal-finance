@@ -1,8 +1,8 @@
 # IPO setup and verification
 
-Branch: `ipo`. Repository: `C:\Users\vinith bukka\Documents\Codex\2026-11-06\can\work\personal-finance`.
+Branch: `main`. Repository: `C:\Users\vinith bukka\Documents\Codex\2026-11-06\can\work\personal-finance`.
 
-The implementation is local. **No production Supabase migration, deployment, merge or push has been performed.** This guide is the remaining manual setup, not confirmation that your live database was changed.
+The combined company and application form needs the latest IPO migration on your existing Supabase project.
 
 ## Apply the database changes
 
@@ -13,12 +13,13 @@ The implementation is local. **No production Supabase migration, deployment, mer
    1. `supabase/migrations/20261117100000_ipo_portfolio.sql`
    2. `supabase/migrations/20261117110000_ipo_commands.sql`
    3. `supabase/migrations/20261117120000_ipo_reads.sql`
+   4. `supabase/migrations/20261123110000_ipo_company_applications.sql`
 
 4. Run [IPO-VERIFY.sql](IPO-VERIFY.sql) in the SQL Editor and compare the results with its comments.
-5. If the API still reports a missing IPO function after all three succeed, refresh its schema cache with `NOTIFY pgrst, 'reload schema';`, then refresh the app.
-6. Run the `ipo` branch locally or in your testing deployment using the existing project's frontend URL and public/anonymous key. No service-role key belongs in frontend configuration. Do not merge or publish to production until the validation below is complete.
+5. If the API still reports a missing IPO function after the migrations succeed, refresh its schema cache with `NOTIFY pgrst, 'reload schema';`, then refresh the app.
+6. Run `main` locally or in your testing deployment using the existing project's frontend URL and public/anonymous key. No service-role key belongs in frontend configuration. Do not merge or publish to production until the validation below is complete.
 
-SQL Editor runs are not automatically equivalent to a CLI migration-history entry. Keep a record of the three successful filenames. If you later use Supabase CLI migrations, reconcile its migration history with those manual runs before running a push. These migrations are deliberately **not** intended to be replayed after success.
+SQL Editor runs are not automatically equivalent to a CLI migration-history entry. Keep a record of the successful filenames. If you later use Supabase CLI migrations, reconcile its migration history with those manual runs before running a push. These migrations are deliberately **not** intended to be replayed after success.
 
 ## What the migrations do
 
@@ -27,6 +28,9 @@ SQL Editor runs are not automatically equivalent to a CLI migration-history entr
 | `20261117100000_ipo_portfolio.sql` | Nine IPO domain tables plus an internal transaction authorization table; ownership constraints, RLS, indexes, transaction-to-event link, protected-write triggers, helpers and IPO activity-log entity support |
 | `20261117110000_ipo_commands.sql` | Atomic, validated financial/profile commands; workspace lock, idempotency key, ledger posting, linked investment creation, sale cost allocation, receipts, reversals and audit entries |
 | `20261117120000_ipo_reads.sql` | Private dashboard and finance-summary adapters, cleanup integration with the already-authorized account-deletion flow, and qualification of an ambiguous aggregate in the existing investment-settlement function |
+| `20261123110000_ipo_company_applications.sql` | Saves a new company and its submitted demat applications in one transaction using the existing IPO commands |
+
+For an existing IPO installation, apply only the new company-applications migration from this list.
 
 Existing migration files were not rewritten. The settlement fix qualifies withdrawal column names without changing the ordinary settlement calculation. IPO allotment does not call the normal `record_investment` function, because that would create another capital debit.
 
