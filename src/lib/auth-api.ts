@@ -1,4 +1,5 @@
-import { supabase } from '@/lib/supabase';
+import { clearFinanceTabSession, supabase } from '@/lib/supabase';
+import { publicApiError } from '@/lib/public-api-error';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession } from '@/lib/session-api';
 
 export const PASSWORD_MIN_LENGTH = 12;
@@ -64,7 +65,7 @@ export async function createAccount(email: string, password: string, firstName: 
 
 export async function loadCurrentFinanceProfile(): Promise<CurrentFinanceProfile> {
   const { data, error } = await supabase.rpc('get_current_finance_profile');
-  if (error) throw new Error(error.message);
+  if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== 'object') throw new Error('We could not load your profile.');
   const profile = row as { id?: string; email?: string; first_name?: string | null; last_name?: string | null };
@@ -82,7 +83,7 @@ export async function saveCurrentFinanceProfileName(firstName: string, lastName:
     p_first_name: firstName.trim(),
     p_last_name: lastName.trim(),
   });
-  if (error) throw new Error(error.message);
+  if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
 }
 
 export async function signIn(email: string, password: string): Promise<void> {
@@ -99,7 +100,7 @@ export async function signIn(email: string, password: string): Promise<void> {
       await supabase.auth.signOut({ scope: 'others' });
       await recordAuthenticatedActivity('signed_in');
     } catch (caught) {
-      await supabase.auth.signOut({ scope: 'local' });
+      await closeFinanceSession();
       throw caught;
     }
     return;
@@ -120,29 +121,42 @@ export async function updatePassword(password: string): Promise<void> {
   if (error) throw new Error('We could not update your password. Request a new reset link and try again.');
 }
 
+export async function closeFinanceSession(scope: 'local' | 'global' = 'local'): Promise<void> {
+  try {
+    const { error } = await supabase.auth.signOut({ scope });
+    if (!error) return;
+  } catch {
+    // The auth service can be unreachable. Clear this tab independently.
+  }
+  clearFinanceTabSession();
+  window.location.reload();
+}
+
 export async function signOut(): Promise<void> {
   await recordAuthenticatedActivity('signed_out');
   try {
     await endCurrentSingleDeviceSession();
+  } catch {
+    // A failed server-side sign-out should still close the browser session.
   } finally {
-    await supabase.auth.signOut({ scope: 'local' });
+    await closeFinanceSession();
   }
 }
 
 export async function claimWorkspace(): Promise<void> {
   const { error } = await supabase.rpc('open_finance_workspace');
-  if (error) throw new Error(error.message);
+  if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
 }
 
 export async function requireFinanceOwner(): Promise<void> {
   const { data, error } = await supabase.rpc('is_finance_workspace_owner');
   if (error?.code === 'PGRST202') throw new Error('The single-owner workspace setup is pending in Supabase.');
-  if (error) throw new Error(error.message);
+  if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
   if (data !== true) throw new Error('Only the owner can open this finance workspace.');
 }
 
 export async function deleteCurrentFinanceAccount(): Promise<void> {
   const { error } = await supabase.rpc('delete_my_finance_account');
-  if (error) throw new Error(error.message);
-  await supabase.auth.signOut({ scope: 'local' });
+  if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
+  await closeFinanceSession();
 }

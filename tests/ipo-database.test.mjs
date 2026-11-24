@@ -29,9 +29,10 @@ test('IPO accounting on the complete application migration history', async (t) =
  const savingsHistoryMigration = '20261123210000_savings_account_history.sql';
  const ipoPresentValueMigration = '20261123220000_ipo_present_total_value.sql';
  const ipoNotAllottedMigration = '20261124100000_ipo_not_allotted.sql';
+ const financeReadsMigration = '20261124110000_scope_finance_reads.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
-   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration].includes(name)) continue; // Test each upgrade with existing data.
+   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration, financeReadsMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -737,6 +738,42 @@ test('IPO accounting on the complete application migration history', async (t) =
 
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
   await assert.rejects(save(null, null, true), /session|workspace owner/i);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('scoped finance reads require the owner session and page without dropping records', async () => {
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(financeReadsMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const list = async (requestedOwner, cursor = null, limit = 1000, scheduledOnly = false, transactionId = null) =>
+    (await db.query('SELECT * FROM public.get_finance_transaction_page($1,$2,$3,$4,$5)', [requestedOwner, cursor, limit, scheduledOnly, transactionId])).rows;
+  const usage = () => scalar('SELECT public.get_finance_transaction_usage($1)', [owner]);
+  const full = await list(owner);
+  assert.ok(full.length > 1);
+  assert.deepEqual(full.map((entry) => entry.id),
+    (await db.query('SELECT id FROM public.transactions WHERE user_id = $1 ORDER BY id', [owner])).rows.map((entry) => entry.id));
+  const first = await list(owner, null, 1);
+  assert.deepEqual(first, full.slice(0, 1));
+  assert.deepEqual(await list(owner, first[0].id), full.slice(1));
+  assert.deepEqual(await list(owner, null, 1000, true), full.filter((entry) => entry.transaction_source === 'scheduled'));
+  assert.deepEqual(await list(owner, null, 1000, false, first[0].id), first);
+  const counts = (key) => full.reduce((map, entry) => {
+    if (entry[key]) map[entry[key]] = (map[entry[key]] ?? 0) + 1;
+    return map;
+  }, {});
+  assert.deepEqual(await usage(), { types: counts('transaction_type_id'), categories: counts('category_id') });
+  await assert.rejects(list(other), /workspace is unavailable/i);
+  await assert.rejects(db.query('SELECT public.list_platform_users()'), /permission denied/i);
+
+  await db.exec('RESET ROLE; SET ROLE anon;');
+  await assert.rejects(list(owner), /permission denied/i);
+  await assert.rejects(db.query('SELECT id FROM public.transactions'), /permission denied/i);
+  await db.exec('RESET ROLE; SET ROLE authenticated;');
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  await assert.rejects(list(owner), /session|owner/i);
+  await assert.rejects(usage(), /session|owner/i);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: randomUUID() })]);
+  await assert.rejects(list(owner), /session/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{

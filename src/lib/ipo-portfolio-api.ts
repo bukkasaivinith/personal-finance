@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { publicApiError } from '@/lib/public-api-error';
 
 export type IpoDematAccount = {
   id: string;
@@ -69,7 +70,7 @@ export function formatDematAccount(holder: string, demat: string, broker?: strin
 
 export async function loadIpoPortfolio(): Promise<IpoPortfolioData> {
   const { data, error } = await supabase.rpc('get_ipo_portfolio');
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
   return data as IpoPortfolioData;
 }
 
@@ -80,7 +81,7 @@ export async function saveIpoApplications(draft: IpoApplicationDraft, allocation
     p_allocations: allocations,
     p_total_lots: totalLots,
   });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }
 
 export async function updateIpoApplication(id: string, draft: IpoApplicationDraft, allocation: IpoLotAllocation, requestId: string): Promise<void> {
@@ -89,19 +90,19 @@ export async function updateIpoApplication(id: string, draft: IpoApplicationDraf
     p_request_id: requestId,
     p_draft: { ...draft, ...allocation },
   });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }
 
 export async function removeIpoApplication(id: string): Promise<void> {
   const { error } = await supabase.rpc('archive_ipo_portfolio_application', { p_application_id: id });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }
 
 export async function saveIpoApplicationResult(id: string, profitLoss: number | null, presentTotalValue: number | null, notAllotted: boolean): Promise<IpoApplicationResult> {
   const { data, error } = await supabase.rpc('save_ipo_portfolio_result', {
     p_application_id: id, p_profit_loss: profitLoss, p_present_total_value: presentTotalValue, p_not_allotted: notAllotted,
   });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
   return data as IpoApplicationResult;
 }
 
@@ -109,17 +110,17 @@ export async function saveIpoDematAccount(holder: string, nickname: string, desi
   const { error } = await supabase.rpc('save_ipo_demat_account', {
     p_holder_name: holder, p_nickname: nickname, p_designation: designation, p_broker: broker,
   });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }
 
 export async function updateIpoDematAccount(id: string, holder: string, nickname: string, designation: IpoDematAccount['designation'], broker: string): Promise<void> {
   const { error } = await supabase.rpc('update_ipo_demat_account', {
     p_demat_id: id, p_holder_name: holder, p_nickname: nickname, p_designation: designation, p_broker: broker,
   });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }
 
 export async function removeIpoDematAccount(id: string): Promise<void> {
   const { error } = await supabase.rpc('archive_ipo_demat_account', { p_demat_id: id });
-  if (error) throw new Error(error.code === 'PGRST202' ? setupPending : error.message);
+  if (error) throw error.code === 'PGRST202' ? new Error(setupPending) : publicApiError(error, 'Could not complete the IPO request. Please try again.');
 }

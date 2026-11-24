@@ -174,7 +174,10 @@ export type InvestmentDraft = {
   investedOn: string;
 };
 
+export type TransactionUsage = { types: Record<string, number>; categories: Record<string, number> };
+
 export type FinanceData = {
+  transactionUsage?: TransactionUsage;
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
   accounts: Account[];

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Loader2 } from 'lucide-react';
 import { CompleteProfileForm, ForgotPasswordForm, NewPasswordForm, SignInForm, AuthShell } from '@/components/auth-forms';
-import { claimWorkspace, loadCurrentFinanceProfile, requireFinanceOwner, type CurrentFinanceProfile } from '@/lib/auth-api';
+import { claimWorkspace, closeFinanceSession, loadCurrentFinanceProfile, requireFinanceOwner, type CurrentFinanceProfile } from '@/lib/auth-api';
 import { CurrentFinanceProfileContext } from '@/lib/current-finance-profile';
 import { activateCurrentSingleDeviceSession, endCurrentSingleDeviceSession, SESSION_REPLACED_NOTICE, validateCurrentSingleDeviceSession } from '@/lib/session-api';
 import { supabase } from '@/lib/supabase';
+import { browserSessionId } from '@/lib/session-identity';
 
 function profileNeedsName(profile: CurrentFinanceProfile | null): boolean {
   return !profile?.firstName || !profile.lastName;
@@ -17,7 +18,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<CurrentFinanceProfile | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [forgot, setForgot] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [verifiedSessionId, setVerifiedSessionId] = useState<string | null>(null);
+  const sessionId = session ? browserSessionId(session.access_token) : null;
+  const ready = sessionId !== null && verifiedSessionId === sessionId;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -28,6 +31,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
         setSession(data.session);
         setChecked(true);
       }
+    }).catch(() => {
+      if (active) { setChecked(true); setNotice('Could not open the session. Please sign in again.'); }
     });
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
@@ -35,7 +40,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       if (event === 'PASSWORD_RECOVERY') setRecovering(true);
       if (event === 'SIGNED_OUT') {
         setRecovering(false);
-        setReady(false);
+        setVerifiedSessionId(null);
         setProfile(null);
       }
     });
@@ -46,15 +51,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   const signOutReplacedSession = useCallback(async () => {
-    setReady(false);
+    setVerifiedSessionId(null);
     setProfile(null);
     setNotice(SESSION_REPLACED_NOTICE);
-    await supabase.auth.signOut({ scope: 'local' });
+    await closeFinanceSession();
   }, []);
 
   useEffect(() => {
-    if (!session || recovering) {
-      setReady(false);
+    if (!sessionId || recovering) {
+      setVerifiedSessionId(null);
       return;
     }
     let active = true;
@@ -68,7 +73,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         const nextProfile = await loadCurrentFinanceProfile();
         if (active) {
           setProfile(nextProfile);
-          setReady(true);
+          setVerifiedSessionId(sessionId);
         }
       } catch (caught) {
         if (!active) return;
@@ -81,7 +86,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     })();
     return () => { active = false; };
-  }, [session, recovering, signOutReplacedSession]);
+  }, [sessionId, recovering, signOutReplacedSession]);
 
   useEffect(() => {
     if (!session || recovering || !ready) return;
@@ -111,17 +116,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [session, recovering, ready, signOutReplacedSession]);
 
   if (!checked) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Checking your session</p></AuthShell>;
-  if (recovering) return <NewPasswordForm onComplete={async () => { try { await endCurrentSingleDeviceSession(); } finally { await supabase.auth.signOut({ scope: 'global' }); } setRecovering(false); setNotice('Your password has been updated. Sign in with your new password.'); }} />;
+  if (recovering) return <NewPasswordForm onComplete={async () => { try { await endCurrentSingleDeviceSession(); } finally { await closeFinanceSession('global'); } setRecovering(false); setNotice('Your password has been updated. Sign in with your new password.'); }} />;
   if (!session) {
     if (forgot) return <ForgotPasswordForm onBack={() => setForgot(false)} />;
     return <SignInForm notice={notice} onForgot={() => setForgot(true)} />;
   }
-  if (error) return <AuthShell><BrandlessError message={error} /></AuthShell>;
+  if (error || !sessionId) return <AuthShell><BrandlessError message={error || 'Your session is unavailable. Please sign in again.'} /></AuthShell>;
   if (!ready || !profile || profile.id !== session.user.id) return <AuthShell><p className="auth-status"><Loader2 size={18} className="auth-spin" /> Opening your workspace</p></AuthShell>;
   if (profileNeedsName(profile)) return <CompleteProfileForm email={profile.email} onComplete={(firstName, lastName) => setProfile((current) => current ? { ...current, firstName, lastName } : current)} />;
-  return <CurrentFinanceProfileContext.Provider value={profile}>{children}</CurrentFinanceProfileContext.Provider>;
+  return <CurrentFinanceProfileContext.Provider key={sessionId} value={profile}>{children}</CurrentFinanceProfileContext.Provider>;
 }
 
 function BrandlessError({ message }: { message: string }) {
-  return <><div className="auth-heading"><h1>Workspace unavailable</h1><p>{message}</p></div><button className="auth-button" type="button" onClick={() => void supabase.auth.signOut()}>Sign out</button></>;
+  return <><div className="auth-heading"><h1>Workspace unavailable</h1><p>{message}</p></div><button className="auth-button" type="button" onClick={() => void closeFinanceSession()}>Sign out</button></>;
 }

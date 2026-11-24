@@ -5,7 +5,7 @@ import { DatePicker } from '@/components/date-picker';
 import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
-import { loadActivityEvents } from '@/lib/finance-api';
+import { loadActivityEvents, loadFinanceData } from '@/lib/finance-api';
 import {
   AVERAGE_DAYS_PER_MONTH,
   addDays,
@@ -474,7 +474,7 @@ function ActivityLog({ data, workspaceOwnerId }: { data: FinanceData; workspaceO
         <DatePicker label="From" value={from} max={to || undefined} onChange={(value) => changeFilters(() => setFrom(value))} clearable />
         <DatePicker label="To" value={to} min={from || undefined} onChange={(value) => changeFilters(() => setTo(value))} clearable />
       </div>
-      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} data={data} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
+      {loading ? <p className="card-note">Loading activity…</p> : error ? <p className="form-error">{error}</p> : events.length === 0 ? <p className="card-note">No activity matches these filters yet.</p> : <div className="activity-list">{events.map((event) => <ActivityLogRow key={event.id} event={event} data={data} workspaceOwnerId={workspaceOwnerId} expanded={expandedIds.has(event.id)} onToggle={() => toggleDetails(event.id)} />)}</div>}
       <div className="table-pagination"><span>{events.length ? `Page ${page + 1}` : ''}</span><div><button className="secondary-button" type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => Math.max(0, value - 1))}>Previous</button><button className="secondary-button" type="button" disabled={!hasMore || loading} onClick={() => setPage((value) => value + 1)}>Next</button></div></div>
     </div>
   );
@@ -568,17 +568,27 @@ function investmentDetails(item: Investment, accountById: Map<string, Account>):
   };
 }
 
-function ActivityLogRow({ event, data, expanded, onToggle }: { event: ActivityEvent; data: FinanceData; expanded: boolean; onToggle: () => void }) {
+function ActivityLogRow({ event, data, workspaceOwnerId, expanded, onToggle }: { event: ActivityEvent; data: FinanceData; workspaceOwnerId: string; expanded: boolean; onToggle: () => void }) {
   const current = isDetailObject(event.details.current) ? event.details.current : null;
   const previous = isDetailObject(event.details.previous) ? event.details.previous : null;
   const directDetails = current || previous ? null : event.details;
   const hasStoredDetails = [current, previous, directDetails].some((value) => value && Object.keys(value).length);
-  const fallbackDetails = hasStoredDetails ? null : currentRecordDetails(event, data);
+  const [loadedFallback, setLoadedFallback] = useState<Record<string, unknown> | null>();
+  const fallbackDetails = hasStoredDetails ? null : currentRecordDetails(event, data) ?? loadedFallback;
+  const needsFallback = !hasStoredDetails && !fallbackDetails && ['transactions', 'recurring_entries', 'budgets', 'investments', 'investment_types'].includes(event.entityTable);
+  useEffect(() => {
+    if (!expanded || !needsFallback || !workspaceOwnerId) return;
+    const controller = new AbortController();
+    void loadFinanceData(workspaceOwnerId, 'audit', controller.signal, event)
+      .then((snapshot) => { if (!controller.signal.aborted) setLoadedFallback(currentRecordDetails(event, snapshot)); })
+      .catch(() => { if (!controller.signal.aborted) setLoadedFallback(null); });
+    return () => controller.abort();
+  }, [event, expanded, needsFallback, workspaceOwnerId]);
   const dateTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(event.createdAt));
   return (
     <article className={`activity-row ${expanded ? 'expanded' : ''}`}>
       <div className="activity-row-summary"><div><b>{event.entityName || event.entityTable.replace(/_/g, ' ')}</b><small>{event.entityTable.replace(/_/g, ' ')}{event.actorEmail ? ` · by ${event.actorEmail}` : ''}</small></div><span className="activity-action">{event.action.replace(/_/g, ' ')}</span><time dateTime={event.createdAt}>{dateTime}</time><button className="ghost-button activity-details-button" type="button" onClick={onToggle} aria-expanded={expanded}>{expanded ? 'Hide details' : 'View details'}</button></div>
-      {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? directDetails ?? fallbackDetails ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!hasStoredDetails ? <p className="activity-legacy-note">{fallbackDetails ? 'This event happened before detailed auditing was enabled. Values above are the current record and may have changed since this activity.' : 'Detailed fields were not captured for this earlier activity, and its original record is no longer available.'}</p> : null}</div> : null}
+      {expanded ? <div className="activity-details"><DetailGroup title={previous ? 'Before' : 'Recorded details'} values={previous ?? (hasStoredDetails ? directDetails : fallbackDetails) ?? {}} /><DetailGroup title={previous ? 'After' : 'Current details'} values={current ?? {}} />{!hasStoredDetails ? <p className="activity-legacy-note">{needsFallback && loadedFallback === undefined ? 'Loading current record…' : fallbackDetails ? 'This event happened before detailed auditing was enabled. Values above are the current record and may have changed since this activity.' : 'Detailed fields were not captured for this earlier activity, and its original record is no longer available.'}</p> : null}</div> : null}
     </article>
   );
 }

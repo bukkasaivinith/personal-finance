@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { publicApiError } from '@/lib/public-api-error';
 
 export const savingsLocations = { bank: 'Bank', cash: 'Cash', other: 'Other' } as const;
 export type SavingsLocation = keyof typeof savingsLocations;
@@ -30,7 +31,7 @@ function savingsError(error: { message: string; code?: string }): never {
   if (error.code === 'PGRST205' || error.code === 'PGRST202') {
     throw new Error('Apply the Savings SQL update in Supabase, then try again.');
   }
-  throw new Error(error.message);
+  throw publicApiError(error, 'Could not complete the savings request. Please try again.');
 }
 
 export async function loadSavingsLocations(ownerId: string): Promise<CustomSavingsLocation[]> {
