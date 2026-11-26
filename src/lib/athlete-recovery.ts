@@ -1,6 +1,6 @@
 import type { RecoveryMetrics } from './athlete';
 import { recognitionReferenceDate, recognizeScreenshot, type ScreenshotReading } from './athlete-recognition';
-import { routeVoiceAthleteRecord, type DistanceUnit } from './athlete';
+import { routeAthleteText, type DistanceUnit } from './athlete';
 
 export const recoveryFields = [
   ['hrv', 'HRV (ms)', 1, 500], ['restingHeartRate', 'Resting heart rate (bpm)', 20, 260],
@@ -19,7 +19,7 @@ export function recognizeWhoopRecovery(readings: ScreenshotReading[], unit: Dist
   const combined = evidence.join('\n');
   if (!/\b(?:whoop|HRV|heart rate variability)\b/i.test(combined) || !/\brecovery\b/i.test(combined)) return null;
   const recovered = recognizeScreenshot(readings, unit, recognitionReferenceDate(timezone));
-  const route = recovered ?? routeVoiceAthleteRecord('', unit, recognitionReferenceDate(timezone), { source: 'image' });
+  const route = recovered ?? routeAthleteText('', unit, recognitionReferenceDate(timezone));
   const warnings: string[] = [];
   const read = (label: string, regex: RegExp, minimum: number, maximum: number, convert: (value: string) => number = Number) => {
     const values = [...new Set(evidence.flatMap((text) => [...text.matchAll(regex)]).map((match) => convert(match[1] ?? match[2])).filter((value) => value >= minimum && value <= maximum))];

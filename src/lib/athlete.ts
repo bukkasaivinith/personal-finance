@@ -40,7 +40,7 @@ export type PlannedWorkout = {
 
 export type PlannedWorkoutDraft = Omit<PlannedWorkout, 'id' | 'status'>;
 
-export type VoiceAthleteRoute = {
+export type AthleteTextDraft = {
   destination: 'activity' | 'plan' | 'recovery' | 'race' | 'gym' | 'goal';
   date: string;
   warnings?: string[];
@@ -303,7 +303,7 @@ function includesFutureCue(text: string): boolean { return /\b(?:tomorrow|next|p
 function includesPastCue(text: string): boolean { return /\b(?:yesterday|ago|last|previous|ran|walked|cycled|completed|finished|did)\b|నిన్న|మొన్న|చేశాను|పూర్తి|बीते|पहले|किया|दौड़ा|दौड़ी|दौड़ी/.test(text); }
 
 /** Unknown dates stay empty, requiring a date in review rather than inventing one. */
-export function parseSpokenDate(text: string, referenceDate = new Date()): string {
+export function parseActivityDateText(text: string, referenceDate = new Date()): string {
   const normalized = normalizeAthleteInput(text);
   const futureCue = includesFutureCue(normalized), pastCue = includesPastCue(normalized), today = localDateKey(referenceDate);
   const resolve = (day: number, month: number, suppliedYear?: string): string => {
@@ -359,15 +359,15 @@ function detectedGymExercises(text: string): GymExercise[] {
   return names.flatMap(([pattern, exercise]) => { const match = new RegExp(`\\b${pattern}\\b([^.;\\n]*)`).exec(text); return match ? [{ exercise, sets: Number(match[1].match(/\b(\d+)\s*sets?\b/)?.[1] ?? 0), reps: Number(match[1].match(/\b(\d+)\s*reps?\b/)?.[1] ?? 0), weight: null }] : []; }).slice(0, 10);
 }
 
-export function routeVoiceAthleteRecord(text: string, unit: DistanceUnit, referenceDate = new Date(), options: { source?: 'voice' | 'image' } = {}): VoiceAthleteRoute {
-  const normalized = normalizeAthleteInput(text), parsed = parseActivityText(text, unit), date = parseSpokenDate(text, referenceDate), today = localDateKey(referenceDate);
+export function routeAthleteText(text: string, unit: DistanceUnit, referenceDate = new Date()): AthleteTextDraft {
+  const normalized = normalizeAthleteInput(text), parsed = parseActivityText(text, unit), date = parseActivityDateText(text, referenceDate), today = localDateKey(referenceDate);
   const score = detectedRecoveryScore(normalized), kind = parsed.kind ?? 'run';
   const isFuture = date > today || (includesFutureCue(normalized) && !includesPastCue(normalized));
   const isRecovery = /\b(?:recovery|readiness)\b|రికవరీ|रिकवरी/.test(normalized) && (score !== undefined || !/\b(?:run|ran|running|walk|cycling|workout)\b/.test(normalized));
   const isGym = /\b(?:gym|squats?|deadlift|lunge|bench|push-?ups?|plank|weights?|strength session)\b|జిమ్|जिम/.test(normalized);
   const isGoal = /\b(?:goal|aim|challenge)\b|లక్ష్యం|लक्ष्य/.test(normalized) || /\btarget\s+\d/.test(normalized);
   const exercises = detectedGymExercises(normalized);
-  let destination: VoiceAthleteRoute['destination'] = isFuture ? 'plan' : 'activity';
+  let destination: AthleteTextDraft['destination'] = isFuture ? 'plan' : 'activity';
   if (isRecovery) destination = 'recovery'; else if (isGym) destination = 'gym'; else if (isGoal) destination = 'goal'; else if (isFuture && kind === 'race') destination = 'race';
   const monthOffset = /\bnext month\b/.test(normalized) ? 1 : /\bthis month\b/.test(normalized) ? 0 : null;
   const goalStartsOn = monthOffset === null ? date : localDateKey(new Date(referenceDate.getFullYear(), referenceDate.getMonth() + monthOffset, 1, 12));
@@ -379,13 +379,13 @@ export function routeVoiceAthleteRecord(text: string, unit: DistanceUnit, refere
   if (destination === 'activity' && parsed.distanceMeters === undefined && !parsed.durationSeconds) missingFields.push('Distance or duration');
   const warnings: string[] = [];
   if (missingFields.length) warnings.push(`Not detected: ${missingFields.join(', ')}. Choose these in the review form.`);
-  if (options.source === 'image') warnings.push('Screenshot text can contain unrelated dashboard values. Check each detected measurement.');
+  warnings.push('Screenshot text can contain unrelated dashboard values. Check each detected measurement.');
   if (/\byesterday\b|నిన్న/.test(normalized) && /\btomorrow\b|రేపు/.test(normalized)) warnings.push('This describes more than one date. Review one event at a time.');
   for (const [label, value, name] of [[/(?:heart rate|\bbpm\b)/, parsed.averageHeartRate, 'Average heart rate'], [/(?:calories|\bkcal\b)/, parsed.calories, 'Calories'], [/cadence|\bspm\b/, parsed.cadence, 'Cadence'], [/\bdistance\b|\b\d+(?:[.,]\d+)?\s*(?:km|miles?)\b/, parsed.distanceMeters, 'Distance'], [/\bduration\b|\b(?:moving|elapsed|running) time\b/, parsed.durationSeconds, 'Duration']] as const) if (label.test(normalized) && value == null) warnings.push(`${name} was unclear or conflicting and has been left empty.`);
   const distanceLabel = parsed.distanceMeters ? `${formatDistance(parsed.distanceMeters, unit)} ` : '';
   return {
     destination, date, warnings, missingFields, transcript: text.trim(),
-    activity: { ...parsed, activityDate: date, source: options.source ?? 'voice', notes: '' },
+    activity: { ...parsed, activityDate: date, source: 'image', notes: '' },
     plan: { title: `Planned ${distanceLabel}${kind === 'treadmill' ? 'treadmill run' : kind}`, workoutDate: date, kind, targetDistanceMeters: parsed.distanceMeters ?? null, notes: '' },
     recovery: { recoveryDate: date, score, notes: '', source: 'manual' },
     race: { name: distanceLabel ? `${distanceLabel}race` : 'Upcoming race', raceDate: date, distanceMeters: parsed.distanceMeters ?? null, location: '', finishSeconds: parsed.durationSeconds ?? null, notes: '' },

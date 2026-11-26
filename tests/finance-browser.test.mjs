@@ -35,7 +35,9 @@ async function startFixture(t) {
     if ((await realpath(root)).startsWith(join(temp, 'finance-routing-test-'))) await rm(root, { recursive: true, force: true });
   });
   await build({ logLevel: 'error', build: { outDir: root, emptyOutDir: false } });
-  const emitted = (await readdir(root, { recursive: true })).filter((file) => /\.(?:html|mjs|js|css|map)$/.test(file));
+  const output = await readdir(root, { recursive: true });
+  assert.ok(output.every((file) => !/athlete-voice|ort-wasm/i.test(file)));
+  const emitted = output.filter((file) => /\.(?:html|mjs|js|css|map)$/.test(file));
   for (const file of emitted) {
     const contents = await readFile(join(root, file), 'utf8');
     assert.ok(!contents.includes(privateSentinel), file);
@@ -71,7 +73,7 @@ async function startFixture(t) {
   return { browser, origin: 'http://127.0.0.1:' + server.address().port };
 }
 
-async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }) {
+async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }, athlete) {
   const page = await browser.newPage({ serviceWorkers: 'allow' });
   const rpcCalls = [];
   const rpcPaths = [];
@@ -145,6 +147,28 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
       if (name === 'get_finance_transaction_usage') return json({ types: { [fixtureId]: 1 }, categories: {} });
       if (name === 'get_ipo_portfolio') return json({ applications: [], demat_accounts: [], allotment_date_supported: true });
       if (name === 'ipo_finance_links') return json({ accounts: [], investments: [] });
+      if (athlete) {
+        if (name === 'athlete_get_dashboard') return json({ activities: [athlete.activity] });
+        if (name === 'athlete_get_activity_page') {
+          assert.equal(request.postDataJSON().p_activity_id, athlete.activity.id);
+          return json({ activity: athlete.activity, distance_unit: 'km', details: athlete.details, media: athlete.media });
+        }
+        if (name === 'athlete_get_activity_media') {
+          return json(athlete.bytes.get(request.postDataJSON().p_media_id));
+        }
+        if (name === 'athlete_add_activity_media') {
+          const { p_activity_id, p_batch_id, p_media } = request.postDataJSON();
+          assert.equal(p_activity_id, athlete.activity.id);
+          if (athlete.rejectUpload) return json({ code: '42501', message: 'Fixture rejected the upload' }, 403);
+          for (const { data, name, mime } of p_media) {
+            assert.equal(mime, 'image/jpeg');
+            const id = `screenshot-${athlete.media.length + 1}`;
+            athlete.media.push({ id, batch_id: p_batch_id, name, mime, created_at: athlete.activity.created_at });
+            athlete.bytes.set(id, data);
+          }
+          return json(null);
+        }
+      }
       return json(null);
     }
     return json([], 200, { 'content-range': '*/0', 'access-control-expose-headers': 'content-range' });
@@ -419,6 +443,74 @@ test('Analytics charts investments and savings and appends statement rows on scr
   await waitForHeading(page, 'Transactions');
   await page.getByText('Investment capital', { exact: true }).first().waitFor();
   assert.equal(await page.getByText('Savings withdrawal', { exact: true }).count(), 0);
+});
+
+test('Athlete Hub opens a private activity page with a chart, a route, and expandable screenshots', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const photo = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJWQAAAAASUVORK5CYII=';
+  const activity = {
+    id: fixtureId, kind: 'run', activity_date: '2026-11-20', duration_seconds: 1200, distance_meters: 3000,
+    average_heart_rate: 155, calories: 200, elevation_meters: 20, cadence: 160, effort: 7,
+    notes: 'Evening track workout', source: 'samsung_health', created_at: '2026-11-20T14:00:00Z',
+  };
+  const fixture = {
+    activity,
+    details: { metrics: { steps: 3200, maxHeartRate: 172 }, zones: [{ zone: 4, minimum: 160, maximum: 180, seconds: 15, percent: 20 }],
+      samples: [{ seconds: 0, heartRate: 140, latitude: 17, longitude: 78 }, { seconds: 15, heartRate: 172, latitude: 17.001, longitude: 78.002 }] },
+    media: [{ id: 'screenshot-1', batch_id: 'initial', name: 'workout.png', mime: 'image/png', created_at: activity.created_at }],
+    bytes: new Map([['screenshot-1', photo]]),
+    rejectUpload: false,
+  };
+  const { page, rpcCalls } = await newPage(browser, undefined, undefined, fixture);
+  const activityUrl = origin + '/athlete-hub/activities/' + fixtureId;
+  await page.goto(activityUrl);
+  assert.equal(await page.getByRole('heading', { name: 'Workout summary' }).count(), 0);
+  assert.ok(!rpcCalls.includes('athlete_get_activity_page'));
+  await signIn(page);
+  await waitForHeading(page, 'Workout summary');
+  assert.ok(!rpcCalls.includes('athlete_get_dashboard'));
+  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
+  await page.getByRole('img', { name: 'GPS route with start and finish' }).waitFor();
+  await page.getByRole('slider', { name: 'Explore workout timeline' }).focus();
+  await page.keyboard.press('End');
+  await page.locator('.activity-chart-readout').getByText('172 bpm', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('img', { name: 'workout.png' }).count(), 0);
+  assert.ok(!rpcCalls.includes('athlete_get_activity_media'));
+  await page.getByText('1 screenshot', { exact: true }).click();
+  const image = page.getByRole('img', { name: 'workout.png' });
+  await image.waitFor();
+  await page.waitForFunction(() => document.querySelector('img[alt="workout.png"]')?.naturalWidth > 0);
+  await page.getByText('1 screenshot', { exact: true }).click();
+
+  await page.getByText('Attach screenshots', { exact: true }).click();
+  const files = page.getByLabel('Choose screenshots');
+  const screenshot = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 20;
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await files.setInputFiles({ name: 'new-map.png', mimeType: 'image/png', buffer: Buffer.from(screenshot, 'base64') });
+  fixture.rejectUpload = true;
+  await page.getByRole('button', { name: 'Save screenshot group' }).click();
+  await page.getByRole('alert').getByText('This operation is unavailable for your account.').waitFor();
+  fixture.rejectUpload = false;
+  await page.getByRole('button', { name: 'Save screenshot group' }).click();
+  await page.getByText('Screenshot group saved.', { exact: true }).waitFor();
+  await page.reload();
+  await waitForHeading(page, 'Workout summary');
+  assert.equal(await page.locator('.activity-screenshot-group').count(), 2);
+  assert.equal(await page.locator('.activity-screenshot-group img').count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.locator('.activity-visuals').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.getByRole('link', { name: 'Back to activities' }).click();
+  await waitForHeading(page, 'Activity history');
+  assert.equal(await page.getByRole('button', { name: 'Speak activity' }).count(), 0);
+  await page.getByRole('link', { name: 'Details', exact: true }).click();
+  await waitForHeading(page, 'Workout summary');
+  assert.equal(page.url(), activityUrl);
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

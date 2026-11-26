@@ -1,5 +1,6 @@
 import { Select } from '@/components/select';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import {
   Activity,
   CalendarDays,
@@ -10,7 +11,6 @@ import {
   Flag,
   Footprints,
   HeartPulse,
-  Mic,
   Pencil,
   Plus,
   Settings,
@@ -43,7 +43,6 @@ import {
   formatPace,
   localDateKey,
   metersFromDistance,
-  routeVoiceAthleteRecord,
   recoveryTone,
   type AthleteActivity,
   type AthleteActivityDraft,
@@ -57,13 +56,14 @@ import {
   type PlannedWorkoutDraft,
   type Race,
   type RecoveryScore,
-  type VoiceAthleteRoute,
+  type AthleteTextDraft,
 } from '@/lib/athlete';
 import { useAthleteData } from '@/lib/use-athlete-data';
-import { AthleteVoiceModal } from '@/components/athlete-voice-modal';
 import { RecognitionConfirmationModal, type PendingRecognition } from '@/components/athlete-recognition-review';
 import { recognitionReferenceDate, recognizeSamsungScreenshots, recognizeScreenshot } from '@/lib/athlete-recognition';
-import { WorkoutDetailsFields, WorkoutDetailsModal } from '@/components/athlete-workout-details';
+import { WorkoutDetailsFields } from '@/components/athlete-workout-details';
+import type { ActivityMediaBatch } from '@/lib/athlete-media';
+import { athleteActivityPath } from '@/lib/navigation';
 import { bestAtDistance, personalBests, runningKinds, type WorkoutDetails } from '@/lib/athlete-workout';
 import { AthleteAnalysis } from '@/components/athlete-analysis';
 import { RecoveryEditor, RecoveryHistory } from '@/components/athlete-recovery';
@@ -71,8 +71,10 @@ import { recognizeWhoopRecovery, whoopTone } from '@/lib/athlete-recovery';
 import { downloadReport } from '@/lib/report-export';
 
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
-type ActivityEditor = { entry?: AthleteActivity; activityId?: string; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean };
-type ScreenshotDraft = { fileName: string; route: VoiceAthleteRoute; file?: File; files?: File[]; fingerprint: string; details?: WorkoutDetails };
+const athleteTabs = [['dashboard', 'Overview'], ['calendar', 'Calendar'], ['timeline', 'Activities'],
+  ['records', 'Personal Bests'], ['recovery', 'Recovery'], ['analysis', 'Analysis']] as const;
+type ActivityEditor = { entry?: AthleteActivity; activityId?: string; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean; screenshots?: File[] };
+type ScreenshotDraft = { fileName: string; route: AthleteTextDraft; file?: File; files?: File[]; fingerprint: string; details?: WorkoutDetails };
 
 const activityKinds: Array<{ value: AthleteActivityKind; label: string }> = [
   { value: 'run', label: 'Run' },
@@ -131,7 +133,7 @@ function IconForActivity({ kind }: { kind: AthleteActivityKind }) {
   return <Activity size={16} />;
 }
 
-function ActivityModal({
+export function ActivityModal({
   settings,
   editor,
   matchingActivities,
@@ -142,7 +144,7 @@ function ActivityModal({
   editor: ActivityEditor;
   matchingActivities: AthleteActivity[];
   onClose: () => void;
-  onSave: (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails) => Promise<void>;
+  onSave: (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails, batch?: ActivityMediaBatch) => Promise<void>;
 }) {
   const entry = editor.entry;
   const draft = editor.draft;
@@ -151,6 +153,8 @@ function ActivityModal({
   const [kind, setKind] = useState<AthleteActivityKind>(entry?.kind ?? draft?.kind ?? 'run');
   const [activityDate, setActivityDate] = useState(entry?.activityDate ?? (editor.imported ? draft?.activityDate ?? '' : draft?.activityDate || localDateKey()));
   const [details, setDetails] = useState(editor.details);
+  const [keepScreenshots, setKeepScreenshots] = useState(true);
+  const [mediaBatchId] = useState(() => crypto.randomUUID());
   const [matchChoice, setMatchChoice] = useState<{ id: string; action: string }>();
   const [distanceValue, setDistanceValue] = useState(distance);
   const [hours, setHours] = useState(entry?.durationSeconds || draft?.durationSeconds ? String(Math.floor((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) / 3600)) : '');
@@ -200,11 +204,12 @@ function ActivityModal({
         effort: parseOptionalNumber(effort) ?? merge?.effort ?? null,
         notes: notes.trim() || merge?.notes || '',
         source: merge?.source ?? source,
-      }, entry?.id ?? editor.activityId ?? merge?.id, details);
+      }, entry?.id ?? editor.activityId ?? merge?.id, details,
+      keepScreenshots && editor.screenshots?.length ? { id: mediaBatchId, files: editor.screenshots } : undefined);
     } catch (caught) { savingRequest.current = false; setError(errorMessage(caught)); setSaving(false); }
   };
 
-  return <ModalShell eyebrow={source === 'voice' ? 'Voice draft' : source === 'image' ? 'Screenshot draft' : 'Athlete Hub'} title={entry ? 'Edit activity' : 'Log an activity'} labelId="athlete-activity-title" onClose={onClose}>
+  return <ModalShell eyebrow={editor.screenshots?.length ? 'Screenshot draft' : 'Athlete Hub'} title={entry ? 'Edit activity' : 'Log an activity'} labelId="athlete-activity-title" onClose={() => { if (!savingRequest.current) onClose(); }}>
     <form className="modal-form" onSubmit={submit}>
       {editor.imported || source !== 'manual' ? <p className="form-hint">Review the prefilled values and confirm the activity date before saving.</p> : <p className="modal-description">Capture the essentials first. Pace is calculated automatically when distance and duration are present.</p>}
       <div className="form-grid athlete-form-grid">
@@ -222,6 +227,8 @@ function ActivityModal({
         <label className="full-field screenshot-note-field">Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
       </div>
       {similar ? <label>Possible duplicate<Select value={duplicateAction} onChange={(event) => { setMatchChoice({ id: similar.id, action: event.target.value }); setError(''); }}><option value="">Choose what to do</option><option value="merge">Update the matching activity</option><option value="separate">Save as a separate activity</option></Select></label> : null}
+      {editor.screenshots?.length ? <label className="recognition-check"><input type="checkbox" checked={keepScreenshots} disabled={saving}
+        onChange={(event) => setKeepScreenshots(event.target.checked)} /> Save screenshots privately with this activity</label> : null}
       {error ? <p className="form-error">{error}</p> : null}
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : entry ? 'Save activity' : 'Save activity'}</button></div>
     </form>
@@ -370,7 +377,7 @@ function AthleteCalendar({ data, month, onChangeMonth, onDate, onSelectMonth }: 
   return <section className="surface-card athlete-calendar-card"><div className="card-title-row"><div><h3>Training calendar</h3><p>Runs, recovery scores, plans and races in one monthly view.</p></div><div className="athlete-calendar-controls"><button className="calendar-nav" type="button" onClick={() => onChangeMonth(-1)} aria-label="Previous month"><ChevronLeft size={17} /></button><input aria-label="Jump to month and year" type="month" value={localDateKey(month).slice(0, 7)} onChange={(event) => { if (/^\d{4}-\d{2}$/.test(event.target.value)) onSelectMonth(dateFromKey(event.target.value + '-01')); }} /><button className="calendar-nav" type="button" onClick={() => onChangeMonth(1)} aria-label="Next month"><ChevronRight size={17} /></button></div></div><div className="athlete-calendar-grid athlete-calendar-head">{weekDays.map((day) => <span key={day}>{day}</span>)}</div><div className="athlete-calendar-grid athlete-calendar-days">{dates.map((date) => { const key = dayKey(date); const inMonth = date.getMonth() === month.getMonth(); const items = events.get(key) ?? []; return <button type="button" onClick={() => onDate(key)} aria-label={formatAthleteDate(key) + ', ' + items.length + ' records'} className={`athlete-calendar-cell ${inMonth ? '' : 'outside'} ${key === today ? 'today' : ''}`} key={key}><b>{date.getDate()}</b>{items.slice(0, 3).map((item, index) => <span className={`athlete-calendar-event ${item.tone}`} key={`${item.label}-${index}`} title={`${item.label} · ${item.detail}`}><i>{item.label}</i><em>{item.detail}</em></span>)}{items.length > 3 ? <small>+{items.length - 3} more</small> : null}</button>; })}</div></section>;
 }
 
-function AthleteTimelinePage({ data, onAdd, onEdit, onDetails, onDelete, onExport, exporting }: { data: AthleteHubData; onAdd: () => void; onEdit: (activity: AthleteActivity) => void; onDetails: (activity: AthleteActivity) => void; onDelete: (activity: AthleteActivity) => void; onExport: (format: 'csv' | 'xlsx' | 'pdf', rows: AthleteActivity[]) => void; exporting: boolean }) {
+function AthleteTimelinePage({ data, onAdd, onEdit, onDelete, onExport, exporting }: { data: AthleteHubData; onAdd: () => void; onEdit: (activity: AthleteActivity) => void; onDelete: (activity: AthleteActivity) => void; onExport: (format: 'csv' | 'xlsx' | 'pdf', rows: AthleteActivity[]) => void; exporting: boolean }) {
   const [kind, setKind] = useState<'running' | 'all' | AthleteActivityKind>('running');
   const [range, setRange] = useState<'all' | '30' | 'year'>('all');
   const [query, setQuery] = useState('');
@@ -387,7 +394,7 @@ function AthleteTimelinePage({ data, onAdd, onEdit, onDetails, onDelete, onExpor
       <button className="secondary-button" type="button" disabled={exporting} key={format} onClick={() => onExport(format, timeline)}>{label}</button>)}</div>
     <section className="surface-card athlete-timeline-toolbar"><label>Search<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Notes, activity or source" /></label><label>Activity<Select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="running">Running</option><option value="all">All activities</option>{activityKinds.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label><label>Period<Select value={range} onChange={(event) => setRange(event.target.value as 'all' | '30' | 'year')}><option value="all">All time</option><option value="30">Last 30 days</option><option value="year">This year</option></Select></label></section>
     <div className="metrics-grid athlete-metrics"><Metric label="Activities" value={new Intl.NumberFormat('en-IN').format(timeline.length)} foot="Matching your current filters" icon={<Activity size={16} />} /><Metric label="Distance" value={formatDistance(totalDistance, data.settings.distanceUnit)} foot="Across the visible timeline" icon={<Footprints size={16} />} /><Metric label="Moving time" value={formatDuration(totalDuration || null)} foot="From activities with duration" icon={<CalendarDays size={16} />} /></div>
-    <section className="surface-card athlete-full-timeline"><div className="card-title-row"><div><h3>Activity history</h3><p>Dates, effort and all recorded metrics remain visible together.</p></div><span className="athlete-timeline-count">{timeline.length} record{timeline.length === 1 ? '' : 's'}</span></div>{timeline.length ? <div className="athlete-full-timeline-list">{timeline.map((activity) => <article key={activity.id}><div className="athlete-timeline-date"><b>{formatAthleteDate(activity.activityDate)}</b><small>{activity.source === 'image' ? 'Screenshot import' : activity.source === 'voice' ? 'Voice entry' : activity.source === 'manual' ? 'Manual entry' : activity.source.replace('_', ' ')}</small></div><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div className="athlete-timeline-main"><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><div className="athlete-timeline-metrics"><span>{formatDistance(activity.distanceMeters, data.settings.distanceUnit)}</span><span>{formatDuration(activity.durationSeconds)}</span><span>{formatPace(activity.distanceMeters, activity.durationSeconds, data.settings.distanceUnit)}</span>{activity.averageHeartRate ? <span>{activity.averageHeartRate} bpm</span> : null}{activity.calories ? <span>{activity.calories} cal</span> : null}{activity.elevationMeters ? <span>+{activity.elevationMeters} m</span> : null}{activity.cadence ? <span>{activity.cadence} spm</span> : null}</div>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><button className="ghost-button" type="button" onClick={() => onDetails(activity)}>Details</button><button className="ghost-button" type="button" onClick={() => onEdit(activity)}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => onDelete(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="No activities found" description="Try another filter, or add a new training activity." action={<button type="button" className="primary-button" onClick={onAdd}><Plus size={15} /> Add activity</button>} />}</section>
+    <section className="surface-card athlete-full-timeline"><div className="card-title-row"><div><h3>Activity history</h3><p>Dates, effort and all recorded metrics remain visible together.</p></div><span className="athlete-timeline-count">{timeline.length} record{timeline.length === 1 ? '' : 's'}</span></div>{timeline.length ? <div className="athlete-full-timeline-list">{timeline.map((activity) => <article key={activity.id}><div className="athlete-timeline-date"><b>{formatAthleteDate(activity.activityDate)}</b><small>{activity.source === 'image' ? 'Screenshot import' : activity.source === 'voice' ? 'Previous import' : activity.source === 'manual' ? 'Manual entry' : activity.source.replace('_', ' ')}</small></div><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div className="athlete-timeline-main"><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><div className="athlete-timeline-metrics"><span>{formatDistance(activity.distanceMeters, data.settings.distanceUnit)}</span><span>{formatDuration(activity.durationSeconds)}</span><span>{formatPace(activity.distanceMeters, activity.durationSeconds, data.settings.distanceUnit)}</span>{activity.averageHeartRate ? <span>{activity.averageHeartRate} bpm</span> : null}{activity.calories ? <span>{activity.calories} cal</span> : null}{activity.elevationMeters ? <span>+{activity.elevationMeters} m</span> : null}{activity.cadence ? <span>{activity.cadence} spm</span> : null}</div>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><Link className="ghost-button" to={athleteActivityPath(activity.id)}>Details</Link><button className="ghost-button" type="button" onClick={() => onEdit(activity)}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => onDelete(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="No activities found" description="Try another filter, or add a new training activity." action={<button type="button" className="primary-button" onClick={onAdd}><Plus size={15} /> Add activity</button>} />}</section>
   </div>;
 }
 
@@ -398,23 +405,23 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [customEnd, setCustomEnd] = useState(localDateKey());
   const [calendarMonth, setCalendarMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1, 12); });
   const [activityEditor, setActivityEditor] = useState<ActivityEditor | null>(null);
-  const [viewingActivity, setViewingActivity] = useState<AthleteActivity | null>(null);
   const workoutFileInput = useRef<HTMLInputElement>(null);
   const workoutPending = useRef(false);
   const [readingWorkout, setReadingWorkout] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
-  const [voicePlanDraft, setVoicePlanDraft] = useState<Partial<PlannedWorkoutDraft> | null>(null);
+  const [planDraft, setPlanDraft] = useState<Partial<PlannedWorkoutDraft> | null>(null);
   const [showScore, setShowScore] = useState(false);
-  const [voiceRecoveryDraft, setVoiceRecoveryDraft] = useState<Partial<Omit<RecoveryScore, 'id'>> | null>(null);
+  const [recoveryDraft, setRecoveryDraft] = useState<Partial<Omit<RecoveryScore, 'id'>> | null>(null);
   const [showRace, setShowRace] = useState(false);
-  const [voiceRaceDraft, setVoiceRaceDraft] = useState<Partial<Omit<Race, 'id'>> | null>(null);
+  const [raceDraft, setRaceDraft] = useState<Partial<Omit<Race, 'id'>> | null>(null);
   const [showGym, setShowGym] = useState(false);
-  const [voiceGymDraft, setVoiceGymDraft] = useState<Partial<GymSessionDraft> | null>(null);
+  const [gymDraft, setGymDraft] = useState<Partial<GymSessionDraft> | null>(null);
   const [showGoal, setShowGoal] = useState(false);
-  const [voiceGoalDraft, setVoiceGoalDraft] = useState<Partial<AthleteGoalDraft> | null>(null);
+  const [goalDraft, setGoalDraft] = useState<Partial<AthleteGoalDraft> | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [athletePage, setAthletePage] = useState<'dashboard' | 'calendar' | 'timeline' | 'records' | 'recovery' | 'analysis'>('dashboard');
-  const [showVoice, setShowVoice] = useState(false);
+  const [pageParams, setPageParams] = useSearchParams();
+  const athletePage = athleteTabs.find(([tab]) => tab === pageParams.get('tab'))?.[0] ?? 'dashboard';
+  const setAthletePage = (tab: typeof athleteTabs[number][0]) => setPageParams(tab === 'dashboard' ? {} : { tab }, { replace: true });
   const [calendarDate, setCalendarDate] = useState('');
   const [customBestDistance, setCustomBestDistance] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -444,30 +451,31 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const nextRace = (data?.races ?? []).filter((race) => race.raceDate >= localDateKey()).sort((first, second) => first.raceDate.localeCompare(second.raceDate))[0];
   const personalRecords = useMemo(() => personalBests(activities), [activities]);
 
-  const openRecognizedRecord = ({ route, source, details }: PendingRecognition, existing?: AthleteActivity) => {
+  const openRecognizedRecord = ({ route, details, file, files }: PendingRecognition, existing?: AthleteActivity) => {
     if (route.destination === 'recovery') {
       const existing = data?.recoveryScores.find((entry) => entry.recoveryDate === route.recovery.recoveryDate);
-      setVoiceRecoveryDraft({ ...existing, ...route.recovery, notes: existing?.notes ?? '', metrics: { ...existing?.metrics, ...Object.fromEntries(Object.entries(route.recovery.metrics ?? {}).filter(([, value]) => value !== undefined)) } });
+      setRecoveryDraft({ ...existing, ...route.recovery, notes: existing?.notes ?? '', metrics: { ...existing?.metrics, ...Object.fromEntries(Object.entries(route.recovery.metrics ?? {}).filter(([, value]) => value !== undefined)) } });
       setShowScore(true);
       return;
     }
-    if (route.destination === 'gym') { setVoiceGymDraft(route.gym); setShowGym(true); return; }
-    if (route.destination === 'goal') { setVoiceGoalDraft(route.goal); setShowGoal(true); return; }
-    if (route.destination === 'race') { setVoiceRaceDraft(route.race); setShowRace(true); return; }
-    if (route.destination === 'plan') { setVoicePlanDraft(route.plan); setShowPlan(true); return; }
+    if (route.destination === 'gym') { setGymDraft(route.gym); setShowGym(true); return; }
+    if (route.destination === 'goal') { setGoalDraft(route.goal); setShowGoal(true); return; }
+    if (route.destination === 'race') { setRaceDraft(route.race); setShowRace(true); return; }
+    if (route.destination === 'plan') { setPlanDraft(route.plan); setShowPlan(true); return; }
     const suggested = Object.fromEntries(Object.entries(route.activity).filter(([, value]) => value !== null && value !== undefined && value !== ''));
     const draft = existing ? { ...existing, ...suggested, notes: existing.notes, source: existing.source } : route.activity;
-    setActivityEditor({ draft: { ...draft, source: existing?.source ?? (details?.source === 'Samsung Health' ? 'samsung_health' : source) }, details, imported: true, activityId: existing?.id });
+    setActivityEditor({ draft: { ...draft, source: existing?.source ?? (details?.source === 'Samsung Health' ? 'samsung_health' : 'image') },
+      details, imported: true, activityId: existing?.id, screenshots: files ?? (file ? [file] : []) });
   };
-  const reviewRecognizedRecord = (route: VoiceAthleteRoute, source: PendingRecognition['source'], image?: ScreenshotDraft) => {
-    setPendingRecognition({ id: crypto.randomUUID(), route, source, file: image?.file, files: image?.files, fileName: image?.fileName, details: image?.details });
-    onNotify(`${source === 'voice' ? 'Voice' : 'Screenshot'} details are ready for confirmation.`);
+  const reviewRecognizedRecord = (image: ScreenshotDraft) => {
+    setPendingRecognition({ ...image, id: crypto.randomUUID() });
+    onNotify('Screenshot details are ready for confirmation.');
   };
   const advanceScreenshotDraft = () => {
     if (!screenshotDrafts.length) return false;
     const remaining = screenshotDrafts.slice(1);
     setScreenshotDrafts(remaining);
-    if (remaining[0]) { reviewRecognizedRecord(remaining[0].route, 'image', remaining[0]); onNotify(`${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.`); }
+    if (remaining[0]) { reviewRecognizedRecord(remaining[0]); onNotify(`${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.`); }
     else onNotify('All screenshot drafts were saved.');
     return true;
   };
@@ -478,11 +486,11 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   };
   const discardPendingRecognition = () => {
     if (!pendingRecognition) return;
-    if (pendingRecognition.source === 'image' && screenshotDrafts.length) {
+    if (screenshotDrafts.length) {
       const remaining = screenshotDrafts.slice(1);
       setScreenshotDrafts(remaining);
       setPendingRecognition(null);
-      if (remaining[0]) reviewRecognizedRecord(remaining[0].route, 'image', remaining[0]);
+      if (remaining[0]) reviewRecognizedRecord(remaining[0]);
       else onNotify('Screenshot draft discarded.');
       return;
     }
@@ -490,8 +498,8 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     onNotify('Recognized details discarded.');
   };
 
-  const saveActivity = async (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails) => {
-    await saveAthleteActivity(draft, id, details);
+  const saveActivity = async (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails, batch?: ActivityMediaBatch) => {
+    await saveAthleteActivity(draft, id, details, batch);
     await refresh();
     if (screenshotDrafts.length) {
       setActivityEditor(null);
@@ -569,7 +577,11 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
       }
       if (combine && bundle.length) {
         const parsed = recognizeSamsungScreenshots(bundle, unit, reference);
-        if (parsed) drafts.push({ ...parsed, fileName: bundle.length + ' screenshots · one workout', files: bundle.map((result) => files[results.indexOf(result)]), fingerprint: bundle[0].fingerprint });
+        if (parsed) {
+          const group = results.flatMap((result, index) => result.fingerprint && !result.duplicateOf ? [{ result, file: files[index] }] : []);
+          drafts.push({ route: parsed.route, fileName: group.length + ' screenshots · one workout', files: group.map(({ file }) => file),
+            fingerprint: bundle[0].fingerprint, details: { ...parsed.details, fingerprints: group.map(({ result }) => result.fingerprint) } });
+        }
       }
       if (!drafts.length) {
         setScreenshotReaderError(failures.join('\n') || 'No readable fitness details found. Try a clearer screenshot with the activity labels and values.');
@@ -577,7 +589,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
       }
       if (failures.length) drafts[0].route.warnings = [...(drafts[0].route.warnings ?? []), ...failures];
       setScreenshotDrafts(drafts);
-      reviewRecognizedRecord(drafts[0].route, 'image', drafts[0]);
+      reviewRecognizedRecord(drafts[0]);
       setScreenshotImportOpen(false);
       onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready. ${duplicates ? `${duplicates} repeated file(s) skipped. ` : ''}${failures.length ? `${failures.length} file(s) could not be read; see review details.` : 'Nothing is saved until you confirm.'}`);
     } catch (caught) {
@@ -620,10 +632,10 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const bests = <section className="surface-card athlete-pr-card">
     <div className="card-title-row"><div><h3>Personal bests</h3><p>Fastest recorded finishes. The workout must reach the target and finish within 2% of it.</p></div><Trophy size={18} /></div>
     <div className="athlete-pr-list">{personalRecords.map(({ label, activity }) => <div key={label}><span>{label}</span><b>{activity ? formatDuration(activity.durationSeconds) : '—'}</b>
-      {activity ? <button className="text-button" type="button" onClick={() => setViewingActivity(activity)}>{formatAthleteDate(activity.activityDate)}</button> : <small>No qualifying run</small>}
+      {activity ? <Link className="text-button" to={athleteActivityPath(activity.id)}>{formatAthleteDate(activity.activityDate)}</Link> : <small>No qualifying run</small>}
     </div>)}</div>
     {athletePage === 'records' ? <div className="form-grid"><label>Custom distance ({settings.distanceUnit})<input type="number" min="0.01" step="any" value={customBestDistance} onChange={(event) => setCustomBestDistance(event.target.value)} /></label>
-      {bestTarget > 0 ? <div>{customBest ? <button className="text-button" type="button" onClick={() => setViewingActivity(customBest)}>{formatDuration(customBest.durationSeconds)} · {formatAthleteDate(customBest.activityDate)}</button> : <p className="form-hint">No qualifying run at this distance.</p>}</div> : null}</div> : null}
+      {bestTarget > 0 ? <div>{customBest ? <Link className="text-button" to={athleteActivityPath(customBest.id)}>{formatDuration(customBest.durationSeconds)} · {formatAthleteDate(customBest.activityDate)}</Link> : <p className="form-hint">No qualifying run at this distance.</p>}</div> : null}</div> : null}
     <button className="text-button" type="button" onClick={() => setShowGoal(true)}><Target size={14} /> Create distance goal</button>
   </section>;
   const dayScore = data.recoveryScores.find((entry) => entry.recoveryDate === calendarDate);
@@ -632,54 +644,51 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const dayRaces = data.races.filter((entry) => entry.raceDate === calendarDate);
   const calendarDay = calendarDate ? <SimpleModal title={formatAthleteDate(calendarDate)} onClose={() => setCalendarDate('')}>
     <div className="modal-form">
-      {dayActivities.map((entry) => <button key={entry.id} type="button" className="secondary-button" onClick={() => { setCalendarDate(''); setViewingActivity(entry); }}>{entry.kind} · {formatDistance(entry.distanceMeters, settings.distanceUnit)} · {formatDuration(entry.durationSeconds)}</button>)}
+      {dayActivities.map((entry) => <Link key={entry.id} className="secondary-button" to={athleteActivityPath(entry.id)}>{entry.kind} · {formatDistance(entry.distanceMeters, settings.distanceUnit)} · {formatDuration(entry.durationSeconds)}</Link>)}
       {dayPlans.map((entry) => <p key={entry.id}>Plan · {entry.title}</p>)}
       {dayRaces.map((entry) => <p key={entry.id}>Race · {entry.name}</p>)}
       <p>{dayScore ? 'Recovery · ' + dayScore.score + '%' : 'No recovery score recorded.'}</p>
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => { setVoiceRecoveryDraft(dayScore ?? { recoveryDate: calendarDate }); setCalendarDate(''); setShowScore(true); }}>{dayScore ? 'Edit recovery' : 'Log recovery'}</button>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => { setRecoveryDraft(dayScore ?? { recoveryDate: calendarDate }); setCalendarDate(''); setShowScore(true); }}>{dayScore ? 'Edit recovery' : 'Log recovery'}</button>
         <button className="primary-button" type="button" onClick={() => { setActivityEditor({ draft: { activityDate: calendarDate } }); setCalendarDate(''); }}>Add activity</button></div>
     </div>
   </SimpleModal> : null;
 
-  const workoutDetailsModal = viewingActivity ? <WorkoutDetailsModal key={viewingActivity.id} activity={viewingActivity} settings={settings} onClose={() => setViewingActivity(null)} onEdit={(details) => { setActivityEditor({ entry: viewingActivity, details }); setViewingActivity(null); }} /> : null;
 
 
 
 
 
   return <div className="athlete-hub">
-    {workoutDetailsModal}
     {calendarDay}
     <input type="file" ref={workoutFileInput} accept=".gpx,.tcx,.fit" hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importWorkout(file); }} />
     <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><button className="secondary-button" type="button" onClick={() => setShowSettings(true)}><Settings size={15} /> Settings</button><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => setScreenshotImportOpen(true)}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshots'}</button><button className="secondary-button" type="button" disabled={readingWorkout} onClick={() => workoutFileInput.current?.click()}>{readingWorkout ? 'Reading workout…' : 'Import workout file'}</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
     <nav className="athlete-analysis-nav" aria-label="Athlete Hub pages">
-      {([['dashboard', 'Overview'], ['calendar', 'Calendar'], ['timeline', 'Activities'], ['records', 'Personal Bests'], ['recovery', 'Recovery'], ['analysis', 'Analysis']] as const).map(([id, label]) =>
+      {athleteTabs.map(([id, label]) =>
         <button type="button" key={id} className={athletePage === id ? 'active' : undefined} aria-current={athletePage === id ? 'page' : undefined} onClick={() => setAthletePage(id)}>{label}</button>)}
     </nav>
     {athletePage === 'analysis' ? <AthleteAnalysis data={data} onTimeline={() => setAthletePage('timeline')} /> : null}
     {athletePage === 'timeline' ? <AthleteTimelinePage data={data} exporting={exporting} onExport={(format, rows) => void exportTraining(format, rows)}
-      onAdd={() => setActivityEditor({})} onEdit={(activity) => setActivityEditor({ entry: activity })} onDetails={setViewingActivity} onDelete={(activity) => void deleteActivity(activity)} /> : null}
-    {athletePage === 'recovery' ? <RecoveryHistory scores={data.recoveryScores} onAdd={() => setShowScore(true)} onEdit={(score) => { setVoiceRecoveryDraft(score); setShowScore(true); }} onDelete={(score) => void removeRecovery(score)} /> : null}
+      onAdd={() => setActivityEditor({})} onEdit={(activity) => setActivityEditor({ entry: activity })} onDelete={(activity) => void deleteActivity(activity)} /> : null}
+    {athletePage === 'recovery' ? <RecoveryHistory scores={data.recoveryScores} onAdd={() => setShowScore(true)} onEdit={(score) => { setRecoveryDraft(score); setShowScore(true); }} onDelete={(score) => void removeRecovery(score)} /> : null}
     {athletePage === 'calendar' ? calendar : null}
     {athletePage === 'records' ? bests : null}
     {athletePage === 'dashboard' ? <>
 
-    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><Select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></Select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div><div className="athlete-voice-controls"><span className="athlete-voice-hint">Speak or type your activity, plan, recovery or goal. Review the details before saving.</span><button type="button" className="secondary-button" onClick={() => setShowVoice(true)}><Mic size={15} />Speak activity</button></div></div>
+    <div className="athlete-toolbar surface-card"><div className="athlete-period-control"><span>View</span><Select value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="week">Last 7 days</option><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom range</option></Select>{period === 'custom' ? <div className="athlete-custom-dates"><DatePicker label="From" value={customStart} onChange={setCustomStart} max={customEnd} /><DatePicker label="To" value={customEnd} onChange={setCustomEnd} min={customStart} /></div> : null}</div></div>
     <div className="metrics-grid athlete-metrics"><Metric label="Running distance" value={formatDistance(runningDistance, settings.distanceUnit)} foot={`${runningActivities.length} run${runningActivities.length === 1 ? '' : 's'} in this view`} icon={<Footprints size={16} />} /><Metric label="Run and walk distance" value={formatDistance(allDistance, settings.distanceUnit)} foot="Running and walking combined" icon={<Activity size={16} />} /><Metric label="Average pace" value={averagePace} foot={totalSeconds ? `${formatDuration(totalSeconds)} running time` : 'Add duration to calculate'} icon={<Sparkles size={16} />} /><Metric label="Energy logged" value={new Intl.NumberFormat('en-IN').format(totalCalories)} foot="Calories recorded in this view" icon={<HeartPulse size={16} />} /></div>
     <div className="content-grid athlete-overview-grid"><section className="surface-card athlete-today-card"><div className="card-title-row"><div><h3>Today’s readiness</h3><p>Recovery and your next useful action.</p></div><button type="button" className="text-button" onClick={() => setShowScore(true)}><Plus size={14} /> Log score</button></div><div className="athlete-readiness"><div className={`athlete-recovery-ring ${recovery ? recovery.source === 'whoop' ? whoopTone(recovery.score) : recoveryTone(recovery.score) : 'empty'}`}><b>{recovery?.score ?? '—'}</b><span>{recovery ? 'Recovery' : 'No score'}</span></div><div><strong>{recovery ? recovery.score >= 67 ? 'High recovery' : recovery.score >= 34 ? 'Moderate recovery' : 'Low recovery' : 'Check in with yourself'}</strong><p>{recovery?.notes || 'Log a recovery check-in for today.'}</p></div></div>{nextRace ? <div className="athlete-race-banner"><Flag size={15} /><span><b>{nextRace.name}</b>{nextRace.distanceMeters ? ` · ${formatDistance(nextRace.distanceMeters, settings.distanceUnit)}` : ''}</span><strong>{Math.max(0, daysBetween(localDateKey(), nextRace.raceDate))} days</strong><button className="ghost-button danger" aria-label={`Delete ${nextRace.name}`} type="button" onClick={() => void deleteRecord('race', nextRace.id, nextRace.name)}><Trash2 size={13} /></button></div> : <button className="athlete-add-race" type="button" onClick={() => setShowRace(true)}><Flag size={15} /> Add a race countdown</button>}</section><section className="surface-card athlete-plan-card"><div className="card-title-row"><div><h3>Coming up</h3><p>Planned sessions and races stay in sight.</p></div><button type="button" className="text-button" onClick={() => setShowPlan(true)}><Plus size={14} /> Plan</button></div>{planned.length ? <div className="athlete-upcoming-list">{planned.map((workout) => <div key={workout.id}><span className="athlete-date-chip">{formatAthleteDate(workout.workoutDate)}</span><p><b>{workout.title}</b><small>{workout.targetDistanceMeters ? formatDistance(workout.targetDistanceMeters, settings.distanceUnit) : activityKinds.find((item) => item.value === workout.kind)?.label}</small></p><button className="ghost-button danger" aria-label={`Delete ${workout.title}`} type="button" onClick={() => void deleteRecord('planned_workout', workout.id, workout.title)}><Trash2 size={13} /></button></div>)}</div> : <div className="athlete-empty-inline"><CalendarDays size={16} /><span>No planned workouts. Add the next one when you are ready.</span></div>}</section></div>
     <div className="content-grid athlete-training-grid">{calendar}{bests}</div>
     <div className="content-grid athlete-bottom-grid"><section className="surface-card athlete-goals-card"><div className="card-title-row"><div><h3>Distance goals</h3><p>Progress updates from your completed activity log.</p></div><button type="button" className="text-button" onClick={() => setShowGoal(true)}><Plus size={14} /> Goal</button></div>{data.goals.filter((goal) => goal.isActive).length ? <div className="athlete-goal-list">{data.goals.filter((goal) => goal.isActive).map((goal) => { const covered = activities.filter((activity) => inRange(activity.activityDate, goal.startsOn, goal.endsOn)).reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0); return <div className="athlete-goal-row" key={goal.id}><ProgressRow label={goal.title} detail={<>{formatDistance(covered, settings.distanceUnit)} of <b>{formatDistance(goal.targetDistanceMeters, settings.distanceUnit)}</b> · ends {formatAthleteDate(goal.endsOn)}</>} progress={covered / goal.targetDistanceMeters * 100} /><button className="ghost-button danger" type="button" aria-label={`Delete ${goal.title}`} onClick={() => void deleteRecord('goal', goal.id, goal.title)}><Trash2 size={13} /></button></div>; })}</div> : <div className="athlete-empty-inline"><Target size={16} /><span>Create a running-distance goal for clear momentum.</span></div>}</section><section className="surface-card athlete-strength-card"><div className="card-title-row"><div><h3>Strength for runners</h3><p>Minimal gym logging that supports your training.</p></div><button type="button" className="text-button" onClick={() => setShowGym(true)}><Plus size={14} /> Log strength</button></div>{data.gymSessions.length ? <div className="athlete-strength-summary"><Dumbbell size={19} /><div><b>{data.gymSessions[0].title}</b><small>{formatAthleteDate(data.gymSessions[0].sessionDate)}{data.gymSessions[0].durationMinutes ? ` · ${data.gymSessions[0].durationMinutes} min` : ''}</small></div><button className="ghost-button danger" type="button" aria-label={`Delete ${data.gymSessions[0].title}`} onClick={() => void deleteRecord('gym_session', data.gymSessions[0].id, data.gymSessions[0].title)}><Trash2 size={13} /></button></div> : <div className="athlete-empty-inline"><Dumbbell size={16} /><span>Log simple strength sessions when they help your running.</span></div>}</section></div>
-    <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><button className="ghost-button" type="button" onClick={() => setViewingActivity(activity)}>Details</button><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually, speak it, or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
+    <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><Link className="ghost-button" to={athleteActivityPath(activity.id)}>Details</Link><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     </> : null}
     {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} progress={screenshotProgress} error={screenshotReaderError} onClose={() => { screenshotAbort.current?.abort(); setScreenshotImportOpen(false); }} onFiles={readScreenshots} /> : null}
-    {showVoice ? <AthleteVoiceModal onClose={() => setShowVoice(false)} onReview={(text) => { setShowVoice(false); reviewRecognizedRecord(routeVoiceAthleteRecord(text, settings.distanceUnit, recognitionReferenceDate(settings.timezone)), 'voice'); }} /> : null}
     {pendingRecognition ? <RecognitionConfirmationModal key={pendingRecognition.id} pending={pendingRecognition} settings={settings} activities={activities} onClose={discardPendingRecognition} onAddInfo={(route, existing) => { const next = { ...pendingRecognition, route }; setPendingRecognition(null); openRecognizedRecord(next, existing); }} /> : null}
     {activityEditor ? <ActivityModal settings={settings} matchingActivities={activities} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
-    {showScore ? <RecoveryEditor initial={voiceRecoveryDraft} onClose={() => { setShowScore(false); setVoiceRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setVoiceRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
-    {showPlan ? <PlanModal settings={settings} initial={voicePlanDraft} onClose={() => { setShowPlan(false); setVoicePlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setVoicePlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}
-    {showRace ? <RaceModal settings={settings} initial={voiceRaceDraft} onClose={() => { setShowRace(false); setVoiceRaceDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setVoiceRaceDraft(null); if (advanceScreenshotDraft()) return; onNotify('Race added.'); }} /> : null}
-    {showGym ? <GymModal settings={settings} initial={voiceGymDraft} onClose={() => { setShowGym(false); setVoiceGymDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setVoiceGymDraft(null); if (advanceScreenshotDraft()) return; onNotify('Strength session saved.'); }} /> : null}
-    {showGoal ? <GoalModal settings={settings} initial={voiceGoalDraft} onClose={() => { setShowGoal(false); setVoiceGoalDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setVoiceGoalDraft(null); if (advanceScreenshotDraft()) return; onNotify('Running goal saved.'); }} /> : null}
+    {showScore ? <RecoveryEditor initial={recoveryDraft} onClose={() => { setShowScore(false); setRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
+    {showPlan ? <PlanModal settings={settings} initial={planDraft} onClose={() => { setShowPlan(false); setPlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setPlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}
+    {showRace ? <RaceModal settings={settings} initial={raceDraft} onClose={() => { setShowRace(false); setRaceDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setRaceDraft(null); if (advanceScreenshotDraft()) return; onNotify('Race added.'); }} /> : null}
+    {showGym ? <GymModal settings={settings} initial={gymDraft} onClose={() => { setShowGym(false); setGymDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setGymDraft(null); if (advanceScreenshotDraft()) return; onNotify('Strength session saved.'); }} /> : null}
+    {showGoal ? <GoalModal settings={settings} initial={goalDraft} onClose={() => { setShowGoal(false); setGoalDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setGoalDraft(null); if (advanceScreenshotDraft()) return; onNotify('Running goal saved.'); }} /> : null}
     {showSettings ? <AthleteSettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} onDelete={deleteAll} /> : null}
   </div>;
 }

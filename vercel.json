@@ -11,14 +11,14 @@
         { "key": "Content-Security-Policy", "value": "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'" },
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
         { "key": "Referrer-Policy", "value": "no-referrer" },
-        { "key": "Permissions-Policy", "value": "camera=(), geolocation=(), microphone=(self)" },
+        { "key": "Permissions-Policy", "value": "camera=(), geolocation=(), microphone=()" },
         { "key": "Strict-Transport-Security", "value": "max-age=31536000" }
       ]
     }
   ],
   "rewrites": [
     {
-      "source": "/((?!api(?:/|$)|assets(?:/|$)|athlete-ocr(?:/|$)|athlete-voice(?:/|$)|licenses(?:/|$)|.*\\.).*)",
+      "source": "/((?!api(?:/|$)|assets(?:/|$)|athlete-ocr(?:/|$)|licenses(?:/|$)|.*\\.).*)",
       "destination": "/index.html"
     }
   ]

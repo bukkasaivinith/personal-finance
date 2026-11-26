@@ -162,7 +162,7 @@ export function imageDimensions(bytes: Uint8Array): { width: number; height: num
   return null;
 }
 
-function checkDimensions(size: { width: number; height: number }) {
+export function checkDimensions(size: { width: number; height: number }) {
   if (size.width < 20 || size.height < 20) throw new Error('This image is too small to read. Choose the original screenshot.');
   if (Math.max(size.width, size.height) > screenshotLimits.side || size.width * size.height > screenshotLimits.pixels) throw new Error('This image is too large to process safely. Crop it to the activity metrics first.');
 }

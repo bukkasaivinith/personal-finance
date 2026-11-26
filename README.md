@@ -74,15 +74,13 @@ After the migration is applied, test with two different browsers:
 3. Before that visual redirect, browser A must already be unable to read or write finance data because the RLS session policy rejects it.
 4. In **Settings → Platform administration**, verify the session timestamps, then use **Sign out** to revoke a test user's finance session.
 
-## Athlete Hub screenshot and voice entry
+## Athlete Hub screenshots and workout files
 
-Screenshot recognition runs locally with the bundled English Tesseract reader. It checks original, enhanced and sparse-text layouts, pairs metric labels with nearby values, and leaves conflicting readings empty. Multiple images are reviewed separately; identical files in a batch are skipped, and matching saved activities trigger a duplicate warning. Screenshots and extracted text are not automatically stored as notes.
+Screenshot recognition runs locally with the bundled English Tesseract reader. It checks original, enhanced and sparse-text layouts, pairs metric labels with nearby values, and leaves conflicting readings empty. Review images individually or combine screenshots from one workout. The reader skips identical files in a batch and flags matching saved activities for review.
 
-Voice entry uses Transformers.js with the multilingual `onnx-community/whisper-base` model in a browser worker. It downloads public model files from Hugging Face, but never sends recordings there. No paid API, API key or database migration is required. First use downloads approximately 180 MB including the reader; subsequent use can reuse the browser cache. Model loading needs internet access, recording needs HTTPS (or localhost), and transcription speed depends on the device. Recordings are limited to two minutes and microphone tracks/workers are released on cancellation or close.
+English metric labels are the supported screenshot format. Users can correct the extracted text and choose the destination. Every import follows **Review → Add info → editable entry form → Save**. For completed activities, users can save the screenshots privately in an expandable group or attach them from the activity page later.
 
-Language detection is automatic. Mixed-language transcription can still make mistakes. The structured parser handles supported English, Hindi and Telugu phrases, dates and units; it is not a general conversational AI. English metric labels are currently the supported screenshot format. Users can correct the source transcript and choose the destination (activity, plan, recovery, race, strength or goal). Unclear or missing details require review. Every import follows **Review → Add info → editable entry form → Save**; recognition never saves a record by itself.
-
-Run the parser, OCR-layout and recognition regression suite with `npm run test:athlete`, along with `npm run typecheck` and `npm run build`. Runtime browser verification should include light/dark screenshots, multi-column metrics, duplicate files, microphone cancellation, and a real model transcription. Keep the ONNX runtime assets in `public/athlete-voice` synchronized with the installed runtime when updating dependencies; provenance and license are included beside them.
+**Activities → Details** opens the workout page. FIT, GPX and TCX files can provide timestamped measurements and GPS tracks for timelines and route maps. Run the parser, OCR-layout and recognition regression suite with `npm run test:athlete`, the browser suite with `npm run test:browser`, and the production build with `npm run build`.
 
 ## Security note
 

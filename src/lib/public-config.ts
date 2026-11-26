@@ -1,5 +1,3 @@
-const modelOrigins = ['https://huggingface.co', 'https://*.huggingface.co', 'https://*.hf.co'];
-
 function isPublicKey(key: string): boolean {
   if (/^sb_publishable_[\w-]+$/.test(key)) return true;
   const pieces = key.split('.');
@@ -29,6 +27,6 @@ export function browserConfig(env: Record<string, string>, development: boolean)
   return {
     url: api.origin,
     key: env.VITE_SUPABASE_ANON_KEY,
-    connectPolicy: ['connect-src', "'self'", api.origin, api.origin.replace(/^http/, 'ws'), ...modelOrigins].join(' '),
+    connectPolicy: ['connect-src', "'self'", api.origin, api.origin.replace(/^http/, 'ws')].join(' '),
   };
 }

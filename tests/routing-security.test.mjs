@@ -20,13 +20,14 @@ test('the route map covers every page with a distinct exact URL', () => {
     overview: '/', transactions: '/transactions', accounts: '/accounts', savings: '/savings',
     analytics: '/analytics', goals: '/goals', recurring: '/recurring', investments: '/investments',
     'ipo-portfolio': '/investments/ipo', 'ipo-demats': '/investments/ipo/demats',
-    athlete: '/athlete-hub', setup: '/setup', settings: '/settings',
+    athlete: '/athlete-hub', 'athlete-activity': '/athlete-hub/activities/:activityId', setup: '/setup', settings: '/settings',
   });
   assert.equal(mobilePath, '/mobile');
   for (const [id, path] of Object.entries(viewPaths)) {
     assert.equal(matchRoutes(financePageRoutes, path)?.[0].route.id, id);
   }
   assert.equal(matchRoutes(financePageRoutes, '/investments/private-id'), null);
+  assert.equal(matchRoutes(financePageRoutes, '/athlete-hub/activities/a0000000-0000-4000-8000-000000000001')?.[0].route.id, 'athlete-activity');
 });
 
 test('React Router restores the prior path and safe query values with Back and Forward', async (t) => {
@@ -44,6 +45,7 @@ test('React Router restores the prior path and safe query values with Back and F
 test('frontend configuration rejects privileged credentials without exposing the value', () => {
   const input = { VITE_SUPABASE_URL: 'https://example.invalid', VITE_SUPABASE_ANON_KEY: 'sb_publishable_test_value' };
   assert.match(browserConfig(input, false).connectPolicy, /https:\/\/example\.invalid/);
+  assert.doesNotMatch(browserConfig(input, false).connectPolicy, /huggingface|hf\.co/);
   assert.throws(() => browserConfig({ ...input, VITE_SUPABASE_URL: 'http://example.invalid' }, false), /HTTPS/);
   const token = (role) => 'fixture.' + Buffer.from(JSON.stringify({ role })).toString('base64url') + '.fixture';
   assert.equal(browserConfig({ ...input, VITE_SUPABASE_ANON_KEY: token('anon') }, false).key, token('anon'));
@@ -64,13 +66,14 @@ test('the hosting fallback serves page requests and excludes APIs and static fil
   const hosting = JSON.parse(await readFile('vercel.json', 'utf8'));
   const target = new RegExp('^' + hosting.rewrites[0].source + '$');
   for (const path of [...Object.values(viewPaths), mobilePath, '/missing-page']) assert.ok(target.test(path), path);
-  for (const path of ['/api', '/api/missing', '/sw.js', '/manifest.webmanifest', '/assets/missing.js', '/athlete-ocr/missing', '/athlete-voice/runtime.wasm']) {
+  for (const path of ['/api', '/api/missing', '/sw.js', '/manifest.webmanifest', '/assets/missing.js', '/athlete-ocr/missing']) {
     assert.equal(target.test(path), false, path);
   }
   const headers = Object.fromEntries(hosting.headers[0].headers.map(({ key, value }) => [key, value]));
   assert.match(headers['Content-Security-Policy'], /script-src 'self' 'wasm-unsafe-eval'/);
   assert.equal(headers['Referrer-Policy'], 'no-referrer');
   assert.equal(headers['X-Content-Type-Options'], 'nosniff');
+  assert.match(headers['Permissions-Policy'], /microphone=\(\)/);
 });
 
 test('the service worker leaves external requests alone and bypasses caches for origin API reads', async () => {

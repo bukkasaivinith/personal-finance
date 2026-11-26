@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const result = await build({ entryPoints: ['src/lib/athlete.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
-const { parseActivityText, parseSpokenDate, routeVoiceAthleteRecord } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+const { parseActivityText, parseActivityDateText, routeAthleteText } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 const reference = new Date(2026, 10, 16, 12);
 
 const metrics = [
@@ -73,27 +73,27 @@ const dates = [
   ['effort not date', 'Effort 8/10', ''],
   ['pace not date', 'Pace 6:12 /km', ''],
 ];
-for (const [name, text, expected] of dates) test(name, () => assert.equal(parseSpokenDate(text, reference), expected));
+for (const [name, text, expected] of dates) test(name, () => assert.equal(parseActivityDateText(text, reference), expected));
 
-test('same-day future intention opens planned workout', () => assert.equal(routeVoiceAthleteRecord('I will run 5 km today', 'km', reference).destination, 'plan'));
-test('completed recovery run stays an activity', () => assert.equal(routeVoiceAthleteRecord('Recovery run 5 km yesterday', 'km', reference).destination, 'activity'));
+test('same-day future intention opens planned workout', () => assert.equal(routeAthleteText('I will run 5 km today', 'km', reference).destination, 'plan'));
+test('completed recovery run stays an activity', () => assert.equal(routeAthleteText('Recovery run 5 km yesterday', 'km', reference).destination, 'activity'));
 test('recovery score uses spoken words', () => {
-  const route = routeVoiceAthleteRecord('Recovery score eighty five today', 'km', reference);
+  const route = routeAthleteText('Recovery score eighty five today', 'km', reference);
   assert.equal(route.destination, 'recovery'); assert.equal(route.recovery.score, 85);
 });
-test('future race uses race draft', () => assert.equal(routeVoiceAthleteRecord('I will run a marathon next Sunday', 'km', reference).destination, 'race'));
+test('future race uses race draft', () => assert.equal(routeAthleteText('I will run a marathon next Sunday', 'km', reference).destination, 'race'));
 test('gym and monthly goal remain supported', () => {
-  assert.equal(routeVoiceAthleteRecord('Gym bench 3 sets 10 reps yesterday', 'km', reference).destination, 'gym');
-  const goal = routeVoiceAthleteRecord('My goal is 100 km next month', 'km', reference);
+  assert.equal(routeAthleteText('Gym bench 3 sets 10 reps yesterday', 'km', reference).destination, 'gym');
+  const goal = routeAthleteText('My goal is 100 km next month', 'km', reference);
   assert.equal(goal.destination, 'goal'); assert.equal(goal.goal.startsOn, '2026-12-01'); assert.equal(goal.goal.endsOn, '2026-12-31');
 });
 test('missing and conflicting fields are reported, not invented', () => {
-  const route = routeVoiceAthleteRecord('Distance 5 km\nDistance 8 km', 'km', reference, { source: 'image' });
+  const route = routeAthleteText('Distance 5 km\nDistance 8 km', 'km', reference);
   assert.equal(route.date, ''); assert.equal(route.activity.activityDate, ''); assert.equal(route.activity.source, 'image');
   assert(route.missingFields.includes('Date')); assert(route.warnings.some((warning) => warning.includes('Distance was unclear or conflicting')));
 });
 test('source text is separate from every notes field', () => {
-  const route = routeVoiceAthleteRecord('Ran 5 km yesterday and felt good', 'km', reference);
+  const route = routeAthleteText('Ran 5 km yesterday and felt good', 'km', reference);
   assert.equal(route.transcript, 'Ran 5 km yesterday and felt good');
   for (const key of ['activity', 'plan', 'recovery', 'race', 'gym']) assert.equal(route[key].notes, '');
 });

@@ -24,6 +24,7 @@ export const viewPaths = {
   'ipo-portfolio': '/investments/ipo',
   'ipo-demats': '/investments/ipo/demats',
   athlete: '/athlete-hub',
+  'athlete-activity': '/athlete-hub/activities/:activityId',
   setup: '/setup',
   settings: '/settings',
 } as const;
@@ -32,6 +33,8 @@ export type View = keyof typeof viewPaths;
 
 export const financePageRoutes = Object.entries(viewPaths).map(([id, path]) => ({ id, path, element: null }));
 export const mobilePath = '/mobile';
+export const athleteActivitiesPath = viewPaths.athlete + '?tab=timeline';
+export const athleteActivityPath = (activityId: string) => viewPaths['athlete-activity'].replace(':activityId', encodeURIComponent(activityId));
 
 export type NavItem = { id: View; label: string; icon: LucideIcon };
 
@@ -71,6 +74,7 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   'ipo-portfolio': { title: 'Portfolio', eyebrow: 'IPO' },
   'ipo-demats': { title: 'Demat account holders', eyebrow: 'IPO' },
   athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
+  'athlete-activity': { title: 'Activity details', eyebrow: 'Athlete Hub' },
   setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },
   settings: { title: 'Settings', eyebrow: 'Preferences and data' },
 };

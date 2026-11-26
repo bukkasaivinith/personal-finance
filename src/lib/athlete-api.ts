@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { publicApiError } from '@/lib/public-api-error';
+import { prepareActivityMedia, type ActivityMedia, type ActivityMediaBatch } from '@/lib/athlete-media';
 import type { WorkoutDetails } from '@/lib/athlete-workout';
 import type {
   AthleteActivity,
@@ -28,24 +29,64 @@ function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
 }
 
+function readActivity(row: Record<string, unknown>): AthleteActivity {
+  return {
+    id: String(row.id), kind: row.kind as AthleteActivity['kind'], activityDate: String(row.activity_date),
+    durationSeconds: nullableNumber(row.duration_seconds), distanceMeters: nullableNumber(row.distance_meters),
+    averageHeartRate: nullableNumber(row.average_heart_rate), calories: nullableNumber(row.calories),
+    elevationMeters: nullableNumber(row.elevation_meters), cadence: nullableNumber(row.cadence), effort: nullableNumber(row.effort),
+    notes: String(row.notes ?? ''), source: row.source as AthleteActivity['source'], createdAt: String(row.created_at),
+  };
+}
+
+function readSettings(row: Record<string, unknown>): AthleteSettings {
+  return {
+    distanceUnit: row.distance_unit === 'mi' ? 'mi' : 'km',
+    weightUnit: row.weight_unit === 'lb' ? 'lb' : 'kg',
+    timezone: typeof row.timezone === 'string' ? row.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
+  };
+}
+
+function activityMediaError(error: { message: string; code?: string }): never {
+  if (error.code === 'PGRST202') throw new Error('Apply the Athlete Hub activity media SQL migration in Supabase, then try again.');
+  fail(error);
+}
+
+export async function loadAthleteActivityPage(id: string, signal?: AbortSignal) {
+  const request = supabase.rpc('athlete_get_activity_page', { p_activity_id: id });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
+  if (error) activityMediaError(error);
+  const result = data as Record<string, unknown>;
+  return {
+    activity: readActivity(result.activity as Record<string, unknown>),
+    settings: readSettings(result),
+    details: result.details as WorkoutDetails | null,
+    media: rows<ActivityMedia>(result.media),
+  };
+}
+
+export async function loadAthleteActivityMedia(id: string, mime: string, signal: AbortSignal): Promise<Blob> {
+  const { data, error } = await supabase.rpc('athlete_get_activity_media', { p_media_id: id }).abortSignal(signal);
+  if (error) activityMediaError(error);
+  const bytes = Uint8Array.from(atob(String(data)), (character) => character.charCodeAt(0));
+  return new Blob([bytes], { type: mime });
+}
+
+export async function addAthleteActivityMedia(id: string, batch: ActivityMediaBatch) {
+  const { error } = await supabase.rpc('athlete_add_activity_media', {
+    p_activity_id: id, p_batch_id: batch.id, p_media: await prepareActivityMedia(batch.files),
+  });
+  if (error) activityMediaError(error);
+}
+
 export async function loadAthleteHubData(signal?: AbortSignal): Promise<AthleteHubData> {
   const request = supabase.rpc('athlete_get_dashboard');
   const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error) fail(error);
   const result = (data ?? {}) as Record<string, unknown>;
   const settingsRow = (result.settings ?? {}) as Record<string, unknown>;
-  const settings: AthleteSettings = {
-    distanceUnit: settingsRow.distance_unit === 'mi' ? 'mi' : 'km',
-    weightUnit: settingsRow.weight_unit === 'lb' ? 'lb' : 'kg',
-    timezone: typeof settingsRow.timezone === 'string' ? settingsRow.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
-  };
-  const activities = rows<Record<string, unknown>>(result.activities).map((row): AthleteActivity => ({
-    id: String(row.id), kind: row.kind as AthleteActivity['kind'], activityDate: String(row.activity_date),
-    durationSeconds: nullableNumber(row.duration_seconds), distanceMeters: nullableNumber(row.distance_meters),
-    averageHeartRate: nullableNumber(row.average_heart_rate), calories: nullableNumber(row.calories),
-    elevationMeters: nullableNumber(row.elevation_meters), cadence: nullableNumber(row.cadence), effort: nullableNumber(row.effort),
-    notes: String(row.notes ?? ''), source: row.source as AthleteActivity['source'], createdAt: String(row.created_at),
-  }));
+  const settings = readSettings(settingsRow);
+  const activities = rows<Record<string, unknown>>(result.activities).map(readActivity);
   const plannedWorkouts = rows<Record<string, unknown>>(result.planned_workouts).map((row): PlannedWorkout => ({
     id: String(row.id), title: String(row.title), workoutDate: String(row.workout_date), kind: row.kind as PlannedWorkout['kind'],
     targetDistanceMeters: nullableNumber(row.target_distance_meters), notes: String(row.notes ?? ''), status: row.status as PlannedWorkout['status'],
@@ -67,13 +108,20 @@ export async function loadAthleteHubData(signal?: AbortSignal): Promise<AthleteH
   return { settings, activities, plannedWorkouts, recoveryScores, races, gymSessions, goals };
 }
 
-export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails): Promise<string> {
+export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails, batch?: ActivityMediaBatch): Promise<string> {
   const payload = {
     kind: draft.kind, activity_date: draft.activityDate, duration_seconds: draft.durationSeconds, distance_meters: draft.distanceMeters,
     average_heart_rate: draft.averageHeartRate, calories: draft.calories, elevation_meters: draft.elevationMeters,
     cadence: draft.cadence, effort: draft.effort, notes: draft.notes, source: draft.source,
   };
   const args = { p_activity_id: id ?? null, p_payload: payload };
+  if (batch?.files.length) {
+    const { data, error } = await supabase.rpc('athlete_save_activity_with_media', {
+      ...args, p_details: details ?? null, p_batch_id: batch.id, p_media: await prepareActivityMedia(batch.files),
+    });
+    if (error) activityMediaError(error);
+    return String(data);
+  }
   const { data, error } = details
     ? await supabase.rpc('athlete_save_workout', { ...args, p_details: details })
     : await supabase.rpc('athlete_save_activity', args);

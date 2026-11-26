@@ -9,6 +9,7 @@ import { SavingsView } from '@/components/savings-view';
 import { InvestmentsView } from '@/components/investments-view';
 import { IpoPortfolio } from '@/components/ipo-portfolio';
 import { AthleteHub, AthletePreferencesButton } from '@/components/athlete-hub';
+import { AthleteActivityPage } from '@/components/athlete-activity-page';
 import { loadAthleteHubData } from '@/lib/athlete-api';
 import { SetupView } from '@/components/setup-views';
 import { EmptyPanel } from '@/components/ui';
@@ -59,7 +60,8 @@ function NavigationGroup({
   activeView: View;
   onSelect: () => void;
 }) {
-  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments' : activeView;
+  const selectedView = activeView === 'ipo-portfolio' || activeView === 'ipo-demats' ? 'investments'
+    : activeView === 'athlete-activity' ? 'athlete' : activeView;
   return (
     <div className="nav-group">
       <span className="nav-label">{label}</span>
@@ -86,13 +88,15 @@ export default function App() {
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Personal Financing';
   const routerNavigate = useNavigate();
   const matches = useMatches();
-  const activeView = matches[matches.length - 1].id as View;
+  const currentRoute = matches[matches.length - 1];
+  const activeView = currentRoute.id as View;
   const isIpoApplicationPage = activeView === 'ipo-portfolio';
   const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
   const ledgerPage = activeView === 'overview' || activeView === 'transactions' || activeView === 'accounts';
   const scope = ledgerPage ? 'ledger' : activeView === 'analytics' || activeView === 'investments' || activeView === 'recurring' || activeView === 'setup' ? activeView : 'forms';
-  const needsForms = activeView !== 'athlete' && activeView !== 'savings' && activeView !== 'ipo-demats';
+  const isAthletePage = activeView === 'athlete' || activeView === 'athlete-activity';
+  const needsForms = !isAthletePage && activeView !== 'savings' && activeView !== 'ipo-demats';
   const finance = useFinanceData(needsForms ? activeOwnerId : null, scope);
   const data = finance.data ?? emptyFinance;
   const { accounts, transactions, categories, transactionTypes, recurringEntries, investments, investmentTypes } = data;
@@ -364,6 +368,8 @@ export default function App() {
         );
       case 'athlete':
         return <AthleteHub onNotify={showToast} />;
+      case 'athlete-activity':
+        return <AthleteActivityPage key={currentRoute.params.activityId} id={currentRoute.params.activityId ?? ''} onNotify={showToast} />;
       case 'settings':
         return <SettingsView onExport={exportCsv} onExportAthleteData={exportAthleteData} hasData={canExportCsv && !exportingCsv} data={data} workspaceOwnerId={activeOwnerId ?? ''} workspaceControls={<WorkspaceSettings />} athletePreferences={<AthletePreferencesButton onNotify={showToast} />} />;
     }
@@ -412,7 +418,7 @@ export default function App() {
             <div className="eyebrow">{pageCopy[activeView].eyebrow}</div>
             <h1>{pageCopy[activeView].title}</h1>
           </div>
-          {activeView !== 'transactions' && activeView !== 'athlete' && activeView !== 'savings' ? (
+          {activeView !== 'transactions' && !isAthletePage && activeView !== 'savings' ? (
             <div className="top-actions">
               <button className={`primary-button header-action${isIpoApplicationPage ? ' ipo-header-action' : ''}`} type="button" onClick={() => setModal(isIpoApplicationPage ? 'ipo' : isIpoDemats ? 'ipo-demat' : 'transaction')}>
                 <span className="header-action-icon" aria-hidden="true">

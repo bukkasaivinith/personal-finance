@@ -30,18 +30,109 @@
 .workout-table th, .workout-table td { padding: 0.4rem 0.55rem; text-align: left; border-bottom: 1px solid var(--border, #dee6df); }
 .workout-edit > summary { cursor: pointer; margin-bottom: 0.65rem; }
 .workout-edit fieldset { margin-top: 0.75rem; padding: 0.6rem; border: 1px solid var(--border, #dee6df); }
-.workout-details .workout-trace label { display: grid; gap: 0.4rem; }
-.workout-chart, .workout-route { display: block; width: 100%; margin: 0.75rem 0; }
-.workout-route { max-height: 19rem; }
-.workout-chart path, .workout-route path { fill: none; stroke: currentColor; stroke-width: 2; }
-.workout-chart circle { fill: currentColor; }
-.workout-details input[type="range"] { width: 100%; }
+.athlete-activity-stats a, .athlete-hub a.text-button, .activity-back { text-decoration: none; }
+.athlete-activity-page { display: grid; gap: 16px; min-width: 0; }
+.athlete-activity-page .section-heading { align-items: center; margin-bottom: 0; }
+.activity-back { justify-self: start; }
+.activity-detail-section { min-width: 0; }
+.activity-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+}
+.activity-detail-metrics > div { padding: 13px 14px; border-radius: 10px; background: var(--green-soft); }
+.activity-detail-metrics dt { color: var(--muted); font-size: 11px; }
+.activity-detail-metrics dd {
+  margin: 3px 0 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(18px, 2.1vw, 25px);
+  font-weight: 600;
+}
+.activity-detail-notes { margin-top: 16px; }
+.activity-detail-notes h4, .activity-detail-notes p { margin: 0; }
+.activity-detail-notes p { margin-top: 4px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.activity-visuals { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+.activity-visuals .card-title-row { align-items: center; flex-wrap: wrap; }
+.activity-metric-picker { min-width: min(10rem, 100%); }
+.activity-timeline .workout-controls { align-items: end; margin-top: 12px; }
+.activity-timeline .workout-controls label { display: grid; gap: 4px; }
+.activity-chart, .activity-route-map { display: block; width: 100%; height: auto; margin-top: 14px; }
+.activity-chart { border-radius: 9px; background: #f6f8f4; cursor: crosshair; }
+.activity-chart-gridline { stroke: #d9e3d8; vector-effect: non-scaling-stroke; }
+.activity-chart-axis { fill: #627067; font: 13px 'DM Mono', monospace; }
+.activity-chart-zone { fill: #dce8d8; opacity: .68; }
+.activity-chart-zone.zone-4 { fill: #f3dcc2; }
+.activity-chart-zone.zone-5 { fill: #f1d0cb; }
+.activity-chart-line, .activity-chart-cursor, .activity-route-path, .activity-route-scale {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.activity-chart-line { stroke: var(--green); stroke-width: 2.25px; stroke-linejoin: round; }
+.activity-chart-cursor { stroke: #6b8675; stroke-dasharray: 4 4; }
+.activity-chart-point { fill: var(--green); stroke: #fff; stroke-width: 1.5px; }
+.activity-chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 10px;
+}
+.activity-chart-readout label { display: grid; flex: 1 1 160px; gap: 4px; font-size: 11px; }
+.activity-chart-readout input { width: 100%; accent-color: var(--green); }
+.activity-chart-readout output { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.activity-chart-readout output span { font: 12px 'DM Mono', monospace; color: var(--muted); }
+.activity-chart-readout output strong { font-size: 15px; }
+.activity-chart-zoom { margin-top: 14px; }
+.activity-route-map { background: #edf4ec; border: 1px solid var(--line); border-radius: 9px; }
+.activity-route-grid { stroke: #dce7db; vector-effect: non-scaling-stroke; }
+.activity-route-path { stroke: #28614c; stroke-width: 3px; stroke-linejoin: round; stroke-linecap: round; }
+.activity-route-start { fill: #28614c; stroke: #fff; stroke-width: 2px; }
+.activity-route-finish { fill: #c47850; stroke: #fff; stroke-width: 2px; }
+.activity-route-caption { fill: #365547; font: 16px 'DM Mono', monospace; }
+.activity-route-scale { stroke: #365547; stroke-width: 2px; }
+.activity-route-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.activity-route-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.activity-route-legend i { height: 8px; width: 8px; border-radius: 50%; background: #28614c; }
+.activity-route-legend span:last-child i { background: #c47850; }
+.activity-screenshot-groups { display: grid; gap: 8px; margin-top: 14px; }
+.activity-screenshot-group { border: 1px solid var(--line); border-radius: 10px; }
+.activity-screenshot-group > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  padding: 11px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.activity-screenshot-group > summary small { margin-left: auto; color: var(--muted); font-weight: 400; }
+.activity-screenshot-group > summary::after { content: '+'; color: var(--green); }
+.activity-screenshot-group[open] > summary::after { content: '−'; }
+.activity-screenshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+.activity-screenshot { min-width: 0; margin: 0; }
+.activity-screenshot img { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; background: #f3f5f0; }
+.activity-screenshot figcaption { margin-top: 5px; overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }
+.activity-screenshot-placeholder { padding: 10px; background: #f3f5f0; border-radius: 8px; }
+.activity-screenshot-upload { margin-top: 14px; }
+.activity-screenshot-upload summary { color: var(--green); cursor: pointer; }
+.activity-screenshot-upload form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 10px; }
+.activity-screenshot-upload label { display: grid; gap: 5px; min-width: 0; }
+.activity-screenshot-upload input { max-width: 100%; }
+.activity-screenshot-upload .form-error { flex-basis: 100%; margin: 0; }
 .athlete-hub nav.athlete-analysis-nav { flex-wrap: wrap; }
 .athlete-hub button.athlete-calendar-cell { background: transparent; border-top: 0; border-left: 0; text-align: left; align-content: start; }
 .athlete-hub button.athlete-calendar-cell:hover { background: var(--sage, #eff4ef); }
 .athlete-hub .athlete-calendar-controls input { min-width: 0; }
 .athlete-timeline-page .finance-export-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 @media (max-width: 760px) {
+  .activity-visuals { grid-template-columns: minmax(0, 1fr); }
+  .activity-chart-axis { font-size: 17px; }
   .athlete-hub .athlete-calendar-grid { min-width: 0; }
   .athlete-hub button.athlete-calendar-cell { min-height: 4rem; padding: 0.15rem; min-width: 0; }
   .athlete-hub .athlete-calendar-event { padding: 0.15rem; min-width: 0; }

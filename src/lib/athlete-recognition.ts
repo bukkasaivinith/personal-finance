@@ -1,9 +1,9 @@
 import { readSamsungWorkout } from './athlete-samsung';
 import type { WorkoutLap } from './athlete-workout';
-import { routeVoiceAthleteRecord, type AthleteActivity, type DistanceUnit, type VoiceAthleteRoute } from './athlete';
+import { routeAthleteText, type AthleteActivity, type DistanceUnit, type AthleteTextDraft } from './athlete';
 
 export type ScreenshotReading = { text: string; layoutText: string; confidence: number; pass: string; laps?: WorkoutLap[] };
-export const recognitionDestinations: Array<{ value: VoiceAthleteRoute['destination']; label: string }> = [
+export const recognitionDestinations: Array<{ value: AthleteTextDraft['destination']; label: string }> = [
   { value: 'activity', label: 'Completed activity' }, { value: 'plan', label: 'Planned workout' },
   { value: 'recovery', label: 'Recovery score' }, { value: 'race', label: 'Race event' },
   { value: 'gym', label: 'Strength session' }, { value: 'goal', label: 'Distance goal' },
@@ -23,11 +23,11 @@ const metrics = [
   ['calories', 'Calories'], ['elevationMeters', 'Elevation'], ['cadence', 'Cadence'], ['effort', 'Effort'],
 ] as const;
 
-function metricCount(route: VoiceAthleteRoute): number {
+function metricCount(route: AthleteTextDraft): number {
   return metrics.filter(([key]) => typeof route.activity[key] === 'number').length;
 }
 
-function hasUsefulDetails(route: VoiceAthleteRoute): boolean {
+function hasUsefulDetails(route: AthleteTextDraft): boolean {
   if (metricCount(route)) return true;
   if (route.destination === 'recovery') return typeof route.recovery.score === 'number';
   if (route.destination === 'gym') return Boolean(route.gym.exercises?.length || route.gym.durationMinutes);
@@ -35,10 +35,10 @@ function hasUsefulDetails(route: VoiceAthleteRoute): boolean {
 }
 
 /** Keep OCR disagreements visible; never create a composite from conflicting readings. */
-export function recognizeScreenshot(readings: ScreenshotReading[], unit: DistanceUnit, referenceDate = new Date()): VoiceAthleteRoute | null {
+export function recognizeScreenshot(readings: ScreenshotReading[], unit: DistanceUnit, referenceDate = new Date()): AthleteTextDraft | null {
   const candidates = readings.filter((reading) => reading.text.trim() || reading.layoutText.trim()).map((reading) => {
-    const raw = routeVoiceAthleteRecord(reading.text, unit, referenceDate, { source: 'image' });
-    const layout = reading.layoutText.trim() ? routeVoiceAthleteRecord(reading.layoutText, unit, referenceDate, { source: 'image' }) : null;
+    const raw = routeAthleteText(reading.text, unit, referenceDate);
+    const layout = reading.layoutText.trim() ? routeAthleteText(reading.layoutText, unit, referenceDate) : null;
     // Layout labels are paired spatially; use those metrics instead of flattening columns.
     const route = layout && hasUsefulDetails(layout) ? {
       ...raw,
@@ -50,7 +50,7 @@ export function recognizeScreenshot(readings: ScreenshotReading[], unit: Distanc
   const confident = candidates.filter(({ reading }) => reading.confidence >= 45);
   const usable = confident.length ? confident : candidates;
   usable.sort((a, b) => metricCount(b.route) - metricCount(a.route) || b.reading.confidence - a.reading.confidence);
-  const route: VoiceAthleteRoute = structuredClone(usable[0].route);
+  const route: AthleteTextDraft = structuredClone(usable[0].route);
   const warnings = new Set(route.warnings ?? []);
   if (!confident.length) warnings.add('The image text was difficult to read. Check every value against the screenshot.');
   for (const [key, label] of metrics) {
@@ -94,7 +94,7 @@ export function recognizeSamsungScreenshots(images: Parameters<typeof readSamsun
   if (!result) return null;
   const drafts = images.map(({ readings }) => recognizeScreenshot(readings, unit, referenceDate));
   const dates = [...new Set(drafts.flatMap((draft) => draft?.date ? [draft.date] : []))];
-  const route = routeVoiceAthleteRecord('', unit, referenceDate, { source: 'image' });
+  const route = routeAthleteText('', unit, referenceDate);
   route.date = dates.length === 1 ? dates[0] : '';
   route.destination = 'activity';
   route.activity = { ...result.activity, activityDate: route.date, kind: 'run', notes: '', source: 'samsung_health' };
@@ -104,7 +104,7 @@ export function recognizeSamsungScreenshots(images: Parameters<typeof readSamsun
   return { route, details: result.details };
 }
 
-export function missingRecognitionFields(route: VoiceAthleteRoute): string[] {
+export function missingRecognitionFields(route: AthleteTextDraft): string[] {
   const missing: string[] = [];
   if (!route.date && route.destination !== 'goal') missing.push('What date is this for?');
   if (route.destination === 'activity') {
@@ -119,7 +119,7 @@ export function missingRecognitionFields(route: VoiceAthleteRoute): string[] {
   return missing;
 }
 
-export function similarActivity(route: VoiceAthleteRoute, activities: AthleteActivity[]): AthleteActivity | undefined {
+export function similarActivity(route: AthleteTextDraft, activities: AthleteActivity[]): AthleteActivity | undefined {
   if (route.destination !== 'activity' || !route.date || !route.activity.distanceMeters || !route.activity.durationSeconds) return;
   return activities.find((activity) => activity.activityDate === route.date && activity.kind === route.activity.kind
     && activity.distanceMeters === route.activity.distanceMeters && activity.durationSeconds === route.activity.durationSeconds);
