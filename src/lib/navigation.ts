@@ -44,7 +44,7 @@ const todayLabel = new Intl.DateTimeFormat('en-IN', {
 }).format(new Date());
 
 export const workspaceNavigation: NavItem[] = [
-  { id: 'overview', label: 'Overview', icon: Home },
+  { id: 'overview', label: 'Dashboard', icon: Home },
   { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
   { id: 'accounts', label: 'Accounts', icon: Wallet },
   { id: 'savings', label: 'Savings', icon: PiggyBank },
@@ -60,7 +60,7 @@ export const manageNavigation: NavItem[] = [
 ];
 
 export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
-  overview: { title: 'Overview', eyebrow: todayLabel },
+  overview: { title: 'Dashboard', eyebrow: todayLabel },
   transactions: { title: 'Transactions', eyebrow: 'Income, expenses and transfers' },
   accounts: { title: 'Accounts', eyebrow: 'Balances across your money' },
   savings: { title: 'Savings', eyebrow: 'Set-aside money' },

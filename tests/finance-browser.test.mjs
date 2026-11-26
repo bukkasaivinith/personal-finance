@@ -198,7 +198,7 @@ test('production build opens protected routes, preserves history, clears sign-ou
   await waitForHeading(page, 'New Transaction');
   assert.ok(!rpcPaths.some(([name, path]) => name === 'get_finance_transaction_page' && path === '/mobile'));
   await page.getByRole('button', { name: 'Open dashboard' }).click();
-  await waitForHeading(page, 'Overview');
+  await waitForHeading(page, 'Dashboard');
 
   await page.goto(origin + '/athlete-hub');
   await page.getByRole('button', { name: 'Read screenshots', exact: true }).click();
@@ -333,7 +333,7 @@ test('Analytics charts investments and savings and appends statement rows on scr
   assert.ok((await statement.getByRole('row').filter({ hasText: 'Savings deposit · Top-up' }).textContent()).includes('Emergency fund (Savings)'));
 
   const plot = page.getByRole('region', { name: 'Transaction trend' });
-  assert.equal(await plot.locator('.analytics-chart-axis span').count(), 5);
+  assert.equal(await plot.locator('.finance-chart-axis span').count(), 5);
   const plotDays = plot.getByRole('button');
   assert.equal(await plotDays.count(), 15);
   const bucket = plotDays.last();
@@ -343,9 +343,9 @@ test('Analytics charts investments and savings and appends statement rows on scr
   const layout = await bucket.evaluate((element) => {
     const bounds = (selector) => element.querySelector(selector).getBoundingClientRect();
     return {
-      incomeHeight: bounds('.analytics-series-income').height,
-      expenseHeight: bounds('.analytics-series-expense').height,
-      barsBottom: bounds('.analytics-chart-bar-group').bottom,
+      incomeHeight: bounds('.finance-chart-series-income').height,
+      expenseHeight: bounds('.finance-chart-series-expense').height,
+      barsBottom: bounds('.finance-chart-bar-group').bottom,
       labelTop: bounds('small').top,
     };
   });
@@ -353,9 +353,13 @@ test('Analytics charts investments and savings and appends statement rows on scr
   assert.ok(layout.labelTop >= layout.barsBottom);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.ok(await plot.locator('.analytics-chart-scroll').evaluate((element) =>
-    element.scrollWidth > element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+  await plot.getByText(/Amounts grouped across up to \d+ days/).waitFor();
+  assert.ok(await plotDays.count() < 15);
+  assert.match(await plotDays.last().getAttribute('aria-label'), /Income ₹2,000, Expenses ₹1,000, Savings deposits ₹240, Savings withdrawals ₹80/);
+  assert.ok(await plot.locator('.finance-chart-plot').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
   await page.setViewportSize({ width: 1280, height: 720 });
+  await plot.getByText('Amounts by day', { exact: true }).waitFor();
 
   const readCount = rpcCalls.filter((name) => name === 'get_finance_transaction_page').length;
   await page.getByRole('button', { name: 'All time', exact: true }).click();
@@ -393,6 +397,24 @@ test('Analytics charts investments and savings and appends statement rows on scr
   assert.equal(await shownRows.count(), 25);
   assert.equal(rpcCalls.filter((name) => name === 'get_finance_transaction_page').length, readCount);
 
+  await page.locator('.sidebar').getByRole('link', { name: 'Dashboard', exact: true }).click();
+  await waitForHeading(page, 'Dashboard');
+  assert.equal(new URL(page.url()).pathname, '/');
+  const cashFlow = page.getByRole('region', { name: 'Cash flow', exact: true });
+  const months = cashFlow.getByRole('button');
+  await months.last().waitFor();
+  assert.equal(await months.count(), 6);
+  assert.equal(await cashFlow.locator('.finance-chart-axis span').count(), 5);
+  assert.match(await months.last().getAttribute('aria-label'), /Income ₹2,000, Expenses ₹1,000$/);
+  assert.match(await months.nth(4).getAttribute('aria-label'), /Income ₹0, Expenses ₹520$/);
+  await months.nth(4).focus();
+  await cashFlow.locator('.finance-chart-details').getByText('₹520', { exact: true }).waitFor();
+  await page.setViewportSize({ width: 320, height: 844 });
+  assert.equal(await months.count(), 6);
+  assert.ok(await cashFlow.locator('.finance-chart-plot').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(origin + '/transactions');
   await waitForHeading(page, 'Transactions');
   await page.getByText('Investment capital', { exact: true }).first().waitFor();

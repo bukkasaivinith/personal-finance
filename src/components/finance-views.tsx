@@ -19,12 +19,11 @@ import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
 import { SavingsBalanceMetric } from '@/components/savings-view';
-import { AnalyticsTrend } from '@/components/analytics-trend';
+import { AnalyticsTrend, DashboardCashFlow } from '@/components/finance-charts';
 import type { FinanceActions } from '@/lib/finance-actions';
 import {
   formatDate,
   formatMoney,
-  formatShortMonth,
   formatTime,
   signedBalance,
   stateOf,
@@ -202,59 +201,12 @@ function TransactionTable({
   );
 }
 
-function CashFlowCard({ flows }: { flows: MonthlyFlow[] }) {
-  const peak = Math.max(0, ...flows.flatMap((flow) => [flow.income, flow.expense]));
-  return (
-    <div className="surface-card">
-      <div className="card-title-row">
-        <div>
-          <h3>Cash flow</h3>
-          <p>Income and expenses over the last six months</p>
-        </div>
-      </div>
-      <div className="legend">
-        <span>
-          <i className="dot income-dot" /> Income
-        </span>
-        <span>
-          <i className="dot expense-dot" /> Expenses
-        </span>
-      </div>
-      <div className="chart" role="img" aria-label="Income and expenses for the last six months">
-        <div className="chart-gridlines">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-        {peak > 0 ? (
-          <div className="bars">
-            {flows.map((flow) => (
-              <div className="bar-pair" key={flow.month}>
-                <i className="expense-bar" style={{ height: `${(flow.expense / peak) * 100}%` }} title={`Expenses ${formatMoney(flow.expense)}`} />
-                <i className="income-bar" style={{ height: `${(flow.income / peak) * 100}%` }} title={`Income ${formatMoney(flow.income)}`} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="chart-empty">Income and expenses will chart here once you record transactions.</div>
-        )}
-      </div>
-      <div className="chart-labels">
-        {flows.map((flow) => (
-          <span key={flow.month}>{formatShortMonth(flow.month)}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function CategoryBreakdown({ categories }: { categories: CategoryTotal[] }) {
   if (categories.length === 0) {
     return <p className="card-note">No expenses recorded for this month yet.</p>;
   }
   return (
-    <div className="budget-list">
+    <div className="budget-list dashboard-category-list">
       {categories.slice(0, 5).map((category) => (
         <ProgressRow
           key={category.name}
@@ -267,7 +219,7 @@ function CategoryBreakdown({ categories }: { categories: CategoryTotal[] }) {
   );
 }
 
-export function OverviewView({
+export function DashboardView({
   accounts,
   transactions,
   summary,
@@ -293,7 +245,7 @@ export function OverviewView({
   return (
     <>
       <SectionHeading
-        title={userName ? `${userName}'s overview` : 'Monthly overview'}
+        title={userName ? `${userName}'s dashboard` : 'Monthly dashboard'}
         description={`Your summary for ${monthLabel}.`}
         action={
           <button className="text-button" type="button" onClick={() => onNavigate('analytics')}>
@@ -342,8 +294,8 @@ export function OverviewView({
         />
       </div>
 
-      <div className="content-grid">
-        <CashFlowCard flows={flows} />
+      <div className="content-grid dashboard-charts">
+        <DashboardCashFlow flows={flows} />
         <div className="surface-card">
           <div className="card-title-row">
             <div>
