@@ -30,9 +30,11 @@ test('IPO accounting on the complete application migration history', async (t) =
  const ipoPresentValueMigration = '20261123220000_ipo_present_total_value.sql';
  const ipoNotAllottedMigration = '20261124100000_ipo_not_allotted.sql';
  const financeReadsMigration = '20261124110000_scope_finance_reads.sql';
+ const savingsEmojiMigration = '20261126120000_savings_account_emojis.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
-   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration, financeReadsMigration].includes(name)) continue; // Test each upgrade with existing data.
+   allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration,
+   financeReadsMigration, savingsEmojiMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -775,6 +777,37 @@ test('IPO accounting on the complete application migration history', async (t) =
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: randomUUID() })]);
   await assert.rejects(list(owner), /session/i);
   await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+ });
+ await t.test('savings account emojis persist through edits and movements with owner-only access', async () => {
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(savingsEmojiMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+
+  const existing = (await db.query("SELECT emoji, balance FROM public.savings_accounts WHERE name='Emergency fund'")).rows[0];
+  assert.equal(existing.emoji, null);
+  assert.equal(Number(existing.balance), 225);
+  const id = await scalar(
+   "INSERT INTO public.savings_entries(name, amount, saved_on, storage_type, emoji) VALUES ('Holiday', 100, '2026-01-11', 'cash', $1) RETURNING id",
+   ['✈️']);
+  const read = () => scalar('SELECT emoji FROM public.savings_accounts WHERE id=$1', [id]);
+  assert.equal(await read(), '✈️');
+
+  const editedEmoji = '👨‍👩‍👧‍👦';
+  await db.query('UPDATE public.savings_entries SET emoji=$1 WHERE id=$2', [editedEmoji, id]);
+  assert.equal(await read(), editedEmoji);
+  const movement = await scalar("SELECT public.record_savings_movement($1,$2,'deposit',20,'')", [id, randomUUID()]);
+  assert.equal(movement.account.emoji, editedEmoji);
+  assert.equal(movement.account.balance, 120);
+
+  await assert.rejects(db.query('UPDATE public.savings_entries SET emoji=$1 WHERE id=$2', ['💰'.repeat(17), id]), /check constraint/);
+  assert.equal(await read(), editedEmoji);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: other, session_id: session })]);
+  assert.equal((await db.query('SELECT emoji FROM public.savings_accounts WHERE id=$1', [id])).rows.length, 0);
+  assert.equal((await db.query('UPDATE public.savings_entries SET emoji=NULL WHERE id=$1 RETURNING id', [id])).rows.length, 0);
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: owner, session_id: session })]);
+  assert.equal(await read(), editedEmoji);
+  await db.query('UPDATE public.savings_entries SET emoji=NULL WHERE id=$1', [id]);
+  assert.equal(await read(), null);
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');

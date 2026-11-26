@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Banknote, ChevronRight, Landmark, Pencil, PiggyBank, Plus, Trash2, Wallet } from 'lucide-react';
+import { ArrowLeft, Banknote, ChevronRight, Landmark, Pencil, PiggyBank, Plus, SmilePlus, Trash2, Wallet } from 'lucide-react';
+import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { DatePicker } from '@/components/date-picker';
 import { Select } from '@/components/select';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
@@ -57,6 +58,8 @@ function SavingsForm({ ownerId, entry, locations, onSave, onLocationSaved, onLoc
 }) {
   const [id] = useState(() => entry?.id ?? crypto.randomUUID());
   const [name, setName] = useState(entry?.name ?? '');
+  const [emoji, setEmoji] = useState(entry?.emoji ?? '');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [amount, setAmount] = useState(entry ? String(entry.amount) : '');
   const [date, setDate] = useState(entry?.saved_on ?? savingsDate());
   const [location, setLocation] = useState(entry?.location_id ?? entry?.storage_type ?? '');
@@ -83,7 +86,7 @@ function SavingsForm({ ownerId, entry, locations, onSave, onLocationSaved, onLoc
     setError('');
     try {
       await onSave(id, {
-        name: name.trim(), amount: Number(amountText), saved_on: date,
+        name: name.trim(), emoji: emoji.trim() || null, amount: Number(amountText), saved_on: date,
         storage_type: custom ? 'other' : location as SavingsLocation,
         storage_details: details.trim(), location_id: custom?.id ?? null,
       });
@@ -109,6 +112,14 @@ function SavingsForm({ ownerId, entry, locations, onSave, onLocationSaved, onLoc
           <label className="full-field">Name
             <input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="e.g. Emergency fund" autoFocus />
           </label>
+          <div className="full-field savings-emoji-field">
+            <button type="button" className="secondary-button" aria-expanded={showEmojiPicker}
+              disabled={saving} onClick={() => setShowEmojiPicker((open) => !open)}>
+              {emoji ? <span className="savings-emoji" aria-hidden="true">{emoji}</span> : <SmilePlus size={16} aria-hidden="true" />}
+              {showEmojiPicker ? 'Hide emoji picker' : emoji ? 'Change emoji' : 'Add emoji (optional)'}
+            </button>
+            {showEmojiPicker ? <CategoryEmojiPicker label="Savings account emoji" value={emoji} onChange={setEmoji} /> : null}
+          </div>
           <label>Opening amount (₹)
             <RupeeInput value={amount} onValueChange={setAmount} />
           </label>
@@ -237,7 +248,9 @@ export function SavingsView({ ownerId, onNotify }: { ownerId: string; onNotify: 
                   return (
                     <article className="account-row savings-account-row" key={entry.id}>
                       <button type="button" className="account-row savings-account-link" onClick={() => setSelectedId(entry.id)}>
-                        <span className="account-icon" aria-hidden="true"><Icon size={17} /></span>
+                        <span className="account-icon" aria-hidden="true">
+                          {entry.emoji ? <span className="savings-emoji">{entry.emoji}</span> : <Icon size={17} />}
+                        </span>
                         <span className="account-info">
                           <b>{entry.name}</b>
                           <small>{[locationLabel(entry), entry.storage_details, lastActivityDate.format(new Date(entry.last_activity_at))].filter(Boolean).join(' · ')}</small>

@@ -30,6 +30,22 @@
   margin-bottom: 12px;
 }
 
+.savings-emoji-field {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.savings-emoji-field > .secondary-button {
+  justify-self: start;
+}
+
+.savings-emoji {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .savings-history-heading,
 .savings-history-actions {
   display: flex;

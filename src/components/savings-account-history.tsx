@@ -103,7 +103,10 @@ export function SavingsAccountHistory({ account, location, onAccountChanged, onN
     <section className="surface-card" aria-labelledby="savings-account-title">
       <div className="card-title-row savings-history-heading">
         <div>
-          <h3 id="savings-account-title">{account.name}</h3>
+          <h3 id="savings-account-title">
+            {account.emoji ? <><span className="savings-emoji" aria-hidden="true">{account.emoji}</span>{' '}</> : null}
+            {account.name}
+          </h3>
           <p>{[location, account.storage_details].filter(Boolean).join(' · ')}</p>
         </div>
         <div className="savings-history-actions">

@@ -5,6 +5,7 @@ export const savingsLocations = { bank: 'Bank', cash: 'Cash', other: 'Other' } a
 export type SavingsLocation = keyof typeof savingsLocations;
 export type SavingsDraft = {
   name: string;
+  emoji: string | null;
   amount: number;
   saved_on: string;
   storage_type: SavingsLocation;
@@ -23,11 +24,14 @@ export type SavingsMovement = {
   recorded_at: string;
 };
 
-const accountFields = 'id, name, amount, saved_on, storage_type, storage_details, location_id, balance, last_activity_at';
+const accountFields = 'id, name, emoji, amount, saved_on, storage_type, storage_details, location_id, balance, last_activity_at';
 const movementFields = 'id, direction, amount, note, recorded_at';
 
 function savingsError(error: { message: string; code?: string }): never {
   if (error.code === '23505') throw new Error('That savings location already exists.');
+  if ((error.code === '42703' || error.code === 'PGRST204') && /\bemoji\b/.test(error.message)) {
+    throw new Error('Apply the Savings emoji SQL update in Supabase, then try again.');
+  }
   if (error.code === 'PGRST205' || error.code === 'PGRST202') {
     throw new Error('Apply the Savings SQL update in Supabase, then try again.');
   }

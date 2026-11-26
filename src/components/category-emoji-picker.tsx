@@ -30,7 +30,11 @@ const groupSearchTerms = [
   'objects tools', 'symbols signs', 'flags countries',
 ];
 
-export function CategoryEmojiPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+export function CategoryEmojiPicker({ value, onChange, label = 'Category emoji' }: {
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+}) {
   const [catalog, setCatalog] = useState<CategoryEmoji[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -77,7 +81,7 @@ export function CategoryEmojiPicker({ value, onChange }: { value: string; onChan
 
   return (
     <fieldset className="category-emoji-picker category-emoji-browser full-field">
-      <legend>Category emoji <span>(optional)</span></legend>
+      <legend>{label} <span>(optional)</span></legend>
       <div className="category-emoji-search">
         <Search size={16} aria-hidden="true" />
         <input
@@ -85,7 +89,7 @@ export function CategoryEmojiPicker({ value, onChange }: { value: string; onChan
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search emojis, e.g. food, running, money"
-          aria-label="Search all category emojis"
+          aria-label={`Search all ${label.toLowerCase()}s`}
           aria-controls={resultsId}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -130,7 +134,7 @@ export function CategoryEmojiPicker({ value, onChange }: { value: string; onChan
         ) : <p className="category-emoji-empty" role="status">No matching emojis. Try another word or paste your own below.</p>}
       </div>
       <div className="category-emoji-selection" aria-live="polite">
-        {value ? <><span className="category-emoji-preview" aria-hidden="true">{value}</span><span>{selectedName}</span><button type="button" aria-label="Remove category emoji" title="Remove emoji" onClick={() => onChange('')}><X size={15} /></button></> : <span>{query.trim() ? `${matches.length.toLocaleString()} matching emojis` : catalog.length ? `${catalog.length.toLocaleString()} emojis available. Choose a group or search.` : 'Choose an emoji or leave it empty.'}</span>}
+        {value ? <><span className="category-emoji-preview" aria-hidden="true">{value}</span><span>{selectedName}</span><button type="button" aria-label={`Remove ${label.toLowerCase()}`} title="Remove emoji" onClick={() => onChange('')}><X size={15} /></button></> : <span>{query.trim() ? `${matches.length.toLocaleString()} matching emojis` : catalog.length ? `${catalog.length.toLocaleString()} emojis available. Choose a group or search.` : 'Choose an emoji or leave it empty.'}</span>}
       </div>
       <label className="emoji-custom-input">
         Or paste your own emoji
@@ -138,7 +142,7 @@ export function CategoryEmojiPicker({ value, onChange }: { value: string; onChan
           value={value}
           onChange={(event) => onChange(Array.from(event.target.value).slice(0, 16).join(''))}
           placeholder="e.g. 🍽️"
-          aria-label="Custom category emoji"
+          aria-label={`Custom ${label.toLowerCase()}`}
         />
       </label>
     </fieldset>
