@@ -77,6 +77,8 @@ async function newPage(browser) {
   const rpcPaths = [];
   const policyViolations = [];
   let ledgerError = false;
+  let rejectSavingsWrite = false;
+  const savings = new Map();
   await page.addInitScript(() => {
     window.__financePolicyViolations = [];
     window.addEventListener('securitypolicyviolation', (event) => window.__financePolicyViolations.push(event.effectiveDirective));
@@ -104,6 +106,18 @@ async function newPage(browser) {
     }
     if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } });
     if (url.pathname.endsWith('/user')) return json(user);
+    if (url.pathname === '/rest/v1/savings_entries') {
+      if (rejectSavingsWrite) return json({ code: '42501', message: 'Fixture rejected the change' }, 403);
+      const input = request.postDataJSON();
+      const id = input.id ?? url.searchParams.get('id')?.slice(3);
+      assert.equal(input.user_id ?? url.searchParams.get('user_id'), input.id ? fixtureId : 'eq.' + fixtureId);
+      savings.set(id, { ...savings.get(id), ...input, id, balance: input.amount, last_activity_at: new Date().toISOString() });
+      return json({ id });
+    }
+    if (url.pathname === '/rest/v1/savings_accounts') {
+      const id = url.searchParams.get('id')?.slice(3);
+      return json(id ? savings.get(id) : [...savings.values()]);
+    }
     if (url.pathname.includes('/rest/v1/rpc/')) {
       const name = url.pathname.split('/').pop();
       rpcCalls.push(name);
@@ -122,7 +136,8 @@ async function newPage(browser) {
     }
     return json([], 200, { 'content-range': '*/0', 'access-control-expose-headers': 'content-range' });
   });
-  return { page, rpcCalls, rpcPaths, policyViolations, failLedger: () => { ledgerError = true; } };
+  return { page, rpcCalls, rpcPaths, policyViolations, failLedger: () => { ledgerError = true; },
+    setSavingsWriteRejected: (rejected) => { rejectSavingsWrite = rejected; } };
 }
 
 const waitForHeading = (page, name) => page.getByRole('heading', { name, exact: true }).first().waitFor();
@@ -219,4 +234,54 @@ test('a password recovery link opens the recovery form before the finance worksp
   await waitForHeading(page, 'Choose a new password');
   assert.ok(!rpcCalls.includes('get_finance_transaction_page'));
   assert.equal(new URL(page.url()).hash, '');
+});
+
+test('a savings account emoji can be added, changed, and removed across reloads', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const { page, setSavingsWriteRejected } = await newPage(browser);
+  await page.goto(origin + '/savings');
+  await signIn(page);
+  await page.getByRole('button', { name: 'New savings account' }).click();
+  const modal = page.getByRole('dialog');
+  await modal.getByLabel('Name', { exact: true }).fill('Holiday');
+  await modal.getByRole('button', { name: 'Add emoji (optional)', exact: true }).click();
+  await modal.getByRole('button', { name: 'Travel and flights', exact: true }).click();
+  await modal.getByRole('button', { name: 'Hide emoji picker' }).click();
+  await modal.getByLabel('Opening amount (₹)').fill('1500');
+  await modal.getByRole('combobox').click();
+  await page.getByRole('option', { name: 'Cash', exact: true }).click();
+  const save = modal.getByRole('button', { name: 'Save account' });
+  await save.click();
+  const account = page.getByRole('button', { name: /Holiday/ }).filter({ has: page.locator('.account-icon') });
+  await account.getByText('✈️').waitFor();
+  await page.reload();
+  await account.getByText('✈️').waitFor();
+  await account.click();
+  await page.getByRole('heading', { name: 'Holiday', exact: true }).getByText('✈️').waitFor();
+  await page.getByRole('button', { name: 'Back to savings' }).click();
+
+  const edit = page.getByRole('button', { name: 'Edit Holiday' });
+  await edit.click();
+  await modal.getByRole('button', { name: 'Change emoji' }).click();
+  const search = modal.getByRole('searchbox', { name: 'Search all savings account emojis' });
+  await search.fill('mountain');
+  await modal.getByRole('button', { name: 'mountain', exact: true }).click();
+  setSavingsWriteRejected(true);
+  await save.click();
+  await modal.getByRole('alert').getByText('This operation is unavailable for your account.').waitFor();
+  await account.getByText('✈️').waitFor();
+  setSavingsWriteRejected(false);
+  await save.click();
+  await modal.waitFor({ state: 'hidden' });
+  await page.reload();
+  await account.getByText('⛰️').waitFor();
+
+  await edit.click();
+  await modal.getByRole('button', { name: 'Change emoji' }).click();
+  await modal.getByRole('button', { name: 'Remove savings account emoji' }).click();
+  await save.click();
+  await modal.waitFor({ state: 'hidden' });
+  await page.reload();
+  await account.waitFor();
+  assert.equal(await account.locator('.savings-emoji').count(), 0);
 });
