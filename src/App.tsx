@@ -3,7 +3,7 @@ import { Link, useMatches, useNavigate } from 'react-router';
 import { IndianRupee, LogOut, Menu, MoreHorizontal, Plus, Settings, X } from 'lucide-react';
 import { signOut } from '@/lib/auth-api';
 import { AddAccountModal, AddTransactionModal, EditAccountModal } from '@/components/finance-forms';
-import { AccountsView, AnalyticsView, OverviewView, TransactionsView } from '@/components/finance-views';
+import { AccountsView, AnalyticsView, DashboardView, TransactionsView } from '@/components/finance-views';
 import { GoalsView, RecurringView, SettingsView } from '@/components/planning-views';
 import { SavingsView } from '@/components/savings-view';
 import { InvestmentsView } from '@/components/investments-view';
@@ -279,7 +279,7 @@ export default function App() {
     switch (activeView) {
       case 'overview':
         return (
-          <OverviewView
+          <DashboardView
             accounts={usableAccounts}
             transactions={sorted}
             summary={summary}

@@ -1,5 +1,5 @@
 import { Select } from '@/components/select';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -19,12 +19,11 @@ import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
 import { SavingsBalanceMetric } from '@/components/savings-view';
-import { AnalyticsTrend } from '@/components/analytics-trend';
+import { AnalyticsTrend, DashboardCashFlow } from '@/components/finance-charts';
 import type { FinanceActions } from '@/lib/finance-actions';
 import {
   formatDate,
   formatMoney,
-  formatShortMonth,
   formatTime,
   signedBalance,
   stateOf,
@@ -202,59 +201,12 @@ function TransactionTable({
   );
 }
 
-function CashFlowCard({ flows }: { flows: MonthlyFlow[] }) {
-  const peak = Math.max(0, ...flows.flatMap((flow) => [flow.income, flow.expense]));
-  return (
-    <div className="surface-card">
-      <div className="card-title-row">
-        <div>
-          <h3>Cash flow</h3>
-          <p>Income and expenses over the last six months</p>
-        </div>
-      </div>
-      <div className="legend">
-        <span>
-          <i className="dot income-dot" /> Income
-        </span>
-        <span>
-          <i className="dot expense-dot" /> Expenses
-        </span>
-      </div>
-      <div className="chart" role="img" aria-label="Income and expenses for the last six months">
-        <div className="chart-gridlines">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-        {peak > 0 ? (
-          <div className="bars">
-            {flows.map((flow) => (
-              <div className="bar-pair" key={flow.month}>
-                <i className="expense-bar" style={{ height: `${(flow.expense / peak) * 100}%` }} title={`Expenses ${formatMoney(flow.expense)}`} />
-                <i className="income-bar" style={{ height: `${(flow.income / peak) * 100}%` }} title={`Income ${formatMoney(flow.income)}`} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="chart-empty">Income and expenses will chart here once you record transactions.</div>
-        )}
-      </div>
-      <div className="chart-labels">
-        {flows.map((flow) => (
-          <span key={flow.month}>{formatShortMonth(flow.month)}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function CategoryBreakdown({ categories }: { categories: CategoryTotal[] }) {
   if (categories.length === 0) {
     return <p className="card-note">No expenses recorded for this month yet.</p>;
   }
   return (
-    <div className="budget-list">
+    <div className="budget-list dashboard-category-list">
       {categories.slice(0, 5).map((category) => (
         <ProgressRow
           key={category.name}
@@ -267,7 +219,7 @@ function CategoryBreakdown({ categories }: { categories: CategoryTotal[] }) {
   );
 }
 
-export function OverviewView({
+export function DashboardView({
   accounts,
   transactions,
   summary,
@@ -293,7 +245,7 @@ export function OverviewView({
   return (
     <>
       <SectionHeading
-        title={userName ? `${userName}'s overview` : 'Monthly overview'}
+        title={userName ? `${userName}'s dashboard` : 'Monthly dashboard'}
         description={`Your summary for ${monthLabel}.`}
         action={
           <button className="text-button" type="button" onClick={() => onNavigate('analytics')}>
@@ -342,8 +294,8 @@ export function OverviewView({
         />
       </div>
 
-      <div className="content-grid">
-        <CashFlowCard flows={flows} />
+      <div className="content-grid dashboard-charts">
+        <DashboardCashFlow flows={flows} />
         <div className="surface-card">
           <div className="card-title-row">
             <div>
@@ -754,16 +706,31 @@ function statementAccount(transaction: AnalyticsTransaction): string {
 }
 
 function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
-  const [page, setPage] = useState(0);
-  const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / transactionPageSize) - 1));
-  const start = safePage * transactionPageSize;
+  const [visibleCount, setVisibleCount] = useState(transactionPageSize);
+  const footer = useRef<HTMLParagraphElement>(null);
+  const end = Math.min(visibleCount, rows.length);
+  const hasMore = end < rows.length;
+
+  useEffect(() => {
+    const target = footer.current;
+    if (!target || !hasMore) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      observer.disconnect();
+      setVisibleCount(end + transactionPageSize);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [end, hasMore]);
+
   if (!rows.length) return <p className="card-note">No transactions match these filters.</p>;
 
   return <>
     <div className="finance-statement-scroll">
       <table className="finance-analytics-table">
         <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Source</th><th>Amount</th></tr></thead>
-        <tbody>{rows.slice(start, start + transactionPageSize).map((row) => (
+        <tbody>{rows.slice(0, end).map((row) => (
           <tr key={row.id}>
             <td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td>
             <td>{statementAccount(row)}</td><td>{analyticsSources[row.source]}</td><td>{formatMoney(row.amount)}</td>
@@ -771,7 +738,7 @@ function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
         ))}</tbody>
       </table>
     </div>
-    <TransactionPagination total={rows.length} page={safePage} onPage={setPage} />
+    {rows.length > transactionPageSize ? <p className="card-note" role="status" ref={footer}>Showing {end} of {rows.length}</p> : null}
   </>;
 }
 

@@ -198,7 +198,7 @@ test('production build opens protected routes, preserves history, clears sign-ou
   await waitForHeading(page, 'New Transaction');
   assert.ok(!rpcPaths.some(([name, path]) => name === 'get_finance_transaction_page' && path === '/mobile'));
   await page.getByRole('button', { name: 'Open dashboard' }).click();
-  await waitForHeading(page, 'Overview');
+  await waitForHeading(page, 'Dashboard');
 
   await page.goto(origin + '/athlete-hub');
   await page.getByRole('button', { name: 'Read screenshots', exact: true }).click();
@@ -297,7 +297,7 @@ test('Analytics offers only filters matching the other selections and selected d
   await checkMenu('Transaction type', ['Bills', 'Groceries', 'Leisure']);
 });
 
-test('Analytics lists investments and savings, charts accurate amounts, and exports all statement pages', { timeout: 120000 }, async (t) => {
+test('Analytics charts investments and savings and appends statement rows on scroll', { timeout: 120000 }, async (t) => {
   const { browser, origin } = await startFixture(t);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), 15, 12);
@@ -308,7 +308,7 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
       transaction_kind: 'income', amount: 2000, transaction_date: date(15) },
     { ...transaction, id: 'investment', name: 'Investment capital', transaction_type_id: 'capital', transaction_type_name: 'Investment capital',
       investment_id: 'investment-record', transaction_source: 'investment', amount: 1000, transaction_date: date(15) },
-    ...Array.from({ length: 26 }, (_, index) => ({
+    ...Array.from({ length: 52 }, (_, index) => ({
       ...transaction, id: 'older-' + index, name: 'Older expense ' + index, amount: 10, transaction_date: date(1, 1),
     })),
   ];
@@ -333,7 +333,7 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
   assert.ok((await statement.getByRole('row').filter({ hasText: 'Savings deposit · Top-up' }).textContent()).includes('Emergency fund (Savings)'));
 
   const plot = page.getByRole('region', { name: 'Transaction trend' });
-  assert.equal(await plot.locator('.analytics-chart-axis span').count(), 5);
+  assert.equal(await plot.locator('.finance-chart-axis span').count(), 5);
   const plotDays = plot.getByRole('button');
   assert.equal(await plotDays.count(), 15);
   const bucket = plotDays.last();
@@ -343,9 +343,9 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
   const layout = await bucket.evaluate((element) => {
     const bounds = (selector) => element.querySelector(selector).getBoundingClientRect();
     return {
-      incomeHeight: bounds('.analytics-series-income').height,
-      expenseHeight: bounds('.analytics-series-expense').height,
-      barsBottom: bounds('.analytics-chart-bar-group').bottom,
+      incomeHeight: bounds('.finance-chart-series-income').height,
+      expenseHeight: bounds('.finance-chart-series-expense').height,
+      barsBottom: bounds('.finance-chart-bar-group').bottom,
       labelTop: bounds('small').top,
     };
   });
@@ -353,30 +353,68 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
   assert.ok(layout.labelTop >= layout.barsBottom);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.ok(await plot.locator('.analytics-chart-scroll').evaluate((element) =>
-    element.scrollWidth > element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+  await plot.getByText(/Amounts grouped across up to \d+ days/).waitFor();
+  assert.ok(await plotDays.count() < 15);
+  assert.match(await plotDays.last().getAttribute('aria-label'), /Income ₹2,000, Expenses ₹1,000, Savings deposits ₹240, Savings withdrawals ₹80/);
+  assert.ok(await plot.locator('.finance-chart-plot').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
   await page.setViewportSize({ width: 1280, height: 720 });
+  await plot.getByText('Amounts by day', { exact: true }).waitFor();
 
   const readCount = rpcCalls.filter((name) => name === 'get_finance_transaction_page').length;
   await page.getByRole('button', { name: 'All time', exact: true }).click();
   await statement.getByRole('row').filter({ hasText: 'Savings opening balance' }).waitFor();
-  assert.equal(await statement.locator('tbody tr').count(), 25);
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  assert.equal(await statement.locator('tbody tr').count(), 6);
+  const shownRows = statement.locator('tbody tr');
+  const firstBatch = await shownRows.allTextContents();
+  assert.equal(firstBatch.length, 25);
+  assert.equal(await page.getByRole('button', { name: /^(Next|Previous)$/ }).count(), 0);
+
   const downloadReady = page.waitForEvent('download');
   await page.getByRole('button', { name: 'CSV', exact: true }).click();
   const csv = await readFile(await (await downloadReady).path(), 'utf8');
   assert.match(csv, /Savings opening balance/);
   assert.match(csv, /Savings withdrawal/);
   assert.match(csv, /Investment capital/);
-  assert.equal(csv.match(/Older expense /g).length, 26);
+  assert.equal(csv.match(/Older expense /g).length, 52);
+
+  const scrollToBottom = () => page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await scrollToBottom();
+  await page.getByText('Showing 50 of 57', { exact: true }).waitFor();
+  assert.deepEqual((await shownRows.allTextContents()).slice(0, 25), firstBatch);
+  await scrollToBottom();
+  await page.getByText('Showing 57 of 57', { exact: true }).waitFor();
+  const allRows = await shownRows.allTextContents();
+  assert.equal(allRows.length, 57);
+  assert.equal(new Set(allRows).size, 57);
+  assert.deepEqual(allRows.slice(0, 25), firstBatch);
 
   await page.getByRole('combobox', { name: 'Source', exact: true }).click();
   await page.getByRole('option', { name: 'Savings', exact: true }).click();
   assert.equal(await statement.locator('tbody tr').count(), 3);
   assert.equal(await plot.getByRole('list', { name: 'Chart legend' }).getByText('Income', { exact: true }).count(), 0);
+  await page.getByRole('combobox', { name: 'Source', exact: true }).click();
+  await page.getByRole('option', { name: 'All', exact: true }).click();
+  assert.equal(await shownRows.count(), 25);
   assert.equal(rpcCalls.filter((name) => name === 'get_finance_transaction_page').length, readCount);
 
+  await page.locator('.sidebar').getByRole('link', { name: 'Dashboard', exact: true }).click();
+  await waitForHeading(page, 'Dashboard');
+  assert.equal(new URL(page.url()).pathname, '/');
+  const cashFlow = page.getByRole('region', { name: 'Cash flow', exact: true });
+  const months = cashFlow.getByRole('button');
+  await months.last().waitFor();
+  assert.equal(await months.count(), 6);
+  assert.equal(await cashFlow.locator('.finance-chart-axis span').count(), 5);
+  assert.match(await months.last().getAttribute('aria-label'), /Income ₹2,000, Expenses ₹1,000$/);
+  assert.match(await months.nth(4).getAttribute('aria-label'), /Income ₹0, Expenses ₹520$/);
+  await months.nth(4).focus();
+  await cashFlow.locator('.finance-chart-details').getByText('₹520', { exact: true }).waitFor();
+  await page.setViewportSize({ width: 320, height: 844 });
+  assert.equal(await months.count(), 6);
+  assert.ok(await cashFlow.locator('.finance-chart-plot').evaluate((element) =>
+    element.scrollWidth <= element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(origin + '/transactions');
   await waitForHeading(page, 'Transactions');
   await page.getByText('Investment capital', { exact: true }).first().waitFor();

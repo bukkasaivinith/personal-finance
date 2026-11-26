@@ -12,12 +12,12 @@ function ProtectedPages() {
 function RouteMessage({ title, detail }: { title: string; detail: string }) {
   return <AuthShell>
     <div className="auth-heading"><h1>{title}</h1><p>{detail}</p></div>
-    <Link className="auth-button" to={viewPaths.overview}>Back to Overview</Link>
+    <Link className="auth-button" to={viewPaths.overview}>Back to Dashboard</Link>
   </AuthShell>;
 }
 
 const router = createBrowserRouter([{
-  errorElement: <RouteMessage title="Page unavailable" detail="Return to Overview or refresh to try again." />,
+  errorElement: <RouteMessage title="Page unavailable" detail="Return to Dashboard or refresh to try again." />,
   children: [
     {
       element: <ProtectedPages />,
@@ -28,7 +28,7 @@ const router = createBrowserRouter([{
     },
     {
       path: '*',
-      element: <RouteMessage title="Page not found" detail="Check the address or return to Overview." />,
+      element: <RouteMessage title="Page not found" detail="Check the address or return to Dashboard." />,
     },
   ],
 }]);
