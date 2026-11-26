@@ -1,5 +1,5 @@
 import { Select } from '@/components/select';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -754,16 +754,31 @@ function statementAccount(transaction: AnalyticsTransaction): string {
 }
 
 function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
-  const [page, setPage] = useState(0);
-  const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / transactionPageSize) - 1));
-  const start = safePage * transactionPageSize;
+  const [visibleCount, setVisibleCount] = useState(transactionPageSize);
+  const footer = useRef<HTMLParagraphElement>(null);
+  const end = Math.min(visibleCount, rows.length);
+  const hasMore = end < rows.length;
+
+  useEffect(() => {
+    const target = footer.current;
+    if (!target || !hasMore) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      observer.disconnect();
+      setVisibleCount(end + transactionPageSize);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [end, hasMore]);
+
   if (!rows.length) return <p className="card-note">No transactions match these filters.</p>;
 
   return <>
     <div className="finance-statement-scroll">
       <table className="finance-analytics-table">
         <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Source</th><th>Amount</th></tr></thead>
-        <tbody>{rows.slice(start, start + transactionPageSize).map((row) => (
+        <tbody>{rows.slice(0, end).map((row) => (
           <tr key={row.id}>
             <td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td>
             <td>{statementAccount(row)}</td><td>{analyticsSources[row.source]}</td><td>{formatMoney(row.amount)}</td>
@@ -771,7 +786,7 @@ function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
         ))}</tbody>
       </table>
     </div>
-    <TransactionPagination total={rows.length} page={safePage} onPage={setPage} />
+    {rows.length > transactionPageSize ? <p className="card-note" role="status" ref={footer}>Showing {end} of {rows.length}</p> : null}
   </>;
 }
 

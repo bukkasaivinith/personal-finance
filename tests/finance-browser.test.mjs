@@ -297,7 +297,7 @@ test('Analytics offers only filters matching the other selections and selected d
   await checkMenu('Transaction type', ['Bills', 'Groceries', 'Leisure']);
 });
 
-test('Analytics lists investments and savings, charts accurate amounts, and exports all statement pages', { timeout: 120000 }, async (t) => {
+test('Analytics charts investments and savings and appends statement rows on scroll', { timeout: 120000 }, async (t) => {
   const { browser, origin } = await startFixture(t);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), 15, 12);
@@ -308,7 +308,7 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
       transaction_kind: 'income', amount: 2000, transaction_date: date(15) },
     { ...transaction, id: 'investment', name: 'Investment capital', transaction_type_id: 'capital', transaction_type_name: 'Investment capital',
       investment_id: 'investment-record', transaction_source: 'investment', amount: 1000, transaction_date: date(15) },
-    ...Array.from({ length: 26 }, (_, index) => ({
+    ...Array.from({ length: 52 }, (_, index) => ({
       ...transaction, id: 'older-' + index, name: 'Older expense ' + index, amount: 10, transaction_date: date(1, 1),
     })),
   ];
@@ -360,21 +360,37 @@ test('Analytics lists investments and savings, charts accurate amounts, and expo
   const readCount = rpcCalls.filter((name) => name === 'get_finance_transaction_page').length;
   await page.getByRole('button', { name: 'All time', exact: true }).click();
   await statement.getByRole('row').filter({ hasText: 'Savings opening balance' }).waitFor();
-  assert.equal(await statement.locator('tbody tr').count(), 25);
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  assert.equal(await statement.locator('tbody tr').count(), 6);
+  const shownRows = statement.locator('tbody tr');
+  const firstBatch = await shownRows.allTextContents();
+  assert.equal(firstBatch.length, 25);
+  assert.equal(await page.getByRole('button', { name: /^(Next|Previous)$/ }).count(), 0);
+
   const downloadReady = page.waitForEvent('download');
   await page.getByRole('button', { name: 'CSV', exact: true }).click();
   const csv = await readFile(await (await downloadReady).path(), 'utf8');
   assert.match(csv, /Savings opening balance/);
   assert.match(csv, /Savings withdrawal/);
   assert.match(csv, /Investment capital/);
-  assert.equal(csv.match(/Older expense /g).length, 26);
+  assert.equal(csv.match(/Older expense /g).length, 52);
+
+  const scrollToBottom = () => page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await scrollToBottom();
+  await page.getByText('Showing 50 of 57', { exact: true }).waitFor();
+  assert.deepEqual((await shownRows.allTextContents()).slice(0, 25), firstBatch);
+  await scrollToBottom();
+  await page.getByText('Showing 57 of 57', { exact: true }).waitFor();
+  const allRows = await shownRows.allTextContents();
+  assert.equal(allRows.length, 57);
+  assert.equal(new Set(allRows).size, 57);
+  assert.deepEqual(allRows.slice(0, 25), firstBatch);
 
   await page.getByRole('combobox', { name: 'Source', exact: true }).click();
   await page.getByRole('option', { name: 'Savings', exact: true }).click();
   assert.equal(await statement.locator('tbody tr').count(), 3);
   assert.equal(await plot.getByRole('list', { name: 'Chart legend' }).getByText('Income', { exact: true }).count(), 0);
+  await page.getByRole('combobox', { name: 'Source', exact: true }).click();
+  await page.getByRole('option', { name: 'All', exact: true }).click();
+  assert.equal(await shownRows.count(), 25);
   assert.equal(rpcCalls.filter((name) => name === 'get_finance_transaction_page').length, readCount);
 
   await page.goto(origin + '/transactions');
