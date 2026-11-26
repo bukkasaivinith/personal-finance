@@ -71,14 +71,14 @@ async function startFixture(t) {
   return { browser, origin: 'http://127.0.0.1:' + server.address().port };
 }
 
-async function newPage(browser, transactions = [transaction]) {
+async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }) {
   const page = await browser.newPage({ serviceWorkers: 'allow' });
   const rpcCalls = [];
   const rpcPaths = [];
   const policyViolations = [];
   let ledgerError = false;
   let rejectSavingsWrite = false;
-  const savings = new Map();
+  const savings = new Map(savingsActivity.openings.map((entry) => [entry.id, entry]));
   await page.addInitScript(() => {
     window.__financePolicyViolations = [];
     window.addEventListener('securitypolicyviolation', (event) => window.__financePolicyViolations.push(event.effectiveDirective));
@@ -106,7 +106,15 @@ async function newPage(browser, transactions = [transaction]) {
     }
     if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } });
     if (url.pathname.endsWith('/user')) return json(user);
+    const savingsPage = (rows) => json(rows, 200, {
+      'content-range': rows.length ? `0-${rows.length - 1}/${rows.length}` : '*/0',
+      'access-control-expose-headers': 'content-range',
+    });
     if (url.pathname === '/rest/v1/savings_entries') {
+      if (request.method() === 'GET') {
+        assert.equal(url.searchParams.get('user_id'), 'eq.' + fixtureId);
+        return savingsPage([...savings.values()]);
+      }
       if (rejectSavingsWrite) return json({ code: '42501', message: 'Fixture rejected the change' }, 403);
       const input = request.postDataJSON();
       const id = input.id ?? url.searchParams.get('id')?.slice(3);
@@ -117,6 +125,11 @@ async function newPage(browser, transactions = [transaction]) {
     if (url.pathname === '/rest/v1/savings_accounts') {
       const id = url.searchParams.get('id')?.slice(3);
       return json(id ? savings.get(id) : [...savings.values()]);
+    }
+    if (url.pathname === '/rest/v1/savings_movements' && url.searchParams.has('user_id')) {
+      assert.equal(url.searchParams.get('user_id'), 'eq.' + fixtureId);
+      assert.ok(url.searchParams.get('select').includes('savings_entries!inner(name)'));
+      return savingsPage(savingsActivity.movements);
     }
     if (url.pathname.includes('/rest/v1/rpc/')) {
       const name = url.pathname.split('/').pop();
@@ -282,6 +295,92 @@ test('Analytics offers only filters matching the other selections and selected d
   await checkMenu('Category', ['Food', 'Household']);
   await checkMenu('Account', ['Bank', 'Cash'], 'All');
   await checkMenu('Transaction type', ['Bills', 'Groceries', 'Leisure']);
+});
+
+test('Analytics lists investments and savings, charts accurate amounts, and exports all statement pages', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), 15, 12);
+  if (today > now) today.setMonth(today.getMonth() - 1);
+  const date = (day, monthsAgo = 0) => new Date(today.getFullYear(), today.getMonth() - monthsAgo, day).toLocaleDateString('sv-SE');
+  const ledger = [
+    { ...transaction, id: 'salary', name: 'Salary', transaction_type_id: 'wages', transaction_type_name: 'Wages',
+      transaction_kind: 'income', amount: 2000, transaction_date: date(15) },
+    { ...transaction, id: 'investment', name: 'Investment capital', transaction_type_id: 'capital', transaction_type_name: 'Investment capital',
+      investment_id: 'investment-record', transaction_source: 'investment', amount: 1000, transaction_date: date(15) },
+    ...Array.from({ length: 26 }, (_, index) => ({
+      ...transaction, id: 'older-' + index, name: 'Older expense ' + index, amount: 10, transaction_date: date(1, 1),
+    })),
+  ];
+  const savingsId = 'savings-fund';
+  const savingsAccount = { id: savingsId, name: 'Emergency fund', amount: 500, saved_on: date(10, 1) };
+  const { page, rpcCalls } = await newPage(browser, ledger, {
+    openings: [savingsAccount],
+    movements: [
+      { id: 'deposit', savings_entry_id: savingsId, direction: 'deposit', amount: 240, note: 'Top-up',
+        recorded_at: date(14) + 'T20:30:00Z', savings_entries: { name: savingsAccount.name } },
+      { id: 'withdrawal', savings_entry_id: savingsId, direction: 'withdrawal', amount: 80, note: '',
+        recorded_at: date(15) + 'T04:00:00Z', savings_entries: { name: savingsAccount.name } },
+    ],
+  });
+  await page.clock.setFixedTime(today);
+  await page.goto(origin + '/analytics');
+  await signIn(page);
+  const statement = page.locator('.finance-analytics-table');
+  await statement.getByRole('row').filter({ hasText: 'Savings deposit · Top-up' }).waitFor();
+  assert.equal(await statement.locator('tbody tr').count(), 4);
+  assert.ok((await statement.getByRole('row').filter({ hasText: 'Investment capital' }).textContent()).includes('Investments'));
+  assert.ok((await statement.getByRole('row').filter({ hasText: 'Savings deposit · Top-up' }).textContent()).includes('Emergency fund (Savings)'));
+
+  const plot = page.getByRole('region', { name: 'Transaction trend' });
+  assert.equal(await plot.locator('.analytics-chart-axis span').count(), 5);
+  const plotDays = plot.getByRole('button');
+  assert.equal(await plotDays.count(), 15);
+  const bucket = plotDays.last();
+  const tooltip = await bucket.getAttribute('aria-label');
+  assert.match(tooltip, /Income ₹2,000, Expenses ₹1,000, Savings deposits ₹240, Savings withdrawals ₹80/);
+  assert.match(await plotDays.nth(13).getAttribute('aria-label'), /Income ₹0, Expenses ₹0, Savings deposits ₹0, Savings withdrawals ₹0/);
+  const layout = await bucket.evaluate((element) => {
+    const bounds = (selector) => element.querySelector(selector).getBoundingClientRect();
+    return {
+      incomeHeight: bounds('.analytics-series-income').height,
+      expenseHeight: bounds('.analytics-series-expense').height,
+      barsBottom: bounds('.analytics-chart-bar-group').bottom,
+      labelTop: bounds('small').top,
+    };
+  });
+  assert.ok(Math.abs(layout.incomeHeight - layout.expenseHeight * 2) < 1);
+  assert.ok(layout.labelTop >= layout.barsBottom);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await plot.locator('.analytics-chart-scroll').evaluate((element) =>
+    element.scrollWidth > element.clientWidth && element.getBoundingClientRect().right <= window.innerWidth));
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  const readCount = rpcCalls.filter((name) => name === 'get_finance_transaction_page').length;
+  await page.getByRole('button', { name: 'All time', exact: true }).click();
+  await statement.getByRole('row').filter({ hasText: 'Savings opening balance' }).waitFor();
+  assert.equal(await statement.locator('tbody tr').count(), 25);
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  assert.equal(await statement.locator('tbody tr').count(), 6);
+  const downloadReady = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'CSV', exact: true }).click();
+  const csv = await readFile(await (await downloadReady).path(), 'utf8');
+  assert.match(csv, /Savings opening balance/);
+  assert.match(csv, /Savings withdrawal/);
+  assert.match(csv, /Investment capital/);
+  assert.equal(csv.match(/Older expense /g).length, 26);
+
+  await page.getByRole('combobox', { name: 'Source', exact: true }).click();
+  await page.getByRole('option', { name: 'Savings', exact: true }).click();
+  assert.equal(await statement.locator('tbody tr').count(), 3);
+  assert.equal(await plot.getByRole('list', { name: 'Chart legend' }).getByText('Income', { exact: true }).count(), 0);
+  assert.equal(rpcCalls.filter((name) => name === 'get_finance_transaction_page').length, readCount);
+
+  await page.goto(origin + '/transactions');
+  await waitForHeading(page, 'Transactions');
+  await page.getByText('Investment capital', { exact: true }).first().waitFor();
+  assert.equal(await page.getByText('Savings withdrawal', { exact: true }).count(), 0);
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

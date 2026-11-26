@@ -2,6 +2,7 @@ import {
   type Account,
   type ActivityAction,
   type ActivityEvent,
+  type AnalyticsTransaction,
   type Budget,
   type CategoryOption,
   type FinanceData,
@@ -125,7 +126,7 @@ function statusOf(row: StatusRow) {
   return { isActive: row.is_active, deletedAt: row.deleted_at };
 }
 
-export type FinanceScope = 'forms' | 'ledger' | 'recurring' | 'investments' | 'audit' | 'setup';
+export type FinanceScope = 'forms' | 'ledger' | 'analytics' | 'recurring' | 'investments' | 'audit' | 'setup';
 
 const pageSize = 1000;
 
@@ -180,6 +181,53 @@ async function readRows(enabled: boolean, request: RowPage, signal?: AbortSignal
   }
 }
 
+type SavingsOpeningRow = { id: string; name: string; amount: number; saved_on: string };
+type SavingsMovementRow = {
+  id: string;
+  savings_entry_id: string;
+  direction: 'deposit' | 'withdrawal';
+  amount: number;
+  note: string;
+  recorded_at: string;
+  savings_entries: { name: string };
+};
+
+const savingsActivityLabels = { opening: 'Savings opening balance', deposit: 'Savings deposit', withdrawal: 'Savings withdrawal' };
+const savingsActivityDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' });
+const savingsActivityTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', timeStyle: 'medium' });
+
+async function loadAnalyticsSavingsActivity(ownerId: string, signal?: AbortSignal): Promise<AnalyticsTransaction[]> {
+  const [openings, movements] = await Promise.all([
+    readRows(true, supabase.from('savings_entries').select('id, name, amount, saved_on', { count: 'exact' })
+      .eq('user_id', ownerId).order('id'), signal) as Promise<SavingsOpeningRow[]>,
+    readRows(true, supabase.from('savings_movements')
+      .select('id, savings_entry_id, direction, amount, note, recorded_at, savings_entries!inner(name)', { count: 'exact' })
+      .eq('user_id', ownerId).order('id'), signal) as Promise<SavingsMovementRow[]>,
+  ]);
+
+  function entry(id: string, account: Pick<SavingsOpeningRow, 'id' | 'name'>, activity: keyof typeof savingsActivityLabels,
+    amount: number, date: string, time: string | null, note = ''): AnalyticsTransaction {
+    const typeName = savingsActivityLabels[activity];
+    return {
+      id: `savings-${activity}:${id}`,
+      name: [typeName, note].filter(Boolean).join(' · '),
+      typeId: `savings:${activity}`, typeName, categoryId: 'savings', categoryName: 'Savings',
+      kind: 'savings', source: 'savings', savingsActivity: activity,
+      amount: Number(amount), date, time, accountId: `savings:${account.id}`, accountName: `${account.name} (Savings)`,
+      toAccountId: null, toAccountName: null,
+    };
+  }
+
+  return [
+    ...openings.map((opening) => entry(opening.id, opening, 'opening', opening.amount, opening.saved_on, null)),
+    ...movements.map((movement) => {
+      const recorded = new Date(movement.recorded_at);
+      return entry(movement.id, { id: movement.savings_entry_id, name: movement.savings_entries.name }, movement.direction,
+        movement.amount, savingsActivityDate.format(recorded), savingsActivityTime.format(recorded), movement.note);
+    }),
+  ];
+}
+
 type LegacyIpoLinks = {
   accounts?: { id: string; custody: string | null }[];
   investments?: { id: string }[];
@@ -219,7 +267,8 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
     withdrawalsQuery.eq('investment_id', investmentId);
   }
   if (investmentTypeId) investmentTypesQuery.eq('id', investmentTypeId);
-  const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult, investmentTypeResult, withdrawalResult, ipoLinks, transactionUsage] = await Promise.all([
+  const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult,
+    investmentTypeResult, withdrawalResult, ipoLinks, transactionUsage, savingsActivity] = await Promise.all([
     readRows(true, supabase.from('transaction_types').select('id, name, kind, is_active, deleted_at', { count: 'exact' })
       .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
     readRows(true, supabase.from('categories').select('id, name, emoji, parent_id, is_active, deleted_at', { count: 'exact' })
@@ -228,7 +277,7 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
       .eq('user_id', workspaceOwnerId).order('category_id').order('transaction_type_id'), signal),
     readRows(true, supabase.from('accounts').select('id, name, description, opening_balance, opening_balance_date, is_liability, is_active, deleted_at', { count: 'exact' })
       .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
-    scope === 'ledger' || scope === 'recurring' || recurringId || recordId('transactions')
+    scope === 'ledger' || scope === 'analytics' || scope === 'recurring' || recurringId || recordId('transactions')
       ? loadWorkspaceTransactions(workspaceOwnerId, signal, scope === 'recurring' || Boolean(recurringId), lookup)
       : [],
     readRows(Boolean(budgetId), budgetsQuery, signal),
@@ -238,6 +287,7 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
     readRows(scope === 'investments' || Boolean(investmentId), withdrawalsQuery, signal),
     loadLegacyIpoLinks(workspaceOwnerId, signal),
     scope === 'setup' ? loadTransactionUsage(workspaceOwnerId, signal) : undefined,
+    scope === 'analytics' ? loadAnalyticsSavingsActivity(workspaceOwnerId, signal) : undefined,
   ]);
 
   const typeRows = typeResult as TransactionTypeRow[];
@@ -387,7 +437,8 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
     .filter((row) => !legacyInvestmentTypeIds.has(row.id) || regularInvestmentTypeIds.has(row.id))
     .map((row) => ({ id: row.id, name: row.name }));
 
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes, transactionUsage };
+  const analyticsTransactions = savingsActivity && [...transactions, ...savingsActivity];
+  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes, transactionUsage, analyticsTransactions };
 }
 
 export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {
