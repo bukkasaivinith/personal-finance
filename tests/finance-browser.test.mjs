@@ -71,7 +71,7 @@ async function startFixture(t) {
   return { browser, origin: 'http://127.0.0.1:' + server.address().port };
 }
 
-async function newPage(browser) {
+async function newPage(browser, transactions = [transaction]) {
   const page = await browser.newPage({ serviceWorkers: 'allow' });
   const rpcCalls = [];
   const rpcPaths = [];
@@ -127,7 +127,7 @@ async function newPage(browser) {
       if (name === 'get_finance_transaction_page') {
         if (ledgerError) return json({ code: 'XX000', message: 'PRIVATE_FIXTURE_DATABASE_DIAGNOSTIC' }, 500);
         assert.equal(request.headers().authorization, 'Bearer ' + token);
-        return json(request.postDataJSON()?.p_after_id ? [] : [transaction]);
+        return json(request.postDataJSON()?.p_after_id ? [] : transactions);
       }
       if (name === 'get_finance_transaction_usage') return json({ types: { [fixtureId]: 1 }, categories: {} });
       if (name === 'get_ipo_portfolio') return json({ applications: [], demat_accounts: [], allotment_date_supported: true });
@@ -224,6 +224,64 @@ test('production build opens protected routes, preserves history, clears sign-ou
   assert.equal((await fetch(origin + '/sw.js')).status, 200);
   assert.deepEqual(await page.evaluate(() => window.__financePolicyViolations), []);
   assert.deepEqual(policyViolations, []);
+});
+
+test('Analytics offers only filters matching the other selections and selected dates', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), 15, 12);
+  if (today > now) today.setMonth(today.getMonth() - 1);
+  const date = (day) => new Date(today.getFullYear(), today.getMonth(), day).toLocaleDateString('sv-SE');
+  const bank = { account_id: 'bank', account_name: 'Bank' };
+  const cash = { account_id: 'cash', account_name: 'Cash' };
+  const rows = [
+    { ...bank, name: 'Grocery purchase', transaction_type_id: 'groceries', transaction_type_name: 'Groceries', category_id: 'food', category_name: 'Food', transaction_date: date(15) },
+    { ...bank, name: 'Electricity payment', transaction_type_id: 'bills', transaction_type_name: 'Bills', category_id: 'household', category_name: 'Household', transaction_date: date(14) },
+    { ...cash, name: 'Cinema ticket', transaction_type_id: 'leisure', transaction_type_name: 'Leisure', category_id: 'movies', category_name: 'Movies', transaction_date: date(15) },
+    { ...cash, name: 'Cash wage', transaction_type_id: 'wages', transaction_type_name: 'Wages', transaction_kind: 'income', transaction_date: date(15) },
+    { ...cash, name: 'Cash deposit', transaction_type_id: 'deposit', transaction_type_name: 'Deposit', transaction_kind: 'transfer', to_account_id: bank.account_id, to_account_name: bank.account_name, transaction_date: date(15) },
+  ].map((row, index) => ({ ...transaction, ...row, id: 'analytics-' + index }));
+  const { page } = await newPage(browser, rows);
+  await page.clock.setFixedTime(today);
+  await page.goto(origin + '/analytics');
+  await signIn(page);
+
+  const filter = (name) => page.getByRole('combobox', { name, exact: true });
+  const menuOptions = () => page.getByRole('listbox').getByRole('option');
+  async function checkMenu(name, expected, choice) {
+    const select = filter(name);
+    await select.click();
+    assert.deepEqual(await menuOptions().allTextContents(), ['All', ...expected]);
+    if (choice) await page.getByRole('option', { name: choice, exact: true }).click();
+    else await select.press('Escape');
+  }
+
+  await checkMenu('Account', ['Bank', 'Cash'], 'Bank');
+  await checkMenu('Transaction type', ['Bills', 'Deposit', 'Groceries']);
+  await checkMenu('Category', ['Food', 'Household', 'Uncategorised']);
+  await checkMenu('Classification', ['Expense', 'Transfer'], 'Expense');
+  await checkMenu('Transaction type', ['Bills', 'Groceries']);
+  await checkMenu('Category', ['Food', 'Household'], 'Household');
+  await checkMenu('Account', ['Bank']);
+  await checkMenu('Transaction type', ['Bills'], 'Bills');
+  await checkMenu('Classification', ['Expense']);
+  const statement = page.locator('.finance-analytics-table');
+  await statement.getByText('Electricity payment').waitFor();
+  assert.equal(await statement.locator('tbody tr').count(), 1);
+
+  await page.getByRole('button', { name: 'Daily', exact: true }).click();
+  assert.equal(await filter('Account').textContent(), 'Bank');
+  assert.equal(await filter('Transaction type').textContent(), 'All');
+  assert.equal(await filter('Category').textContent(), 'All');
+  assert.equal(await filter('Classification').textContent(), 'Expense');
+  await checkMenu('Transaction type', ['Groceries']);
+  await statement.getByText('Grocery purchase').waitFor();
+  assert.equal(await statement.locator('tbody tr').count(), 1);
+
+  await page.getByRole('button', { name: 'Monthly', exact: true }).click();
+  await checkMenu('Category', ['Food', 'Household']);
+  await checkMenu('Account', ['Bank', 'Cash'], 'All');
+  await checkMenu('Transaction type', ['Bills', 'Groceries', 'Leisure']);
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

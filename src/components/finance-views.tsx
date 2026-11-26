@@ -36,11 +36,15 @@ import {
 } from '@/lib/finance';
 import type { View } from '@/lib/navigation';
 import {
+  analyticsFilterOptions,
   analyzeTransactions,
+  emptyAnalyticsFilters,
   emptyTransactionAnalysisFilters,
+  reconcileAnalyticsFilters,
   transactionAnalysisOptions,
   transactionAnalysisRange,
   type AnalysisPeriod,
+  type AnalyticsFilters,
   type TransactionAnalysisFilters,
 } from '@/lib/transaction-analysis';
 import { type TableReport, downloadReport } from '@/lib/report-export';
@@ -740,24 +744,31 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
   const monthly = rangeForPreset('monthly');
   const [customFrom, setCustomFrom] = useState(monthly.from);
   const [customTo, setCustomTo] = useState(monthly.to);
-  const [filters, setFilters] = useState({ account: '', category: '', typeId: '', kind: 'all' as 'all' | TransactionKind });
+  const [selectedFilters, setFilters] = useState(emptyAnalyticsFilters);
   const [compare, setCompare] = useState(false);
   const [exportError, setExportError] = useState('');
   const [exporting, setExporting] = useState(false);
   const activeRange = range === 'custom' ? { from: customFrom, to: customTo } : rangeForPreset(range);
   const { from, to } = activeRange;
-  const prepared = useMemo(() => filters.typeId ? transactions.filter((transaction) => transaction.typeId === filters.typeId) : transactions, [filters.typeId, transactions]);
-  const options = useMemo(() => transactionAnalysisOptions(transactions), [transactions]);
-  const types = useMemo(() => [...new Map(transactions.map((transaction) => [transaction.typeId, transaction.typeName])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [transactions]);
-  const analytics = useMemo(() => analyzeTransactions(prepared, { ...emptyTransactionAnalysisFilters, ...filters, from, to }), [prepared, filters, from, to]);
+  const validRange = Boolean(from && to && from <= to);
+  const periodTransactions = useMemo(() => validRange
+    ? analyzeTransactions(transactions, { ...emptyTransactionAnalysisFilters, from, to }).matches
+    : [], [transactions, validRange, from, to]);
+  const filters = useMemo(() => reconcileAnalyticsFilters(periodTransactions, selectedFilters), [periodTransactions, selectedFilters]);
+  if (validRange && filters !== selectedFilters) setFilters(filters);
+
+  const options = useMemo(() => analyticsFilterOptions(periodTransactions, filters), [periodTransactions, filters]);
+  const analytics = useMemo(() => analyzeTransactions(periodTransactions, { ...emptyTransactionAnalysisFilters, ...filters, from, to }),
+    [periodTransactions, filters, from, to]);
   const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 || 1);
   const months = Math.max(1, ((Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1) || 1);
   const previousRange = useMemo(() => {
     const anchor = new Date(from + 'T12:00:00');
     return { from: dateOffset(anchor, -days), to: dateOffset(anchor, -1) };
   }, [from, days]);
-  const previous = useMemo(() => compare && !analytics.error && from && to ? analyzeTransactions(prepared, { ...emptyTransactionAnalysisFilters, ...filters, ...previousRange }) : null,
-    [compare, analytics.error, from, to, prepared, filters, previousRange]);
+  const previous = useMemo(() => compare && validRange
+    ? analyzeTransactions(transactions, { ...emptyTransactionAnalysisFilters, ...filters, ...previousRange }) : null,
+    [compare, validRange, transactions, filters, previousRange]);
   const rollups = useMemo(() => {
     const categories = new Map<string, { name: string; amount: number }>();
     const types = new Map<string, { name: string; amount: number }>();
@@ -790,9 +801,9 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
   const exportStatement = async (format: 'csv' | 'xlsx' | 'pdf') => {
     setExporting(true);
     setExportError('');
-    const account = options.accounts.find(([id]) => id === filters.account)?.[1] ?? 'All accounts';
-    const category = options.categories.find(([id]) => id === filters.category)?.[1] ?? 'All categories';
-    const type = types.find(([id]) => id === filters.typeId)?.[1] ?? 'All types';
+    const account = options.account.find(([id]) => id === filters.account)?.[1] ?? 'All accounts';
+    const category = options.category.find(([id]) => id === filters.category)?.[1] ?? 'All categories';
+    const type = options.typeId.find(([id]) => id === filters.typeId)?.[1] ?? 'All types';
     const report: TableReport = {
       title: 'Financial transaction statement', filename: 'transactions-' + from + '-to-' + to,
       summary: [
@@ -819,9 +830,13 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
       {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
       <p>{formatDate(from)} – {formatDate(to)}</p>
       <div className="form-grid finance-analytics-filters">
-        {([['account', 'Account', options.accounts], ['typeId', 'Transaction type', types], ['category', 'Category', options.categories]] as const).map(([key, label, values]) =>
-          <label key={key}>{label}<Select value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}><option value="">All</option>{values.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</Select></label>)}
-        <label>Classification<Select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value as typeof filters.kind })}><option value="all">All</option><option value="income">Income</option><option value="expense">Expense</option><option value="transfer">Transfer</option></Select></label>
+        {([['account', 'Account', options.account], ['typeId', 'Transaction type', options.typeId], ['category', 'Category', options.category]] as const).map(([key, label, values]) =>
+          <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
+            <option value="">All</option>{values.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </Select></label>)}
+        <label>Classification<Select aria-label="Classification" value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value as AnalyticsFilters['kind'] })}>
+          <option value="all">All</option>{options.kind.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </Select></label>
       </div>
       <label className="recognition-check"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} /> Compare with the previous period of equal length</label>
     </div>
