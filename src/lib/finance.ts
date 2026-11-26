@@ -73,6 +73,14 @@ export type TransactionDraft = {
   toAccountId: string | null;
 };
 
+export type AnalyticsTransaction = Pick<Transaction,
+  'id' | 'name' | 'typeId' | 'typeName' | 'categoryId' | 'categoryName' | 'amount' | 'date' |
+  'time' | 'accountId' | 'accountName' | 'toAccountId' | 'toAccountName'
+> & (
+  { kind: Transaction['kind']; source: Transaction['source'] } |
+  { kind: 'savings'; source: 'savings'; savingsActivity: 'opening' | 'deposit' | 'withdrawal' }
+);
+
 export type Budget = {
   id: string;
   categoryId: string;
@@ -178,6 +186,7 @@ export type TransactionUsage = { types: Record<string, number>; categories: Reco
 
 export type FinanceData = {
   transactionUsage?: TransactionUsage;
+  analyticsTransactions?: AnalyticsTransaction[];
   transactionTypes: TransactionTypeOption[];
   categories: CategoryOption[];
   accounts: Account[];
@@ -242,10 +251,11 @@ export function formatShortMonth(month: string): string {
   return new Intl.DateTimeFormat('en-IN', { month: 'short' }).format(new Date(`${month}-01T12:00:00`));
 }
 
+const dateFormat = new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+const moneyNumberFormat = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+
 export function formatDate(date: string): string {
-  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(
-    new Date(`${date}T12:00:00`),
-  );
+  return dateFormat.format(new Date(`${date}T12:00:00`));
 }
 
 export function formatTime(time: string): string {
@@ -255,7 +265,7 @@ export function formatTime(time: string): string {
 
 export function formatMoney(amount: number): string {
   const sign = amount < 0 ? '−' : '';
-  return `${sign}₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(amount))}`;
+  return `${sign}₹${moneyNumberFormat.format(Math.abs(amount))}`;
 }
 
 export function sortByDate(transactions: Transaction[]): Transaction[] {

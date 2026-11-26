@@ -19,6 +19,7 @@ import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ProgressRow, SectionHeading } from '@/components/ui';
 import { ItemActions, StatusTag } from '@/components/item-actions';
 import { SavingsBalanceMetric } from '@/components/savings-view';
+import { AnalyticsTrend } from '@/components/analytics-trend';
 import type { FinanceActions } from '@/lib/finance-actions';
 import {
   formatDate,
@@ -28,6 +29,7 @@ import {
   signedBalance,
   stateOf,
   type Account,
+  type AnalyticsTransaction,
   type CategoryTotal,
   type MonthSummary,
   type MonthlyFlow,
@@ -36,7 +38,9 @@ import {
 } from '@/lib/finance';
 import type { View } from '@/lib/navigation';
 import {
+  analyticsClassifications,
   analyticsFilterOptions,
+  analyticsSources,
   analyzeTransactions,
   emptyAnalyticsFilters,
   emptyTransactionAnalysisFilters,
@@ -404,6 +408,19 @@ export function OverviewView({
 
 const transactionPageSize = 25;
 
+function TransactionPagination({ total, page, onPage }: { total: number; page: number; onPage: (page: number) => void }) {
+  if (total <= transactionPageSize) return null;
+  const start = page * transactionPageSize;
+  const end = Math.min(start + transactionPageSize, total);
+  return <div className="table-pagination" aria-label="Transaction pages">
+    <span>Showing {start + 1}–{end} of {total}</span>
+    <div>
+      <button className="secondary-button" type="button" onClick={() => onPage(page - 1)} disabled={page === 0}>Previous</button>
+      <button className="secondary-button" type="button" onClick={() => onPage(page + 1)} disabled={end === total}>Next</button>
+    </div>
+  </div>;
+}
+
 function PagedTransactionTable({
   transactions,
   page,
@@ -424,15 +441,7 @@ function PagedTransactionTable({
   return (
     <>
       <TransactionTable transactions={transactions.slice(start, end)} onEdit={onEdit} onDelete={onDelete} />
-      {pageCount > 1 ? (
-        <div className="table-pagination" aria-label="Transaction pages">
-          <span>Showing {start + 1}–{end} of {transactions.length}</span>
-          <div>
-            <button className="secondary-button" type="button" onClick={() => onPage(safePage - 1)} disabled={safePage === 0}>Previous</button>
-            <button className="secondary-button" type="button" onClick={() => onPage(safePage + 1)} disabled={safePage >= pageCount - 1}>Next</button>
-          </div>
-        </div>
-      ) : null}
+      <TransactionPagination total={transactions.length} page={safePage} onPage={onPage} />
     </>
   );
 }
@@ -719,7 +728,8 @@ export function AccountsView({
   );
 }
 
-type AnalyticsRange = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
+const analyticsPeriods = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly', all: 'All time', custom: 'Custom' } as const;
+type AnalyticsRange = keyof typeof analyticsPeriods;
 
 function dateOffset(date: Date, days: number): string {
   const copy = new Date(date);
@@ -727,7 +737,7 @@ function dateOffset(date: Date, days: number): string {
   return `${copy.getFullYear()}-${String(copy.getMonth() + 1).padStart(2, '0')}-${String(copy.getDate()).padStart(2, '0')}`;
 }
 
-function rangeForPreset(range: Exclude<AnalyticsRange, 'custom'>) {
+function rangeForPreset(range: Exclude<AnalyticsRange, 'custom' | 'all'>) {
   const now = new Date();
   const end = dateOffset(now, 0);
   if (range === 'yearly') return { from: end.slice(0, 4) + '-01-01', to: end };
@@ -739,7 +749,33 @@ function rangeForPreset(range: Exclude<AnalyticsRange, 'custom'>) {
   return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: end };
 }
 
-export function AnalyticsView({ transactions }: { transactions: Transaction[] }) {
+function statementAccount(transaction: AnalyticsTransaction): string {
+  return transaction.toAccountName ? transaction.accountName + ' → ' + transaction.toAccountName : transaction.accountName;
+}
+
+function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
+  const [page, setPage] = useState(0);
+  const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / transactionPageSize) - 1));
+  const start = safePage * transactionPageSize;
+  if (!rows.length) return <p className="card-note">No transactions match these filters.</p>;
+
+  return <>
+    <div className="finance-statement-scroll">
+      <table className="finance-analytics-table">
+        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Source</th><th>Amount</th></tr></thead>
+        <tbody>{rows.slice(start, start + transactionPageSize).map((row) => (
+          <tr key={row.id}>
+            <td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td>
+            <td>{statementAccount(row)}</td><td>{analyticsSources[row.source]}</td><td>{formatMoney(row.amount)}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+    <TransactionPagination total={rows.length} page={safePage} onPage={setPage} />
+  </>;
+}
+
+export function AnalyticsView({ transactions }: { transactions: AnalyticsTransaction[] }) {
   const [range, setRange] = useState<AnalyticsRange>('monthly');
   const monthly = rangeForPreset('monthly');
   const [customFrom, setCustomFrom] = useState(monthly.from);
@@ -748,7 +784,19 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
   const [compare, setCompare] = useState(false);
   const [exportError, setExportError] = useState('');
   const [exporting, setExporting] = useState(false);
-  const activeRange = range === 'custom' ? { from: customFrom, to: customTo } : rangeForPreset(range);
+  const allDates = useMemo(() => {
+    if (!transactions.length) return null;
+    let from = transactions[0].date;
+    let to = from;
+    for (const { date } of transactions) {
+      if (date < from) from = date;
+      if (date > to) to = date;
+    }
+    return { from, to };
+  }, [transactions]);
+  const activeRange = range === 'custom' ? { from: customFrom, to: customTo }
+    : range === 'all' ? allDates ?? monthly
+    : rangeForPreset(range);
   const { from, to } = activeRange;
   const validRange = Boolean(from && to && from <= to);
   const periodTransactions = useMemo(() => validRange
@@ -766,35 +814,29 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
     const anchor = new Date(from + 'T12:00:00');
     return { from: dateOffset(anchor, -days), to: dateOffset(anchor, -1) };
   }, [from, days]);
-  const previous = useMemo(() => compare && validRange
+  const previous = useMemo(() => compare && validRange && range !== 'all'
     ? analyzeTransactions(transactions, { ...emptyTransactionAnalysisFilters, ...filters, ...previousRange }) : null,
-    [compare, validRange, transactions, filters, previousRange]);
+    [compare, validRange, range, transactions, filters, previousRange]);
   const rollups = useMemo(() => {
     const categories = new Map<string, { name: string; amount: number }>();
     const types = new Map<string, { name: string; amount: number }>();
     const accounts = new Map<string, { name: string; amount: number }>();
-    const trend = new Map<string, { income: number; expense: number }>();
-    let largestExpense: Transaction | undefined;
-    let largestIncome: Transaction | undefined;
+    let largestExpense: AnalyticsTransaction | undefined;
+    let largestIncome: AnalyticsTransaction | undefined;
     const add = (groups: typeof categories, key: string, name: string, paise: number) => groups.set(key, { name, amount: (groups.get(key)?.amount ?? 0) + paise });
     for (const transaction of analytics.matches) {
-      if (transaction.kind === 'transfer') continue;
       const paise = Math.round(transaction.amount * 100);
-      const key = days > 62 ? transaction.date.slice(0, 7) : transaction.date;
-      const bucket = trend.get(key) ?? { income: 0, expense: 0 };
-      bucket[transaction.kind] += paise;
-      trend.set(key, bucket);
+      add(types, transaction.typeId, transaction.typeName, paise);
+      if (transaction.kind !== 'income' && transaction.kind !== 'expense') continue;
       if (transaction.kind === 'expense') {
         if (!largestExpense || transaction.amount > largestExpense.amount) largestExpense = transaction;
         add(categories, transaction.categoryId ?? 'uncategorised', transaction.categoryName ?? 'Uncategorised', paise);
       } else if (!largestIncome || transaction.amount > largestIncome.amount) largestIncome = transaction;
-      add(types, transaction.typeId, transaction.typeName, paise);
       add(accounts, transaction.accountId, transaction.accountName, transaction.kind === 'income' ? paise : -paise);
     }
-    return { categories, types, accounts, trend: [...trend].sort(([a], [b]) => a.localeCompare(b)), largestExpense, largestIncome };
-  }, [analytics.matches, days]);
+    return { categories, types, accounts, largestExpense, largestIncome };
+  }, [analytics.matches]);
   const statement = useMemo(() => [...analytics.matches].sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '')), [analytics.matches]);
-  const peak = rollups.trend.reduce((maximum, [, entry]) => Math.max(maximum, entry.income, entry.expense), 1);
   const savingsRate = analytics.income ? Math.round((analytics.balance / analytics.income) * 100) : null;
   const invalid = analytics.error || (!from || !to ? 'Choose both dates.' : '');
 
@@ -807,12 +849,15 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
     const report: TableReport = {
       title: 'Financial transaction statement', filename: 'transactions-' + from + '-to-' + to,
       summary: [
-        formatDate(from) + ' – ' + formatDate(to), [account, category, type, filters.kind === 'all' ? 'All classifications' : filters.kind].join(' · '),
+        formatDate(from) + ' – ' + formatDate(to),
+        [account, category, type, filters.kind === 'all' ? 'All classifications' : analyticsClassifications[filters.kind],
+          filters.source === 'all' ? 'All sources' : analyticsSources[filters.source]].join(' · '),
         'Income ' + formatMoney(analytics.income) + ' · Expenses ' + formatMoney(analytics.expense) + ' · Net movement ' + formatMoney(analytics.balance),
       ],
-      headers: ['Date', 'Description', 'Category', 'Type', 'Account', 'Classification', 'Amount (INR)'],
-      rows: statement.map((row) => [row.date, row.name, row.categoryName ?? '', row.typeName, row.toAccountName ? row.accountName + ' → ' + row.toAccountName : row.accountName, row.kind, row.amount]),
-      amountColumn: 6,
+      headers: ['Date', 'Description', 'Category', 'Type', 'Account', 'Classification', 'Source', 'Amount (INR)'],
+      rows: statement.map((row) => [row.date, row.name, row.categoryName ?? '', row.typeName, statementAccount(row),
+        analyticsClassifications[row.kind], analyticsSources[row.source], row.amount]),
+      amountColumn: 7,
     };
     try { await downloadReport(report, format); }
     catch (error) { setExportError(error instanceof Error ? error.message : 'Could not export this statement.'); }
@@ -820,25 +865,26 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
   };
 
   return <>
-    <SectionHeading title="Analytics" description="See income, expenses and cash flow in your selected period." />
+    <SectionHeading title="Analytics" description="See cash flow and recorded activity in your selected period." />
     <div className="analytics-controls surface-card">
       <div className="analytics-tabs" aria-label="Analytics period">
-        {(['daily', 'weekly', 'monthly', 'yearly', 'custom'] as const).map((option) => (
-          <button key={option} type="button" className={range === option ? 'active' : ''} aria-pressed={range === option} onClick={() => setRange(option)}>{option[0].toUpperCase() + option.slice(1)}</button>
+        {(Object.keys(analyticsPeriods) as AnalyticsRange[]).map((option) => (
+          <button key={option} type="button" className={range === option ? 'active' : ''} aria-pressed={range === option} onClick={() => setRange(option)}>{analyticsPeriods[option]}</button>
         ))}
       </div>
       {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
-      <p>{formatDate(from)} – {formatDate(to)}</p>
+      {from && to ? <p>{formatDate(from)} – {formatDate(to)}</p> : null}
       <div className="form-grid finance-analytics-filters">
         {([['account', 'Account', options.account], ['typeId', 'Transaction type', options.typeId], ['category', 'Category', options.category]] as const).map(([key, label, values]) =>
           <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
             <option value="">All</option>{values.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </Select></label>)}
-        <label>Classification<Select aria-label="Classification" value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value as AnalyticsFilters['kind'] })}>
-          <option value="all">All</option>{options.kind.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </Select></label>
+        {([['kind', 'Classification'], ['source', 'Source']] as const).map(([key, label]) =>
+          <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value as AnalyticsFilters[typeof key] })}>
+            <option value="all">All</option>{options[key].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </Select></label>)}
       </div>
-      <label className="recognition-check"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} /> Compare with the previous period of equal length</label>
+      {range !== 'all' ? <label className="recognition-check"><input type="checkbox" checked={compare} onChange={(event) => setCompare(event.target.checked)} /> Compare with the previous period of equal length</label> : null}
     </div>
     {invalid ? <p className="form-error" role="alert">{invalid}</p> : <>
       <div className="metrics-grid">
@@ -854,18 +900,13 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
       {previous ? <p className="form-hint">Comparison period · {formatDate(previousRange.from)} – {formatDate(previousRange.to)}
         {previous.expense > 0 ? ' · Spending changed by ' + new Intl.NumberFormat('en-IN', { style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 1 }).format((analytics.expense - previous.expense) / previous.expense) : null}
       </p> : null}
-      <div className="content-grid analytics-grid">
-        <div className="card-title-row"><div><h3>Cash-flow trend</h3><p>{days > 62 ? 'Income and spending by month' : 'Income and spending by day'}</p></div></div>
-        <div className="surface-card analytics-trend" role="img" aria-label="Income and expense trend for the selected dates">
-          {rollups.trend.length ? <div className="analytics-bars">{rollups.trend.map(([date, point]) => <div className="analytics-bar-pair" key={date} title={date + ' · income ' + formatMoney(point.income / 100) + ' · expense ' + formatMoney(point.expense / 100)}><i className="expense-bar" style={{ height: point.expense / peak * 100 + '%' }} /><i className="income-bar" style={{ height: point.income / peak * 100 + '%' }} /><small>{date.length === 7 ? date.slice(5) : date.slice(8)}</small></div>)}</div> : <p className="card-note">No income or expenses in this view.</p>}
-        </div>
-      </div>
+      <AnalyticsTrend transactions={analytics.matches} from={from} to={to} days={days} months={months} />
       <div className="content-grid analytics-grid">
         {([['Expenses by category', 'category', rollups.categories], ['Transactions by type', 'typeId', rollups.types], ['Net cash flow by account', 'account', rollups.accounts]] as const).map(([title, key, groups]) =>
           <section className="surface-card" key={key}><h3>{title}</h3>
             {[...groups].sort((a, b) => Math.abs(b[1].amount) - Math.abs(a[1].amount)).map(([id, entry]) =>
               <button className="text-button finance-drilldown" key={id} type="button" aria-pressed={filters[key] === id} onClick={() => setFilters({ ...filters, [key]: filters[key] === id ? '' : id })}><span>{entry.name}</span><strong>{formatMoney(entry.amount / 100)}</strong></button>)}
-            {!groups.size ? <p className="card-note">No matching income or expenses.</p> : null}
+            {!groups.size ? <p className="card-note">{key === 'typeId' ? 'No matching transactions.' : 'No matching income or expenses.'}</p> : null}
           </section>)}
       </div>
       <section className="surface-card">
@@ -875,8 +916,7 @@ export function AnalyticsView({ transactions }: { transactions: Transaction[] })
           </div>
         </div>
         {exportError ? <p className="form-error" role="alert">{exportError}</p> : null}
-        {statement.length ? <div className="workout-table"><table className="finance-analytics-table"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Amount</th></tr></thead>
-          <tbody>{statement.map((row) => <tr key={row.id}><td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td><td>{row.accountName}{row.toAccountName ? ' → ' + row.toAccountName : ''}</td><td>{formatMoney(row.amount)}</td></tr>)}</tbody></table></div> : <p className="card-note">No transactions match these filters.</p>}
+        <AnalyticsStatement key={JSON.stringify([from, to, filters])} rows={statement} />
       </section>
     </>}
   </>;

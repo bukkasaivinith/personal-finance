@@ -1,4 +1,4 @@
-import { toDateKey, type Transaction, type TransactionKind } from '@/lib/finance';
+import { toDateKey, type AnalyticsTransaction } from '@/lib/finance';
 
 export type AnalysisPeriod = 'month' | 'last-month' | 'week' | 'all' | 'custom';
 
@@ -6,7 +6,8 @@ export type AnalyticsFilters = {
   account: string;
   typeId: string;
   category: string;
-  kind: 'all' | TransactionKind;
+  kind: 'all' | AnalyticsTransaction['kind'];
+  source: 'all' | AnalyticsTransaction['source'];
 };
 
 export type TransactionAnalysisFilters = AnalyticsFilters & {
@@ -14,13 +15,13 @@ export type TransactionAnalysisFilters = AnalyticsFilters & {
   to: string;
   minAmount: string;
   maxAmount: string;
-  source: 'all' | Transaction['source'];
   search: string;
 };
 
-export const emptyAnalyticsFilters: AnalyticsFilters = { account: '', typeId: '', category: '', kind: 'all' };
-const analyticsFilterKeys = ['account', 'typeId', 'category', 'kind'] as const;
-const classifications = [['income', 'Income'], ['expense', 'Expense'], ['transfer', 'Transfer']] as const;
+export const emptyAnalyticsFilters: AnalyticsFilters = { account: '', typeId: '', category: '', kind: 'all', source: 'all' };
+const analyticsFilterKeys = ['account', 'typeId', 'category', 'kind', 'source'] as const;
+export const analyticsClassifications = { income: 'Income', expense: 'Expense', transfer: 'Transfer', savings: 'Savings' } as const;
+export const analyticsSources = { manual: 'Manual', scheduled: 'Scheduled', investment: 'Investments', savings: 'Savings' } as const;
 
 export const emptyTransactionAnalysisFilters: TransactionAnalysisFilters = {
   ...emptyAnalyticsFilters,
@@ -28,7 +29,6 @@ export const emptyTransactionAnalysisFilters: TransactionAnalysisFilters = {
   to: '',
   minAmount: '',
   maxAmount: '',
-  source: 'all',
   search: '',
 };
 
@@ -50,7 +50,7 @@ export function transactionAnalysisRange(period: Exclude<AnalysisPeriod, 'custom
 
 const byName = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1]);
 
-export function transactionAnalysisOptions(transactions: Transaction[]) {
+export function transactionAnalysisOptions(transactions: AnalyticsTransaction[]) {
   const categories = new Map<string, string>();
   const accounts = new Map<string, string>();
   for (const transaction of transactions) {
@@ -62,17 +62,18 @@ export function transactionAnalysisOptions(transactions: Transaction[]) {
   return { categories: [...categories].sort(byName), accounts: [...accounts].sort(byName) };
 }
 
-function matchesAnalyticsFilter(transaction: Transaction, key: keyof AnalyticsFilters, value: string): boolean {
+function matchesAnalyticsFilter(transaction: AnalyticsTransaction, key: keyof AnalyticsFilters, value: string): boolean {
   if (value === emptyAnalyticsFilters[key]) return true;
   switch (key) {
     case 'account': return transaction.accountId === value || transaction.toAccountId === value;
     case 'typeId': return transaction.typeId === value;
     case 'category': return (transaction.categoryId ?? 'uncategorised') === value;
     case 'kind': return transaction.kind === value;
+    case 'source': return transaction.source === value;
   }
 }
 
-export function reconcileAnalyticsFilters(transactions: Transaction[], selected: AnalyticsFilters): AnalyticsFilters {
+export function reconcileAnalyticsFilters(transactions: AnalyticsTransaction[], selected: AnalyticsFilters): AnalyticsFilters {
   let matching = transactions;
   let filters = selected;
   // When the date range changes, retain compatible filters in the order they appear on screen.
@@ -85,24 +86,26 @@ export function reconcileAnalyticsFilters(transactions: Transaction[], selected:
   return filters;
 }
 
-export function analyticsFilterOptions(transactions: Transaction[], filters: AnalyticsFilters) {
+export function analyticsFilterOptions(transactions: AnalyticsTransaction[], filters: AnalyticsFilters) {
   const choices = (field: keyof AnalyticsFilters) => transactions.filter((transaction) =>
     analyticsFilterKeys.every((key) => key === field || matchesAnalyticsFilter(transaction, key, filters[key])));
   const types = new Map(choices('typeId').map((transaction) => [transaction.typeId, transaction.typeName]));
   const kinds = new Set(choices('kind').map((transaction) => transaction.kind));
+  const sources = new Set(choices('source').map((transaction) => transaction.source));
   return {
     account: transactionAnalysisOptions(choices('account')).accounts,
     category: transactionAnalysisOptions(choices('category')).categories,
     typeId: [...types].sort(byName),
-    kind: classifications.filter(([kind]) => kinds.has(kind)),
+    kind: Object.entries(analyticsClassifications).filter(([kind]) => kinds.has(kind as AnalyticsTransaction['kind'])),
+    source: Object.entries(analyticsSources).filter(([source]) => sources.has(source as AnalyticsTransaction['source'])),
   };
 }
 
-export function analyzeTransactions(transactions: Transaction[], filters: TransactionAnalysisFilters) {
+export function analyzeTransactions<Entry extends AnalyticsTransaction>(transactions: Entry[], filters: TransactionAnalysisFilters) {
   const min = filters.minAmount === '' ? 0 : Number(filters.minAmount);
   const max = filters.maxAmount === '' ? Infinity : Number(filters.maxAmount);
   const query = filters.search.trim().toLocaleLowerCase();
-  const matches: Transaction[] = [];
+  const matches: Entry[] = [];
   let incomePaise = 0;
   let expensePaise = 0;
   let error = '';
@@ -120,7 +123,6 @@ export function analyzeTransactions(transactions: Transaction[], filters: Transa
       if ((filters.from && transaction.date < filters.from) || (filters.to && transaction.date > filters.to)) continue;
       if (transaction.amount < min || transaction.amount > max) continue;
       if (!analyticsFilterKeys.every((key) => matchesAnalyticsFilter(transaction, key, filters[key]))) continue;
-      if (filters.source !== 'all' && transaction.source !== filters.source) continue;
       if (query && ![transaction.name, transaction.categoryName, transaction.typeName, transaction.accountName, transaction.toAccountName]
         .some((label) => label?.toLocaleLowerCase().includes(query))) continue;
 

@@ -90,8 +90,8 @@ export default function App() {
   const isIpoApplicationPage = activeView === 'ipo-portfolio';
   const isIpoDemats = activeView === 'ipo-demats';
   const activeOwnerId = profile?.id ?? null;
-  const ledgerPage = activeView === 'overview' || activeView === 'transactions' || activeView === 'accounts' || activeView === 'analytics';
-  const scope = ledgerPage ? 'ledger' : activeView === 'investments' || activeView === 'recurring' || activeView === 'setup' ? activeView : 'forms';
+  const ledgerPage = activeView === 'overview' || activeView === 'transactions' || activeView === 'accounts';
+  const scope = ledgerPage ? 'ledger' : activeView === 'analytics' || activeView === 'investments' || activeView === 'recurring' || activeView === 'setup' ? activeView : 'forms';
   const needsForms = activeView !== 'athlete' && activeView !== 'savings' && activeView !== 'ipo-demats';
   const finance = useFinanceData(needsForms ? activeOwnerId : null, scope);
   const data = finance.data ?? emptyFinance;
@@ -328,7 +328,7 @@ export default function App() {
           />
         );
       case 'analytics':
-        return <AnalyticsView transactions={transactions} />;
+        return <AnalyticsView transactions={data.analyticsTransactions ?? transactions} />;
       case 'savings':
         return <SavingsView key={activeOwnerId} ownerId={activeOwnerId ?? ''} onNotify={showToast} />;
       case 'goals':
