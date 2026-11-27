@@ -18,7 +18,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   );
   const directory = new URL('../supabase/migrations/', import.meta.url);
   for (const migration of (await readdir(directory)).filter((name) => name.endsWith('.sql') &&
-    (name < '20261115160000' || name.startsWith('2026112323') || name.startsWith('20261127'))).sort()) {
+    (name < '20261115160000' || name.startsWith('2026112323') || (name.startsWith('20261127') && name.includes('_athlete_')))).sort()) {
     await db.exec(await readFile(new URL(migration, directory), 'utf8'));
   }
   const owner = randomUUID();

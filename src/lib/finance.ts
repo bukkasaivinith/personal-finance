@@ -1,21 +1,15 @@
-export type TransactionKind = 'expense' | 'income' | 'transfer';
+export const transactionKinds = ['income', 'expense', 'transfer'] as const;
+export type TransactionKind = typeof transactionKinds[number];
+export const transactionKindLabels: Record<TransactionKind, string> = {
+  income: 'Income', expense: 'Expense', transfer: 'Transfer between accounts',
+};
 
 export type ItemStatus = {
   isActive: boolean;
   deletedAt: string | null;
 };
 
-export type TransactionTypeOption = ItemStatus & { id: string; name: string; kind: TransactionKind };
-
-export function isLegacyIpoTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
-  return ['ipo expense', 'ipo income', 'ipo transfer'].includes(type.name.trim().toLocaleLowerCase('en-US'));
-}
-
-/** Investment accounting types are created and maintained by the Investments workflow. */
-export function isInvestmentManagedTransactionType(type: Pick<TransactionTypeOption, 'name'>): boolean {
-  const name = type.name.trim().toLocaleLowerCase('en-US');
-  return name === 'investment capital' || name === 'investment return' || isLegacyIpoTransactionType(type);
-}
+export type StandardTransactionType = { id: string; kind: TransactionKind };
 
 export type CategoryOption = ItemStatus & {
   id: string;
@@ -38,9 +32,6 @@ export type Account = ItemStatus & {
 export type Transaction = {
   id: string;
   name: string;
-  typeId: string;
-  typeName: string;
-  typeArchived: boolean;
   kind: TransactionKind;
   categoryId: string | null;
   categoryName: string | null;
@@ -74,7 +65,7 @@ export type TransactionDraft = {
 };
 
 export type AnalyticsTransaction = Pick<Transaction,
-  'id' | 'name' | 'typeId' | 'typeName' | 'categoryId' | 'categoryName' | 'amount' | 'date' |
+  'id' | 'name' | 'categoryId' | 'categoryName' | 'amount' | 'date' |
   'time' | 'accountId' | 'accountName' | 'toAccountId' | 'toAccountName'
 > & (
   { kind: Transaction['kind']; source: Transaction['source'] } |
@@ -93,7 +84,7 @@ export type RecurringIntervalUnit = 'day' | 'week' | 'month';
 export type RecurringEntry = {
   id: string;
   name: string;
-  typeId: string;
+  kind: TransactionKind | null;
   categoryId: string | null;
   amount: number;
   accountId: string;
@@ -108,7 +99,7 @@ export type RecurringEntry = {
   lastProcessedDate: string | null;
 };
 
-export type RecurringEntryDraft = Omit<RecurringEntry, 'id' | 'isActive' | 'lastProcessedDate'>;
+export type RecurringEntryDraft = Omit<RecurringEntry, 'id' | 'kind' | 'isActive' | 'lastProcessedDate'> & { typeId: string };
 
 export type ActivityAction =
   | 'created'
@@ -182,12 +173,12 @@ export type InvestmentDraft = {
   investedOn: string;
 };
 
-export type TransactionUsage = { types: Record<string, number>; categories: Record<string, number> };
+export type TransactionUsage = { categories: Record<string, number> };
 
 export type FinanceData = {
   transactionUsage?: TransactionUsage;
   analyticsTransactions?: AnalyticsTransaction[];
-  transactionTypes: TransactionTypeOption[];
+  standardTypes: StandardTransactionType[];
   categories: CategoryOption[];
   accounts: Account[];
   transactions: Transaction[];

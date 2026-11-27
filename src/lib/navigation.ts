@@ -56,7 +56,7 @@ export const workspaceNavigation: NavItem[] = [
 ];
 
 export const manageNavigation: NavItem[] = [
-  { id: 'setup', label: 'Types & categories', icon: Tags },
+  { id: 'setup', label: 'Categories', icon: Tags },
   { id: 'recurring', label: 'Recurring', icon: CalendarDays },
   { id: 'investments', label: 'Investments', icon: ChartNoAxesCombined },
   { id: 'athlete', label: 'Athlete Hub', icon: Activity },
@@ -75,6 +75,6 @@ export const pageCopy: Record<View, { title: string; eyebrow: string }> = {
   'ipo-demats': { title: 'Demat account holders', eyebrow: 'IPO' },
   athlete: { title: 'Athlete Hub', eyebrow: 'Private training and recovery' },
   'athlete-activity': { title: 'Activity details', eyebrow: 'Athlete Hub' },
-  setup: { title: 'Types & categories', eyebrow: 'How you record and group money' },
+  setup: { title: 'Categories', eyebrow: 'How you record and group money' },
   settings: { title: 'Settings', eyebrow: 'Preferences and data' },
 };

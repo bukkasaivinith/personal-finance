@@ -26,6 +26,7 @@ import {
   recentMonthKeys,
   sortByDate,
   summarizeMonth,
+  transactionKindLabels,
   type Account,
   type FinanceData,
   type TransactionKind,
@@ -39,7 +40,7 @@ type ModalKind = 'transaction' | 'account' | 'ipo' | 'ipo-demat';
 const monthOptions = recentMonthKeys(6);
 
 const emptyFinance: FinanceData = {
-  transactionTypes: [],
+  standardTypes: [],
   categories: [],
   accounts: [],
   transactions: [],
@@ -99,7 +100,7 @@ export default function App() {
   const needsForms = !isAthletePage && activeView !== 'savings' && activeView !== 'ipo-demats';
   const finance = useFinanceData(needsForms ? activeOwnerId : null, scope);
   const data = finance.data ?? emptyFinance;
-  const { accounts, transactions, categories, transactionTypes, recurringEntries, investments, investmentTypes } = data;
+  const { accounts, transactions, categories, standardTypes, recurringEntries, investments, investmentTypes } = data;
   const actions = useMemo(() => createFinanceActions(finance.refresh, activeOwnerId ?? ''), [finance.refresh, activeOwnerId]);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -117,7 +118,6 @@ export default function App() {
   useEffect(() => { setRecurringChecked(false); }, [activeOwnerId]);
 
   const usableAccounts = useMemo(() => accounts.filter(isUsable), [accounts]);
-  const usableTypes = useMemo(() => transactionTypes.filter(isUsable), [transactionTypes]);
   const usableCategories = useMemo(() => categories.filter(isUsable), [categories]);
   const summary = useMemo(() => summarizeMonth(transactions, selectedMonth), [transactions, selectedMonth]);
   const flows = useMemo(() => monthlyFlows(transactions, [...monthOptions].reverse()), [transactions]);
@@ -131,7 +131,7 @@ export default function App() {
         !query ||
         transaction.name.toLowerCase().includes(query) ||
         (transaction.categoryName ?? '').toLowerCase().includes(query) ||
-        transaction.typeName.toLowerCase().includes(query);
+        transactionKindLabels[transaction.kind].toLowerCase().includes(query);
       return matchesKind && matchesQuery;
     });
   }, [sorted, searchQuery, filter]);
@@ -232,12 +232,12 @@ export default function App() {
       const ledger = await loadFinanceData(activeOwnerId, 'ledger', request.signal);
       if (request.signal.aborted) return;
       const rows = sortByDate(ledger.transactions).map((transaction) => [
-        transaction.date, transaction.time ?? '', transaction.name, transaction.typeName, transaction.kind,
+        transaction.date, transaction.time ?? '', transaction.name, transactionKindLabels[transaction.kind],
         transaction.categoryName ?? '', transaction.accountName, transaction.toAccountName ?? '', transaction.amount,
       ]);
       await downloadReport({
         title: 'Transactions', filename: 'personal-financing-transactions', summary: [],
-        headers: ['Date', 'Time', 'Name', 'Type', 'Counts as', 'Category', 'Account', 'To account', 'Amount'], rows,
+        headers: ['Date', 'Time', 'Name', 'Type', 'Category', 'Account', 'To account', 'Amount'], rows,
       }, 'csv');
       showToast('CSV export downloaded.');
     } catch {
@@ -324,7 +324,7 @@ export default function App() {
       case 'setup':
         return (
           <SetupView
-            transactionTypes={transactionTypes}
+            standardTypes={standardTypes}
             categories={categories}
             transactionUsage={data.transactionUsage}
             actions={actions}
@@ -344,7 +344,7 @@ export default function App() {
             transactions={transactions}
             categories={categories}
             accounts={accounts}
-            transactionTypes={transactionTypes}
+            standardTypes={standardTypes}
             actions={actions}
             onNotify={showToast}
           />
@@ -468,13 +468,11 @@ export default function App() {
       {modal === 'transaction' ? (
         <AddTransactionModal
           accounts={usableAccounts}
-          transactionTypes={usableTypes}
+          standardTypes={standardTypes}
           categories={usableCategories}
           transaction={editingTransaction}
           onClose={() => { setEditingTransaction(null); closeModal(); }}
           onSubmit={saveTransaction}
-          onCreateTransactionType={actions.createTransactionType}
-          onUpdateTransactionType={actions.updateTransactionType}
           onCreateCategory={actions.createCategory}
           onUpdateCategory={actions.updateCategory}
           onCreateAccount={actions.createAccount}

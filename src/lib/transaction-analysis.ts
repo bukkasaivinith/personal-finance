@@ -1,12 +1,11 @@
-import { toDateKey, type AnalyticsTransaction } from '@/lib/finance';
+import { toDateKey, transactionKindLabels, transactionKinds, type AnalyticsTransaction, type TransactionKind } from '@/lib/finance';
 
 export type AnalysisPeriod = 'month' | 'last-month' | 'week' | 'all' | 'custom';
 
 export type AnalyticsFilters = {
   account: string;
-  typeId: string;
   category: string;
-  kind: 'all' | AnalyticsTransaction['kind'];
+  kind: 'all' | TransactionKind;
   source: 'all' | AnalyticsTransaction['source'];
 };
 
@@ -18,9 +17,8 @@ export type TransactionAnalysisFilters = AnalyticsFilters & {
   search: string;
 };
 
-export const emptyAnalyticsFilters: AnalyticsFilters = { account: '', typeId: '', category: '', kind: 'all', source: 'all' };
-const analyticsFilterKeys = ['account', 'typeId', 'category', 'kind', 'source'] as const;
-export const analyticsClassifications = { income: 'Income', expense: 'Expense', transfer: 'Transfer', savings: 'Savings' } as const;
+export const emptyAnalyticsFilters: AnalyticsFilters = { account: '', category: '', kind: 'all', source: 'all' };
+const analyticsFilterKeys = ['account', 'category', 'kind', 'source'] as const;
 export const analyticsSources = { manual: 'Manual', scheduled: 'Scheduled', investment: 'Investments', savings: 'Savings' } as const;
 
 export const emptyTransactionAnalysisFilters: TransactionAnalysisFilters = {
@@ -66,7 +64,6 @@ function matchesAnalyticsFilter(transaction: AnalyticsTransaction, key: keyof An
   if (value === emptyAnalyticsFilters[key]) return true;
   switch (key) {
     case 'account': return transaction.accountId === value || transaction.toAccountId === value;
-    case 'typeId': return transaction.typeId === value;
     case 'category': return (transaction.categoryId ?? 'uncategorised') === value;
     case 'kind': return transaction.kind === value;
     case 'source': return transaction.source === value;
@@ -89,14 +86,12 @@ export function reconcileAnalyticsFilters(transactions: AnalyticsTransaction[], 
 export function analyticsFilterOptions(transactions: AnalyticsTransaction[], filters: AnalyticsFilters) {
   const choices = (field: keyof AnalyticsFilters) => transactions.filter((transaction) =>
     analyticsFilterKeys.every((key) => key === field || matchesAnalyticsFilter(transaction, key, filters[key])));
-  const types = new Map(choices('typeId').map((transaction) => [transaction.typeId, transaction.typeName]));
   const kinds = new Set(choices('kind').map((transaction) => transaction.kind));
   const sources = new Set(choices('source').map((transaction) => transaction.source));
   return {
     account: transactionAnalysisOptions(choices('account')).accounts,
     category: transactionAnalysisOptions(choices('category')).categories,
-    typeId: [...types].sort(byName),
-    kind: Object.entries(analyticsClassifications).filter(([kind]) => kinds.has(kind as AnalyticsTransaction['kind'])),
+    kind: transactionKinds.filter((kind) => kinds.has(kind)).map((kind) => [kind, transactionKindLabels[kind]] as const),
     source: Object.entries(analyticsSources).filter(([source]) => sources.has(source as AnalyticsTransaction['source'])),
   };
 }
@@ -123,7 +118,8 @@ export function analyzeTransactions<Entry extends AnalyticsTransaction>(transact
       if ((filters.from && transaction.date < filters.from) || (filters.to && transaction.date > filters.to)) continue;
       if (transaction.amount < min || transaction.amount > max) continue;
       if (!analyticsFilterKeys.every((key) => matchesAnalyticsFilter(transaction, key, filters[key]))) continue;
-      if (query && ![transaction.name, transaction.categoryName, transaction.typeName, transaction.accountName, transaction.toAccountName]
+      const typeLabel = transaction.kind === 'savings' ? null : transactionKindLabels[transaction.kind];
+      if (query && ![transaction.name, transaction.categoryName, typeLabel, transaction.accountName, transaction.toAccountName]
         .some((label) => label?.toLocaleLowerCase().includes(query))) continue;
 
       matches.push(transaction);

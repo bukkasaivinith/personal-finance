@@ -6,16 +6,10 @@ import { ArrowLeftRight, Check, ChevronDown, Clock3, LogOut, Settings2 } from 'l
 import { DatePicker } from '@/components/date-picker';
 import { signOut } from '@/lib/auth-api';
 import { createFinanceActions } from '@/lib/finance-actions';
-import { categoriesFor, currentTimeKey, isInvestmentManagedTransactionType, parseAmount, todayKey, type TransactionKind } from '@/lib/finance';
+import { categoriesFor, currentTimeKey, isUsable, parseAmount, todayKey, transactionKindLabels, transactionKinds, type TransactionKind } from '@/lib/finance';
 import { useFinanceData } from '@/lib/use-finance-data';
 import { useCurrentFinanceProfile } from '@/lib/current-finance-profile';
 import './mobile-app.css';
-
-const kinds: { value: TransactionKind; label: string }[] = [
-  { value: 'expense', label: 'Expense' },
-  { value: 'income', label: 'Income' },
-  { value: 'transfer', label: 'Transfer' },
-];
 
 export function MobileApp() {
   const navigate = useNavigate();
@@ -25,7 +19,6 @@ export function MobileApp() {
   const [kind, setKind] = useState<TransactionKind>('expense');
   const [amount, setAmount] = useState('');
   const [name, setName] = useState('');
-  const [typeId, setTypeId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [toAccountId, setToAccountId] = useState('');
@@ -35,20 +28,13 @@ export function MobileApp() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const types = useMemo(
-    () => finance.data?.transactionTypes.filter((type) => type.isActive && type.kind === kind && !isInvestmentManagedTransactionType(type)) ?? [],
-    [finance.data, kind],
-  );
-  const accounts = useMemo(() => finance.data?.accounts.filter((account) => account.isActive && !account.ipoCustody) ?? [], [finance.data]);
-  const categories = useMemo(() => {
-    const selectedType = finance.data?.transactionTypes.find((type) => type.id === typeId);
-    return selectedType ? categoriesFor(finance.data?.categories.filter((category) => category.isActive) ?? [], selectedType.id) : [];
-  }, [finance.data, typeId]);
+  const selectedType = finance.data?.standardTypes.find((type) => type.kind === kind);
+  const accounts = finance.data?.accounts.filter(isUsable) ?? [];
+  const categories = selectedType ? categoriesFor(finance.data?.categories.filter(isUsable) ?? [], selectedType.id) : [];
   const destinationAccounts = accounts.filter((account) => account.id !== accountId);
 
   const changeKind = (next: TransactionKind) => {
     setKind(next);
-    setTypeId('');
     setCategoryId('');
     setToAccountId('');
     setSaved(false);
@@ -59,8 +45,7 @@ export function MobileApp() {
     event.preventDefault();
     if (saving) return;
     const value = parseAmount(amount);
-    const selectedType = types.find((type) => type.id === typeId);
-    if (!selectedType) return setError('Choose a transaction type.');
+    if (!selectedType) return setError('The database update for the standard types is pending.');
     if (!Number.isFinite(value) || value <= 0) return setError('Enter an amount greater than zero.');
     if (!name.trim()) return setError('Add a description.');
     if (!accountId) return setError('Choose an account.');
@@ -116,16 +101,16 @@ export function MobileApp() {
 
           <h1>New Transaction</h1>
           <div className="mobile-kind-tabs" role="tablist" aria-label="Transaction kind">
-            {kinds.map((choice) => (
+            {transactionKinds.map((choice) => (
               <button
                 type="button"
-                key={choice.value}
-                className={kind === choice.value ? 'active' : ''}
+                key={choice}
+                className={kind === choice ? 'active' : ''}
                 role="tab"
-                aria-selected={kind === choice.value}
-                onClick={() => changeKind(choice.value)}
+                aria-selected={kind === choice}
+                onClick={() => changeKind(choice)}
               >
-                {choice.label}
+                {transactionKindLabels[choice]}
               </button>
             ))}
           </div>
@@ -142,19 +127,10 @@ export function MobileApp() {
               />
             </section>
 
-            <label className="mobile-field">
-              <span>Transaction type</span>
-              <Select value={typeId} onChange={(event) => { setTypeId(event.target.value); setCategoryId(''); }}>
-                <option value="">Select type</option>
-                {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-              </Select>
-              <ChevronDown size={17} />
-            </label>
-
             {kind !== 'transfer' ? (
               <label className="mobile-field">
                 <span>Category</span>
-                <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={!typeId}>
+                <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={!selectedType}>
                   <option value="">Select category</option>
                   {categories.map((category) => <option key={category.id} value={category.id}>{category.emoji ? `${category.emoji} ` : ''}{category.name}</option>)}
                 </Select>

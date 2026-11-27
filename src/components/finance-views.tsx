@@ -27,6 +27,7 @@ import {
   formatTime,
   signedBalance,
   stateOf,
+  transactionKindLabels,
   type Account,
   type AnalyticsTransaction,
   type CategoryTotal,
@@ -37,7 +38,6 @@ import {
 } from '@/lib/finance';
 import type { View } from '@/lib/navigation';
 import {
-  analyticsClassifications,
   analyticsFilterOptions,
   analyticsSources,
   analyzeTransactions,
@@ -149,7 +149,7 @@ function TransactionTable({
                       <span>
                         <b>{transaction.name}</b>
                         <small>
-                          {transaction.categoryEmoji ? `${transaction.categoryEmoji} ` : ''}{transaction.categoryName ?? transaction.typeName}
+                          {transaction.categoryEmoji ? `${transaction.categoryEmoji} ` : ''}{transaction.categoryName ?? transactionKindLabels[transaction.kind]}
                           {transaction.categoryArchived ? <ArchivedTag /> : null}
                           {transaction.source === 'scheduled' ? <span className="scheduled-tag">Scheduled</span> : null}
                         </small>
@@ -158,8 +158,7 @@ function TransactionTable({
                   </td>
                   {compact ? null : (
                     <td>
-                      {transaction.typeName}
-                      {transaction.typeArchived ? <ArchivedTag /> : null}
+                      {transactionKindLabels[transaction.kind]}
                     </td>
                   )}
                   <td>
@@ -479,10 +478,10 @@ function TransactionAnalysis({ transactions }: { transactions: Transaction[] }) 
           <label className="transaction-filter-field">
             <span>Kind</span>
             <Select aria-label="Kind" value={filters.kind} onChange={(event) => updateFilter('kind', event.target.value as TransactionAnalysisFilters['kind'])}>
-              <option value="all">All kinds</option>
+              <option value="all">All types</option>
               <option value="income">Income</option>
-              <option value="expense">Expenses</option>
-              <option value="transfer">Transfers</option>
+              <option value="expense">{transactionKindLabels.expense}</option>
+              <option value="transfer">{transactionKindLabels.transfer}</option>
             </Select>
           </label>
           <label className="transaction-filter-field">
@@ -583,12 +582,12 @@ export function TransactionsView({
               className="compact-select"
               value={filter}
               onChange={(event) => { setPage(0); onFilter(event.target.value as 'all' | TransactionKind); }}
-              aria-label="Filter by kind"
+              aria-label="Filter by type"
             >
-              <option value="all">All kinds</option>
-              <option value="income">Counts as income</option>
-              <option value="expense">Counts as expense</option>
-              <option value="transfer">Counts as transfer</option>
+              <option value="all">All types</option>
+              <option value="income">{transactionKindLabels.income}</option>
+              <option value="expense">{transactionKindLabels.expense}</option>
+              <option value="transfer">{transactionKindLabels.transfer}</option>
             </Select>
           </div>
           <PagedTransactionTable transactions={transactions} page={page} onPage={setPage} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
@@ -732,7 +731,7 @@ function AnalyticsStatement({ rows }: { rows: AnalyticsTransaction[] }) {
         <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Account</th><th>Source</th><th>Amount</th></tr></thead>
         <tbody>{rows.slice(0, end).map((row) => (
           <tr key={row.id}>
-            <td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.typeName}</td>
+            <td>{formatDate(row.date)}</td><td>{row.name}</td><td>{row.categoryName || '—'}</td><td>{row.kind === 'savings' ? '—' : transactionKindLabels[row.kind]}</td>
             <td>{statementAccount(row)}</td><td>{analyticsSources[row.source]}</td><td>{formatMoney(row.amount)}</td>
           </tr>
         ))}</tbody>
@@ -793,7 +792,7 @@ export function AnalyticsView({ transactions }: { transactions: AnalyticsTransac
     const add = (groups: typeof categories, key: string, name: string, paise: number) => groups.set(key, { name, amount: (groups.get(key)?.amount ?? 0) + paise });
     for (const transaction of analytics.matches) {
       const paise = Math.round(transaction.amount * 100);
-      add(types, transaction.typeId, transaction.typeName, paise);
+      if (transaction.kind !== 'savings') add(types, transaction.kind, transactionKindLabels[transaction.kind], paise);
       if (transaction.kind !== 'income' && transaction.kind !== 'expense') continue;
       if (transaction.kind === 'expense') {
         if (!largestExpense || transaction.amount > largestExpense.amount) largestExpense = transaction;
@@ -812,19 +811,18 @@ export function AnalyticsView({ transactions }: { transactions: AnalyticsTransac
     setExportError('');
     const account = options.account.find(([id]) => id === filters.account)?.[1] ?? 'All accounts';
     const category = options.category.find(([id]) => id === filters.category)?.[1] ?? 'All categories';
-    const type = options.typeId.find(([id]) => id === filters.typeId)?.[1] ?? 'All types';
     const report: TableReport = {
       title: 'Financial transaction statement', filename: 'transactions-' + from + '-to-' + to,
       summary: [
         formatDate(from) + ' – ' + formatDate(to),
-        [account, category, type, filters.kind === 'all' ? 'All classifications' : analyticsClassifications[filters.kind],
+        [account, category, filters.kind === 'all' ? 'All types' : transactionKindLabels[filters.kind],
           filters.source === 'all' ? 'All sources' : analyticsSources[filters.source]].join(' · '),
         'Income ' + formatMoney(analytics.income) + ' · Expenses ' + formatMoney(analytics.expense) + ' · Net movement ' + formatMoney(analytics.balance),
       ],
-      headers: ['Date', 'Description', 'Category', 'Type', 'Account', 'Classification', 'Source', 'Amount (INR)'],
-      rows: statement.map((row) => [row.date, row.name, row.categoryName ?? '', row.typeName, statementAccount(row),
-        analyticsClassifications[row.kind], analyticsSources[row.source], row.amount]),
-      amountColumn: 7,
+      headers: ['Date', 'Description', 'Category', 'Type', 'Account', 'Source', 'Amount (INR)'],
+      rows: statement.map((row) => [row.date, row.name, row.categoryName ?? '', row.kind === 'savings' ? '' : transactionKindLabels[row.kind],
+        statementAccount(row), analyticsSources[row.source], row.amount]),
+      amountColumn: 6,
     };
     try { await downloadReport(report, format); }
     catch (error) { setExportError(error instanceof Error ? error.message : 'Could not export this statement.'); }
@@ -842,11 +840,11 @@ export function AnalyticsView({ transactions }: { transactions: AnalyticsTransac
       {range === 'custom' ? <div className="analytics-date-range"><DatePicker label="From" value={customFrom} max={customTo || undefined} onChange={setCustomFrom} clearable /><DatePicker label="To" value={customTo} min={customFrom || undefined} onChange={setCustomTo} clearable /></div> : null}
       {from && to ? <p>{formatDate(from)} – {formatDate(to)}</p> : null}
       <div className="form-grid finance-analytics-filters">
-        {([['account', 'Account', options.account], ['typeId', 'Transaction type', options.typeId], ['category', 'Category', options.category]] as const).map(([key, label, values]) =>
+        {([['account', 'Account', options.account], ['category', 'Category', options.category]] as const).map(([key, label, values]) =>
           <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
             <option value="">All</option>{values.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </Select></label>)}
-        {([['kind', 'Classification'], ['source', 'Source']] as const).map(([key, label]) =>
+        {([['kind', 'Type'], ['source', 'Source']] as const).map(([key, label]) =>
           <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value as AnalyticsFilters[typeof key] })}>
             <option value="all">All</option>{options[key].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </Select></label>)}
@@ -869,11 +867,11 @@ export function AnalyticsView({ transactions }: { transactions: AnalyticsTransac
       </p> : null}
       <AnalyticsTrend transactions={analytics.matches} from={from} to={to} days={days} months={months} />
       <div className="content-grid analytics-grid">
-        {([['Expenses by category', 'category', rollups.categories], ['Transactions by type', 'typeId', rollups.types], ['Net cash flow by account', 'account', rollups.accounts]] as const).map(([title, key, groups]) =>
+        {([['Expenses by category', 'category', rollups.categories], ['Transactions by type', 'kind', rollups.types], ['Net cash flow by account', 'account', rollups.accounts]] as const).map(([title, key, groups]) =>
           <section className="surface-card" key={key}><h3>{title}</h3>
             {[...groups].sort((a, b) => Math.abs(b[1].amount) - Math.abs(a[1].amount)).map(([id, entry]) =>
               <button className="text-button finance-drilldown" key={id} type="button" aria-pressed={filters[key] === id} onClick={() => setFilters({ ...filters, [key]: filters[key] === id ? '' : id })}><span>{entry.name}</span><strong>{formatMoney(entry.amount / 100)}</strong></button>)}
-            {!groups.size ? <p className="card-note">{key === 'typeId' ? 'No matching transactions.' : 'No matching income or expenses.'}</p> : null}
+            {!groups.size ? <p className="card-note">{key === 'kind' ? 'No matching transactions.' : 'No matching income or expenses.'}</p> : null}
           </section>)}
       </div>
       <section className="surface-card">

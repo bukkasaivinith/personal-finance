@@ -31,10 +31,11 @@ test('IPO accounting on the complete application migration history', async (t) =
  const ipoNotAllottedMigration = '20261124100000_ipo_not_allotted.sql';
  const financeReadsMigration = '20261124110000_scope_finance_reads.sql';
  const savingsEmojiMigration = '20261126120000_savings_account_emojis.sql';
+ const standardTypesMigration = '20261127150000_standard_transaction_types.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
    allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration,
-   financeReadsMigration, savingsEmojiMigration].includes(name)) continue; // Test each upgrade with existing data.
+   financeReadsMigration, savingsEmojiMigration, standardTypesMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -808,6 +809,47 @@ test('IPO accounting on the complete application migration history', async (t) =
   assert.equal(await read(), editedEmoji);
   await db.query('UPDATE public.savings_entries SET emoji=NULL WHERE id=$1', [id]);
   assert.equal(await read(), null);
+ });
+ await t.test('fixed finance types preserve category links, ledger history, and scheduled entries', async () => {
+  const legacy = await scalar("INSERT INTO public.transaction_types(user_id,name,kind) VALUES(auth.uid(),'Legacy grocery purchase','expense') RETURNING id");
+  const category = await scalar("INSERT INTO public.categories(user_id,name) VALUES(auth.uid(),'Legacy grocery category') RETURNING id");
+  await db.query('INSERT INTO public.category_transaction_types(user_id,category_id,transaction_type_id) VALUES(auth.uid(),$1,$2)', [category, legacy]);
+  const insertExpense = (typeId, categoryId) => scalar(
+    "INSERT INTO public.transactions(user_id,name,transaction_type_id,category_id,amount,transaction_date,account_id) VALUES(auth.uid(),'Groceries',$1,$2,25,CURRENT_DATE,$3) RETURNING id",
+    [typeId, categoryId, bank]);
+  const oldEntry = await insertExpense(legacy, category);
+  const recurring = await scalar("INSERT INTO public.recurring_entries(user_id,name,transaction_type_id,category_id,amount,account_id,frequency,next_date,end_date) VALUES(auth.uid(),'Weekly groceries',$1,$2,25,$3,'weekly',CURRENT_DATE,CURRENT_DATE) RETURNING id",
+    [legacy, category, bank]);
+
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(standardTypesMigration, directory), 'utf8'));
+  await db.exec('SET ROLE authenticated');
+  await db.exec('SELECT public.open_finance_workspace(); SELECT public.open_finance_workspace()');
+  const kinds = new Map((await db.query('SELECT kind,id FROM public.transaction_types WHERE is_standard')).rows.map(({ kind, id }) => [kind, id]));
+  assert.deepEqual([...kinds.keys()].sort(), ['expense', 'income', 'transfer']);
+  await assert.rejects(db.query("INSERT INTO public.transaction_types(user_id,name,kind) VALUES(auth.uid(),'Custom type','expense')"), /permission denied/);
+  assert.equal((await row('transactions', oldEntry)).transaction_type_id, legacy);
+  assert.equal((await row('transactions', oldEntry)).transaction_type_name, 'Legacy grocery purchase');
+  assert.equal((await row('transactions', await insertExpense(kinds.get('expense'), category))).transaction_kind, 'expense');
+  const createCategory = (name, ids) => scalar('SELECT public.create_finance_category($1,NULL,NULL,$2::uuid[])', [name, ids]);
+  await assert.rejects(createCategory('Rejected category', [legacy]), /Choose Income/);
+  assert.equal(Number(await scalar("SELECT count(*) FROM public.categories WHERE name='Rejected category'")), 0);
+  const newCategory = await createCategory('Standard category', [kinds.get('income'), kinds.get('expense')]);
+  const income = await scalar("INSERT INTO public.transactions(user_id,name,transaction_type_id,category_id,amount,transaction_date,account_id) VALUES(auth.uid(),'Income',$1,$2,25,CURRENT_DATE,$3) RETURNING transaction_kind",
+    [kinds.get('income'), newCategory, bank]);
+  assert.equal(income, 'income');
+  const destination = await scalar("INSERT INTO public.accounts(user_id,name,opening_balance,opening_balance_date,is_liability) VALUES(auth.uid(),'Destination account',0,CURRENT_DATE,false) RETURNING id");
+  const transfer = await scalar("INSERT INTO public.transactions(user_id,name,transaction_type_id,amount,transaction_date,account_id,to_account_id) VALUES(auth.uid(),'Transfer',$1,25,CURRENT_DATE,$2,$3) RETURNING transaction_kind",
+    [kinds.get('transfer'), bank, destination]);
+  assert.equal(transfer, 'transfer');
+  await db.query('SELECT public.update_finance_category($1,$2,NULL,NULL,$3::uuid[])', [category, 'Groceries', [kinds.get('income')]]);
+  await assert.rejects(insertExpense(kinds.get('expense'), category), /category does not fit/);
+  await scalar('SELECT public.process_due_recurring_entries()');
+  assert.equal(await scalar('SELECT transaction_kind FROM public.transactions WHERE recurring_entry_id=$1', [recurring]), 'expense');
+  assert.equal((await row('transactions', oldEntry)).transaction_type_id, legacy);
+  const investmentType = await scalar("SELECT public.create_investment_type('Standard test')");
+  const investment = await scalar('SELECT public.record_investment($1,$2,$3,$4,$5,CURRENT_DATE)', ['New investment', investmentType, '', bank, 50]);
+  assert.equal(await scalar('SELECT transaction_kind FROM public.transactions WHERE investment_id=$1', [investment]), 'expense');
  });
  await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
   await db.query('SELECT public.delete_my_finance_account()');

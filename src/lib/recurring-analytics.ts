@@ -22,7 +22,6 @@ export type RecurringDistribution = {
   entries: RecurringEntry[];
 };
 
-type Lookup = Map<string, TransactionKind>;
 
 function dateAtNoon(dateKey: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
@@ -97,14 +96,13 @@ export function frequencyLabel(entry: RecurringEntry): string {
 
 function plannedOccurrences(
   entries: RecurringEntry[],
-  kinds: Lookup,
   start: string,
   end: string,
 ): RecurringOccurrence[] {
   const occurrences: RecurringOccurrence[] = [];
   for (const entry of entries) {
     if (!entry.isActive || entry.nextDate > end || (entry.endDate && entry.endDate < start)) continue;
-    const kind = kinds.get(entry.typeId);
+    const kind = entry.kind;
     if (!kind) continue;
     let date = entry.nextDate;
     let guard = 0;
@@ -133,18 +131,17 @@ function plannedOccurrences(
 export function scheduledOccurrences(
   entries: RecurringEntry[],
   transactions: Transaction[],
-  kinds: Lookup,
   start: string,
   end: string,
 ): RecurringOccurrence[] {
   const activeById = new Map(entries.filter((entry) => entry.isActive).map((entry) => [entry.id, entry]));
-  const byKey = new Map(plannedOccurrences(entries, kinds, start, end).map((item) => [item.key, item]));
+  const byKey = new Map(plannedOccurrences(entries, start, end).map((item) => [item.key, item]));
 
   for (const transaction of transactions) {
     if (transaction.source !== 'scheduled' || !transaction.recurringEntryId || transaction.date < start || transaction.date > end) continue;
     const entry = activeById.get(transaction.recurringEntryId);
     if (!entry) continue;
-    const kind = kinds.get(entry.typeId) ?? transaction.kind;
+    const kind = transaction.kind;
     byKey.set(`${entry.id}:${transaction.date}`, {
       key: `${entry.id}:${transaction.date}`,
       entry,
@@ -160,13 +157,12 @@ export function scheduledOccurrences(
 
 export function recurringDistribution(
   entries: RecurringEntry[],
-  kinds: Lookup,
   mode: 'category' | 'account',
   labels: Map<string, { name: string; emoji?: string | null }>,
 ): RecurringDistribution[] {
   const grouped = new Map<string, { label: string; emoji: string | null; amount: number; entries: RecurringEntry[] }>();
   for (const entry of entries) {
-    if (!entry.isActive || kinds.get(entry.typeId) !== 'expense') continue;
+    if (!entry.isActive || entry.kind !== 'expense') continue;
     const id = mode === 'category' ? entry.categoryId ?? 'uncategorized' : entry.accountId;
     const option = labels.get(id);
     const current = grouped.get(id) ?? {

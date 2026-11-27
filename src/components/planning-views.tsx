@@ -2,6 +2,7 @@ import { Select } from '@/components/select';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Download, List, Pencil, PiggyBank, Play, Plus, Repeat2, Settings, Target, Trash2 } from 'lucide-react';
 import { DatePicker } from '@/components/date-picker';
+import { TransactionKindSelect } from '@/components/transaction-pickers';
 import { RupeeInput } from '@/components/rupee-input';
 import { EmptyPanel, Metric, ModalShell, SectionHeading } from '@/components/ui';
 import type { FinanceActions } from '@/lib/finance-actions';
@@ -20,10 +21,10 @@ import {
   formatDate,
   formatMoney,
   formatTime,
-  isInvestmentManagedTransactionType,
   isUsable,
   parseAmount,
   todayKey,
+  transactionKindLabels,
   type Account,
   type ActivityAction,
   type ActivityEvent,
@@ -33,7 +34,8 @@ import {
   type RecurringEntry,
   type RecurringEntryDraft,
   type Transaction,
-  type TransactionTypeOption,
+  type StandardTransactionType,
+  type TransactionKind,
 } from '@/lib/finance';
 
 function errorMessage(error: unknown): string {
@@ -89,23 +91,22 @@ function PlanningEmptyView({
 }
 
 function RecurringModal({
-  transactionTypes,
+  standardTypes,
   categories,
   accounts,
   entry,
   onClose,
   onSubmit,
 }: {
-  transactionTypes: TransactionTypeOption[];
+  standardTypes: StandardTransactionType[];
   categories: CategoryOption[];
   accounts: Account[];
   entry?: RecurringEntry | null;
   onClose: () => void;
   onSubmit: (draft: RecurringEntryDraft) => Promise<void>;
 }) {
-  const usableTypes = transactionTypes.filter((type) => isUsable(type) && !isInvestmentManagedTransactionType(type));
   const usableAccounts = accounts.filter(isUsable);
-  const [typeId, setTypeId] = useState(entry?.typeId ?? usableTypes[0]?.id ?? '');
+  const [kind, setKind] = useState<TransactionKind>(entry?.kind ?? 'expense');
   const [name, setName] = useState(entry?.name ?? '');
   const [amount, setAmount] = useState(entry ? String(entry.amount) : '');
   const [categoryId, setCategoryId] = useState(entry?.categoryId ?? '');
@@ -117,13 +118,13 @@ function RecurringModal({
   const [endDate, setEndDate] = useState(entry?.endDate ?? '');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const selectedType = usableTypes.find((item) => item.id === typeId);
-  const isTransfer = selectedType?.kind === 'transfer';
+  const selectedType = standardTypes.find((item) => item.kind === kind);
+  const isTransfer = kind === 'transfer';
   const compatibleCategories = selectedType ? categoriesFor(categories, selectedType.id).filter(isUsable) : [];
   const destinationAccounts = usableAccounts.filter((account) => account.id !== accountId);
 
-  const changeType = (nextTypeId: string) => {
-    setTypeId(nextTypeId);
+  const changeKind = (next: TransactionKind) => {
+    setKind(next);
     setCategoryId('');
     setToAccountId('');
   };
@@ -132,12 +133,12 @@ function RecurringModal({
     event.preventDefault();
     const value = parseAmount(amount);
     const interval = Number(intervalValue);
-    if (!selectedType) { setError('Choose a transaction type.'); return; }
+    if (!selectedType) { setError('The database update for the standard types is pending.'); return; }
     if (!name.trim()) { setError('Add a name for this repeating entry.'); return; }
     if (!Number.isFinite(value) || value <= 0) { setError('Enter an amount greater than zero.'); return; }
     if (!accountId) { setError('Choose an account.'); return; }
-    if (!isTransfer && !categoryId) { setError('Choose a category that fits this type.'); return; }
-    if (isTransfer && !toAccountId) { setError('Choose the account to move money into.'); return; }
+    if (!isTransfer && !compatibleCategories.some(({ id }) => id === categoryId)) { setError('Choose a category that fits this type.'); return; }
+    if (isTransfer && !destinationAccounts.some(({ id }) => id === toAccountId)) { setError('Choose the account to move money into.'); return; }
     if (!Number.isInteger(interval) || interval < 1 || interval > 366) { setError('Choose an interval between 1 and 366.'); return; }
     if (endDate && endDate < nextDate) { setError('The end date must be on or after the first due date.'); return; }
     setSaving(true);
@@ -145,7 +146,7 @@ function RecurringModal({
     try {
       const frequency = interval === 1 && intervalUnit === 'day' ? 'daily' : interval === 1 && intervalUnit === 'week' ? 'weekly' : interval === 1 && intervalUnit === 'month' ? 'monthly' : 'custom';
       await onSubmit({
-        name: name.trim(), typeId, categoryId: isTransfer ? null : categoryId, amount: value,
+        name: name.trim(), typeId: selectedType.id, categoryId: isTransfer ? null : categoryId, amount: value,
         accountId, toAccountId: isTransfer ? toAccountId : null, frequency,
         intervalValue: interval, intervalUnit, nextDate, endDate: endDate || null,
         monthDay: intervalUnit === 'month' ? Number(nextDate.slice(8)) : null,
@@ -161,7 +162,7 @@ function RecurringModal({
       <form className="modal-form" onSubmit={submit}>
         <p className="modal-description">Due entries are safely generated once when you open the app or process them below. Generated entries are marked Scheduled until you reconcile them with your bank.</p>
         <div className="form-grid">
-          <label className="full-field">Transaction type<Select value={typeId} onChange={(event) => changeType(event.target.value)}>{usableTypes.length === 0 ? <option value="">No active types available</option> : null}{usableTypes.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.kind})</option>)}</Select></label>
+          <label className="full-field">Type<TransactionKindSelect value={kind} onChange={changeKind} /></label>
           <label className="full-field">Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Monthly rent" maxLength={60} autoFocus /></label>
           <label>Amount (₹)<RupeeInput value={amount} onValueChange={setAmount} placeholder="e.g. 15,000" /></label>
           <label>Every<input type="number" min="1" max="366" inputMode="numeric" value={intervalValue} onChange={(event) => setIntervalValue(event.target.value)} /></label>
@@ -173,7 +174,7 @@ function RecurringModal({
           <div className="full-field"><DatePicker label="End date (optional)" value={endDate} onChange={setEndDate} min={nextDate} clearable placeholder="No end date" /></div>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-        <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || usableTypes.length === 0 || usableAccounts.length === 0}>{saving ? 'Saving...' : entry ? 'Save changes' : 'Add recurring entry'}</button></div>
+        <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !selectedType || usableAccounts.length === 0}>{saving ? 'Saving...' : entry ? 'Save changes' : 'Add recurring entry'}</button></div>
       </form>
     </ModalShell>
   );
@@ -184,7 +185,7 @@ export function RecurringView({
   transactions,
   categories,
   accounts,
-  transactionTypes,
+  standardTypes,
   actions,
   onNotify,
 }: {
@@ -192,7 +193,7 @@ export function RecurringView({
   transactions: Transaction[];
   categories: CategoryOption[];
   accounts: Account[];
-  transactionTypes: TransactionTypeOption[];
+  standardTypes: StandardTransactionType[];
   actions: FinanceActions;
   onNotify: (message: string) => void;
 }) {
@@ -202,32 +203,30 @@ export function RecurringView({
   const [selectedDistributionId, setSelectedDistributionId] = useState('');
   const [scheduleMonth, setScheduleMonth] = useState(() => todayKey());
   const [showEntriesPage, setShowEntriesPage] = useState(false);
-  const typeById = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item])), [transactionTypes]);
   const categoryById = useMemo(() => new Map(categories.map((item) => [item.id, item])), [categories]);
   const accountById = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
-  const kindByTypeId = useMemo(() => new Map(transactionTypes.map((item) => [item.id, item.kind])), [transactionTypes]);
   const today = todayKey();
 
   const activeExpenseEntries = useMemo(
-    () => entries.filter((entry) => entry.isActive && kindByTypeId.get(entry.typeId) === 'expense'),
-    [entries, kindByTypeId],
+    () => entries.filter((entry) => entry.isActive && entry.kind === 'expense'),
+    [entries],
   );
   const activeIncomeEntries = useMemo(
-    () => entries.filter((entry) => entry.isActive && kindByTypeId.get(entry.typeId) === 'income'),
-    [entries, kindByTypeId],
+    () => entries.filter((entry) => entry.isActive && entry.kind === 'income'),
+    [entries],
   );
   const pausedExpenseCount = useMemo(
-    () => entries.filter((entry) => !entry.isActive && kindByTypeId.get(entry.typeId) === 'expense').length,
-    [entries, kindByTypeId],
+    () => entries.filter((entry) => !entry.isActive && entry.kind === 'expense').length,
+    [entries],
   );
   const monthlyExpense = useMemo(() => activeExpenseEntries.reduce((total, entry) => total + monthlyEquivalent(entry), 0), [activeExpenseEntries]);
   const monthlyIncome = useMemo(() => activeIncomeEntries.reduce((total, entry) => total + monthlyEquivalent(entry), 0), [activeIncomeEntries]);
   const netMonthlyCashFlow = monthlyIncome - monthlyExpense;
 
   const upcoming = useMemo(
-    () => scheduledOccurrences(entries, transactions, kindByTypeId, today, addDays(today, 29))
+    () => scheduledOccurrences(entries, transactions, today, addDays(today, 29))
       .filter((occurrence) => occurrence.kind === 'expense' && occurrence.status === 'scheduled'),
-    [entries, transactions, kindByTypeId, today],
+    [entries, transactions, today],
   );
   const upcomingSeven = useMemo(
     () => upcoming.filter((occurrence) => occurrence.date <= addDays(today, 6)),
@@ -278,14 +277,14 @@ export function RecurringView({
   const scheduleDays = useMemo(() => calendarDaysForMonth(scheduleBounds.start), [scheduleBounds.start]);
   const scheduledExpensesByDate = useMemo(() => {
     const grouped = new Map<string, ReturnType<typeof scheduledOccurrences>>();
-    for (const occurrence of scheduledOccurrences(entries, transactions, kindByTypeId, scheduleBounds.start, scheduleBounds.end)) {
+    for (const occurrence of scheduledOccurrences(entries, transactions, scheduleBounds.start, scheduleBounds.end)) {
       if (occurrence.kind !== 'expense') continue;
       const items = grouped.get(occurrence.date) ?? [];
       items.push(occurrence);
       grouped.set(occurrence.date, items);
     }
     return grouped;
-  }, [entries, transactions, kindByTypeId, scheduleBounds]);
+  }, [entries, transactions, scheduleBounds]);
   const scheduledExpenseCount = useMemo(
     () => [...scheduledExpensesByDate.values()].reduce((total, occurrences) => total + occurrences.length, 0),
     [scheduledExpensesByDate],
@@ -332,14 +331,13 @@ export function RecurringView({
         ) : (
           <div className="recurring-list">
             {entries.map((entry) => {
-              const type = typeById.get(entry.typeId);
               const category = entry.categoryId ? categoryById.get(entry.categoryId) : null;
               const account = accountById.get(entry.accountId);
               const due = entry.nextDate <= todayKey();
               return <article className={`surface-card recurring-card ${entry.isActive ? '' : 'paused'}`} key={entry.id}>
                 <div className="recurring-icon">{category?.emoji || <Repeat2 size={18} />}</div>
-                <div className="recurring-main"><div className="recurring-title-row"><h3>{entry.name}</h3>{!entry.isActive ? <span className="status-tag inactive">Paused</span> : due ? <span className="due-tag">Due now</span> : null}</div><p>{type?.name || 'Archived type'} · {category?.name || (type?.kind === 'transfer' ? 'Transfer' : 'Archived category')} · {account?.name || 'Archived account'}</p><small>Every {entry.intervalValue} {entry.intervalUnit}{entry.intervalValue === 1 ? '' : 's'} · Next due {formatDate(entry.nextDate)}{entry.endDate ? ` · Ends ${formatDate(entry.endDate)}` : ''}{entry.lastProcessedDate ? ` · Last processed ${formatDate(entry.lastProcessedDate)}` : ''}</small></div>
-                <div className="recurring-amount"><strong className={type?.kind === 'income' ? 'positive' : ''}>{formatMoney(entry.amount)}</strong><span>{type?.kind || 'transaction'}</span></div>
+                <div className="recurring-main"><div className="recurring-title-row"><h3>{entry.name}</h3>{!entry.isActive ? <span className="status-tag inactive">Paused</span> : due ? <span className="due-tag">Due now</span> : null}</div><p>{category ? category.name + ' · ' : ''}{account?.name || 'Archived account'}</p><small>Every {entry.intervalValue} {entry.intervalUnit}{entry.intervalValue === 1 ? '' : 's'} · Next due {formatDate(entry.nextDate)}{entry.endDate ? ` · Ends ${formatDate(entry.endDate)}` : ''}{entry.lastProcessedDate ? ` · Last processed ${formatDate(entry.lastProcessedDate)}` : ''}</small></div>
+                <div className="recurring-amount"><strong className={entry.kind === 'income' ? 'positive' : ''}>{formatMoney(entry.amount)}</strong><span>{entry.kind ? transactionKindLabels[entry.kind] : '—'}</span></div>
                 <div className="item-actions recurring-actions">
                   {due ? <button className="primary-button compact-primary" type="button" onClick={() => void processDue()} disabled={busyId === 'processing' || !entry.isActive}><Play size={14} /> Process due</button> : null}
                   <button className="ghost-button" type="button" onClick={() => setEditingEntry(entry)} disabled={busyId === entry.id}><Pencil size={15} /> Edit</button>
@@ -352,7 +350,7 @@ export function RecurringView({
         )}
         {entries.some((entry) => entry.isActive && entry.nextDate <= todayKey()) ? <div className="recurring-process-row"><span>Due entries generate once only and are labelled Scheduled.</span><button className="secondary-button" type="button" onClick={() => void processDue()} disabled={busyId === 'processing'}>{busyId === 'processing' ? 'Processing...' : 'Process all due entries'}</button></div> : null}
       </section>
-      {editingEntry !== undefined ? <RecurringModal transactionTypes={transactionTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
+      {editingEntry !== undefined ? <RecurringModal standardTypes={standardTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
     </>;
   }
 
@@ -415,7 +413,7 @@ export function RecurringView({
         </section>
 
       </section>
-      {editingEntry !== undefined ? <RecurringModal transactionTypes={transactionTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
+      {editingEntry !== undefined ? <RecurringModal standardTypes={standardTypes} categories={categories} accounts={accounts} entry={editingEntry} onClose={() => setEditingEntry(undefined)} onSubmit={createEntry} /> : null}
     </>
   );
 }
@@ -469,7 +467,7 @@ function ActivityLog({ data, workspaceOwnerId }: { data: FinanceData; workspaceO
           <option value="all">All actions</option><option value="created">Created</option><option value="updated">Updated</option><option value="renamed">Renamed</option><option value="deleted">Deleted</option><option value="paused">Paused</option><option value="resumed">Resumed</option><option value="signed_in">Signed in</option><option value="signed_out">Signed out</option>
         </Select>
         <Select value={entity} onChange={(event) => changeFilters(() => setEntity(event.target.value as ActivityEvent['entityTable'] | 'all'))} aria-label="Filter activity by item type">
-          <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="investment_types">Investment types</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="transaction_types">Transaction types</option><option value="authentication">Sign-in activity</option>
+          <option value="all">All items</option><option value="transactions">Transactions</option><option value="investments">Investments</option><option value="investment_types">Investment types</option><option value="recurring_entries">Recurring</option><option value="budgets">Budgets</option><option value="accounts">Accounts</option><option value="categories">Categories</option><option value="authentication">Sign-in activity</option>
         </Select>
         <DatePicker label="From" value={from} max={to || undefined} onChange={(value) => changeFilters(() => setFrom(value))} clearable />
         <DatePicker label="To" value={to} min={from || undefined} onChange={(value) => changeFilters(() => setTo(value))} clearable />
@@ -498,14 +496,13 @@ function DetailGroup({ title, values }: { title: string; values: Record<string, 
 
 function currentRecordDetails(event: ActivityEvent, data: FinanceData): Record<string, unknown> | null {
   const accountById = new Map(data.accounts.map((account) => [account.id, account]));
-  const typeById = new Map(data.transactionTypes.map((type) => [type.id, type]));
+  const labelsByTypeId = new Map(data.standardTypes.map((type) => [type.id, transactionKindLabels[type.kind]]));
   const categoryById = new Map(data.categories.map((category) => [category.id, category]));
   if (event.entityTable === 'transactions') {
     const item = data.transactions.find((transaction) => transaction.id === event.entityId);
     if (!item) return null;
     return {
-      'Name': item.name, 'Amount': formatMoney(item.amount), 'Counts as': item.kind,
-      'Transaction type': item.typeName, 'Category': item.categoryName ?? 'None', 'Account': item.accountName,
+      'Name': item.name, 'Amount': formatMoney(item.amount), 'Type': transactionKindLabels[item.kind], 'Category': item.categoryName ?? 'None', 'Account': item.accountName,
       'To account': item.toAccountName ?? '—', 'Date': formatDate(item.date), 'Time': item.time ? formatTime(item.time) : 'Not recorded',
       'Source': item.source === 'scheduled' ? 'Scheduled recurring entry' : item.source === 'investment' ? 'Investment entry' : 'Manual entry',
     };
@@ -514,7 +511,7 @@ function currentRecordDetails(event: ActivityEvent, data: FinanceData): Record<s
     const item = data.recurringEntries.find((entry) => entry.id === event.entityId);
     if (!item) return null;
     return {
-      'Name': item.name, 'Amount': formatMoney(item.amount), 'Transaction type': typeById.get(item.typeId)?.name ?? 'Archived type',
+      'Name': item.name, 'Amount': formatMoney(item.amount), 'Type': item.kind ? transactionKindLabels[item.kind] : '—',
       'Category': item.categoryId ? (categoryById.get(item.categoryId)?.name ?? 'Archived category') : 'Transfer',
       'Account': accountById.get(item.accountId)?.name ?? 'Archived account',
       'To account': item.toAccountId ? (accountById.get(item.toAccountId)?.name ?? 'Archived account') : '—',
@@ -536,12 +533,7 @@ function currentRecordDetails(event: ActivityEvent, data: FinanceData): Record<s
   if (event.entityTable === 'categories') {
     const item = data.categories.find((category) => category.id === event.entityId);
     if (!item) return null;
-    return { 'Category name': item.name, 'Emoji': item.emoji || 'None', 'Transaction types': item.transactionTypeIds.map((id) => typeById.get(id)?.name ?? 'Archived type').join(', ') || 'None', 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
-  }
-  if (event.entityTable === 'transaction_types') {
-    const item = data.transactionTypes.find((type) => type.id === event.entityId);
-    if (!item) return null;
-    return { 'Type name': item.name, 'Counts as': item.kind, 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
+    return { 'Category name': item.name, 'Emoji': item.emoji || 'None', 'Used for': item.transactionTypeIds.map((id) => labelsByTypeId.get(id)).filter(Boolean).join(', ') || 'None', 'Status': item.deletedAt ? 'Deleted' : item.isActive ? 'Active' : 'Inactive' };
   }
   if (event.entityTable === 'investments') {
     const item = data.investments.find((investment) => investment.id === event.entityId);

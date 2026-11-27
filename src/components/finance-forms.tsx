@@ -1,12 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { RupeeInput } from '@/components/rupee-input';
-import { AccountCreateForm, AccountPicker, CategoryPicker, TypePicker, type AccountDraft } from '@/components/transaction-pickers';
+import { AccountCreateForm, AccountPicker, CategoryPicker, TransactionKindSelect, type AccountDraft } from '@/components/transaction-pickers';
 import { DatePicker } from '@/components/date-picker';
 import { ModalShell } from '@/components/ui';
 import {
   categoriesFor,
   currentTimeKey,
-  isInvestmentManagedTransactionType,
   parseAmount,
   todayKey,
   type Account,
@@ -14,7 +13,7 @@ import {
   type TransactionDraft,
   type Transaction,
   type TransactionKind,
-  type TransactionTypeOption,
+  type StandardTransactionType,
 } from '@/lib/finance';
 
 function errorMessage(error: unknown): string {
@@ -99,12 +98,10 @@ export function EditAccountModal({
 
 export function AddTransactionModal({
   accounts,
-  transactionTypes,
+  standardTypes,
   categories,
   onClose,
   onSubmit,
-  onCreateTransactionType,
-  onUpdateTransactionType,
   onCreateCategory,
   onUpdateCategory,
   onCreateAccount,
@@ -112,12 +109,10 @@ export function AddTransactionModal({
   transaction,
 }: {
   accounts: Account[];
-  transactionTypes: TransactionTypeOption[];
+  standardTypes: StandardTransactionType[];
   categories: CategoryOption[];
   onClose: () => void;
   onSubmit: (draft: TransactionDraft) => Promise<void>;
-  onCreateTransactionType: (input: { name: string; kind: TransactionKind }) => Promise<string>;
-  onUpdateTransactionType: (id: string, input: { name: string; kind: TransactionKind }) => Promise<void>;
   onCreateCategory: (input: { name: string; emoji: string | null; parentId: null; transactionTypeIds: string[] }) => Promise<string>;
   onUpdateCategory: (id: string, input: { name: string; emoji: string | null; parentId: string | null; transactionTypeIds: string[] }) => Promise<void>;
   onCreateAccount: (draft: AccountDraft) => Promise<string>;
@@ -125,7 +120,7 @@ export function AddTransactionModal({
   transaction?: Transaction | null;
 }) {
   const editing = Boolean(transaction);
-  const [typeId, setTypeId] = useState(transaction?.typeId ?? '');
+  const [kind, setKind] = useState<TransactionKind>(transaction?.kind ?? 'expense');
   const [name, setName] = useState(transaction?.name ?? '');
   const [amount, setAmount] = useState(transaction ? String(transaction.amount) : '');
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? '');
@@ -136,9 +131,8 @@ export function AddTransactionModal({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const selectableTransactionTypes = transactionTypes.filter((option) => !isInvestmentManagedTransactionType(option));
-  const selectedType = selectableTransactionTypes.find((option) => option.id === typeId);
-  const isTransfer = selectedType?.kind === 'transfer';
+  const selectedType = standardTypes.find((option) => option.kind === kind);
+  const isTransfer = kind === 'transfer';
   const compatibleCategories = selectedType ? categoriesFor(categories, selectedType.id) : [];
   const activeCategoryId = compatibleCategories.some((option) => option.id === categoryId) ? categoryId : '';
   const activeAccountId = accounts.some((account) => account.id === accountId) ? accountId : '';
@@ -148,7 +142,7 @@ export function AddTransactionModal({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedType) {
-      setError('Choose a transaction type.');
+      setError('The database update for the standard types is pending.');
       return;
     }
     const value = parseAmount(amount);
@@ -200,13 +194,7 @@ export function AddTransactionModal({
       <form className="modal-form" onSubmit={submit}>
         {editing ? <p className="modal-description">Update the details below. Account balances and reports recalculate from the corrected entry.</p> : null}
         <div className="form-grid">
-          <TypePicker
-            value={typeId}
-            options={selectableTransactionTypes}
-            onChange={setTypeId}
-            onCreate={onCreateTransactionType}
-          onUpdate={onUpdateTransactionType}
-          />
+          <label>Type<TransactionKindSelect value={kind} onChange={setKind} /></label>
           <label>
             Amount (₹)
             <RupeeInput
@@ -258,11 +246,7 @@ export function AddTransactionModal({
               ) : null}
             </>
           ) : (
-            <p className="modal-description full-field">
-              {selectableTransactionTypes.length === 0
-                ? 'Create a transaction type first. Its categories and accounts will appear here.'
-                : 'Choose a transaction type to see its categories and accounts.'}
-            </p>
+            <p className="modal-description full-field">The database update for the standard types is pending.</p>
           )}
           <DatePicker label="Date" value={date} onChange={setDate} />
           <label>

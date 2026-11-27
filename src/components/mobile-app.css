@@ -42,8 +42,8 @@
   margin: 29px 0 28px;
 }
 
-.premium-mobile-shell .mobile-kind-tabs { margin-top: 0; }
-.premium-mobile-shell .mobile-kind-tabs button { font-size: 15px; }
+.premium-mobile-shell .mobile-kind-tabs { margin-top: 0; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, 1.6fr); }
+.premium-mobile-shell .mobile-kind-tabs button { font-size: 15px; padding-inline: 4px; }
 .premium-mobile-shell .mobile-kind-tabs button.active { border-bottom-color: #fff; }
 .premium-mobile-shell .mobile-form { gap: 13px; margin-top: 21px; }
 

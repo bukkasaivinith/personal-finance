@@ -18,16 +18,15 @@ import {
   type Transaction,
   type TransactionDraft,
   type TransactionKind,
-  type TransactionTypeOption,
   isUsable,
 } from '@/lib/finance';
 import { supabase } from '@/lib/supabase';
 import { publicApiError } from '@/lib/public-api-error';
 
-export type ItemTable = 'transaction_types' | 'categories' | 'accounts';
+export type ItemTable = 'categories' | 'accounts';
 
 type StatusRow = { id: string; is_active: boolean; deleted_at: string | null };
-type TransactionTypeRow = StatusRow & { name: string; kind: TransactionKind };
+type TransactionTypeRow = { id: string; kind: TransactionKind; is_standard: boolean };
 type CategoryRow = StatusRow & { name: string; emoji: string | null; parent_id: string | null };
 type CategoryLinkRow = { category_id: string; transaction_type_id: string };
 type AccountRow = StatusRow & {
@@ -40,8 +39,6 @@ type AccountRow = StatusRow & {
 type TransactionRow = {
   id: string;
   name: string;
-  transaction_type_id: string;
-  transaction_type_name: string;
   transaction_kind: TransactionKind;
   category_id: string | null;
   category_name: string | null;
@@ -207,11 +204,11 @@ async function loadAnalyticsSavingsActivity(ownerId: string, signal?: AbortSigna
 
   function entry(id: string, account: Pick<SavingsOpeningRow, 'id' | 'name'>, activity: keyof typeof savingsActivityLabels,
     amount: number, date: string, time: string | null, note = ''): AnalyticsTransaction {
-    const typeName = savingsActivityLabels[activity];
+    const label = savingsActivityLabels[activity];
     return {
       id: `savings-${activity}:${id}`,
-      name: [typeName, note].filter(Boolean).join(' · '),
-      typeId: `savings:${activity}`, typeName, categoryId: 'savings', categoryName: 'Savings',
+      name: [label, note].filter(Boolean).join(' · '),
+      categoryId: 'savings', categoryName: 'Savings',
       kind: 'savings', source: 'savings', savingsActivity: activity,
       amount: Number(amount), date, time, accountId: `savings:${account.id}`, accountName: `${account.name} (Savings)`,
       toAccountId: null, toAccountName: null,
@@ -247,6 +244,9 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
   const investmentId = recordId('investments');
   const investmentTypeId = recordId('investment_types');
   const recurringId = recordId('recurring_entries');
+  const typeQuery = supabase.from('transaction_types').select('id, kind, is_standard', { count: 'exact' })
+    .eq('user_id', workspaceOwnerId).order('id');
+  if (scope !== 'recurring' && !recurringId) typeQuery.eq('is_standard', true);
   const budgetId = recordId('budgets');
   const budgetsQuery = supabase.from('budgets').select('id, category_id, amount', { count: 'exact' })
     .eq('user_id', workspaceOwnerId).order('created_at').order('id');
@@ -269,8 +269,7 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
   if (investmentTypeId) investmentTypesQuery.eq('id', investmentTypeId);
   const [typeResult, categoryResult, linkResult, accountResult, transactionRows, budgetResult, recurringResult, investmentResult,
     investmentTypeResult, withdrawalResult, ipoLinks, transactionUsage, savingsActivity] = await Promise.all([
-    readRows(true, supabase.from('transaction_types').select('id, name, kind, is_active, deleted_at', { count: 'exact' })
-      .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
+    readRows(true, typeQuery, signal),
     readRows(true, supabase.from('categories').select('id, name, emoji, parent_id, is_active, deleted_at', { count: 'exact' })
       .eq('user_id', workspaceOwnerId).order('created_at').order('id'), signal),
     readRows(true, supabase.from('category_transaction_types').select('category_id, transaction_type_id', { count: 'exact' })
@@ -300,21 +299,23 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
   const investmentTypeRows = investmentTypeResult as InvestmentTypeRow[];
   const withdrawalRows = withdrawalResult as InvestmentWithdrawalRow[];
 
-  const transactionTypes: TransactionTypeOption[] = typeRows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    kind: row.kind,
-    ...statusOf(row),
-  }));
+  const standardTypes = typeRows.filter((row) => row.is_standard).map(({ id, kind }) => ({ id, kind }));
+  const kindByTypeId = new Map(typeRows.map(({ id, kind }) => [id, kind]));
+  const standardIds = new Set(standardTypes.map(({ id }) => id));
+  const categoryTypesById = new Map<string, string[]>();
+  for (const { category_id, transaction_type_id } of linkRows) {
+    if (!standardIds.has(transaction_type_id)) continue;
+    const links = categoryTypesById.get(category_id);
+    if (links) links.push(transaction_type_id);
+    else categoryTypesById.set(category_id, [transaction_type_id]);
+  }
 
   const categories: CategoryOption[] = categoryRows.map((row) => ({
     id: row.id,
     name: row.name,
     emoji: row.emoji,
     parentId: row.parent_id,
-    transactionTypeIds: linkRows
-      .filter((link) => link.category_id === row.id)
-      .map((link) => link.transaction_type_id),
+    transactionTypeIds: categoryTypesById.get(row.id) ?? [],
     ...statusOf(row),
   }));
 
@@ -330,24 +331,19 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
     ...statusOf(row),
   }));
 
-  const typeById = new Map(transactionTypes.map((option) => [option.id, option]));
   const categoryById = new Map(categories.map((option) => [option.id, option]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const archived = (item: { isActive: boolean; deletedAt: string | null } | undefined) =>
     !item || !isUsable(item);
 
   const transactions: Transaction[] = transactionRows.map((row) => {
-    const transactionType = typeById.get(row.transaction_type_id);
     const category = row.category_id === null ? undefined : categoryById.get(row.category_id);
     const account = accountById.get(row.account_id);
     const destinationAccount = row.to_account_id === null ? undefined : accountById.get(row.to_account_id);
     return {
       id: row.id,
       name: row.name,
-      typeId: row.transaction_type_id,
-      typeName: transactionType?.name ?? row.transaction_type_name,
-      typeArchived: archived(transactionType),
-      kind: transactionType?.kind ?? row.transaction_kind,
+      kind: row.transaction_kind,
       categoryId: row.category_id,
       categoryName: row.category_id === null ? null : category?.name ?? row.category_name,
       categoryEmoji: category?.emoji ?? null,
@@ -385,7 +381,7 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
   const recurringEntries: RecurringEntry[] = recurringRows.map((row) => ({
     id: row.id,
     name: row.name,
-    typeId: row.transaction_type_id,
+    kind: kindByTypeId.get(row.transaction_type_id) ?? null,
     categoryId: row.category_id,
     amount: Number(row.amount),
     accountId: row.account_id,
@@ -438,30 +434,7 @@ export async function loadFinanceData(workspaceOwnerId: string, scope: FinanceSc
     .map((row) => ({ id: row.id, name: row.name }));
 
   const analyticsTransactions = savingsActivity && [...transactions, ...savingsActivity];
-  return { transactionTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes, transactionUsage, analyticsTransactions };
-}
-
-export async function insertTransactionType(input: { name: string; kind: TransactionKind }, workspaceOwnerId: string): Promise<string> {
-  const { data, error } = await supabase
-    .from('transaction_types')
-    .insert({ name: input.name, kind: input.kind, user_id: workspaceOwnerId })
-    .select('id')
-    .single();
-  if (error) failWith(error);
-  return (data as { id: string }).id;
-}
-
-async function replaceCategoryLinks(categoryId: string, transactionTypeIds: string[], workspaceOwnerId: string): Promise<void> {
-  const { error: clearError } = await supabase
-    .from('category_transaction_types')
-    .delete()
-    .eq('category_id', categoryId);
-  if (clearError) failWith(clearError);
-  if (transactionTypeIds.length === 0) return;
-  const { error: linkError } = await supabase
-    .from('category_transaction_types')
-    .insert(transactionTypeIds.map((typeId) => ({ category_id: categoryId, transaction_type_id: typeId, user_id: workspaceOwnerId })));
-  if (linkError) failWith(linkError);
+  return { standardTypes, categories, accounts, transactions, budgets, recurringEntries, investments, investmentTypes, transactionUsage, analyticsTransactions };
 }
 
 export async function insertCategory(input: {
@@ -469,16 +442,16 @@ export async function insertCategory(input: {
   emoji: string | null;
   parentId: string | null;
   transactionTypeIds: string[];
-}, workspaceOwnerId: string): Promise<string> {
-  const { data, error } = await supabase
-    .from('categories')
-    .insert({ name: input.name, emoji: input.emoji, parent_id: input.parentId, user_id: workspaceOwnerId })
-    .select('id')
-    .single();
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_finance_category', {
+    p_name: input.name,
+    p_emoji: input.emoji,
+    p_parent_id: input.parentId,
+    p_transaction_type_ids: input.transactionTypeIds,
+  });
   if (error) failWith(error);
-  const categoryId = (data as { id: string }).id;
-  await replaceCategoryLinks(categoryId, input.transactionTypeIds, workspaceOwnerId);
-  return categoryId;
+  if (typeof data !== 'string') throw new Error('Could not confirm that the category was saved.');
+  return data;
 }
 
 export async function updateCategory(
@@ -493,16 +466,6 @@ export async function updateCategory(
     p_transaction_type_ids: input.transactionTypeIds,
   });
   if (error) failWith(error);
-}
-
-export async function updateTransactionType(id: string, input: { name: string; kind: TransactionKind }): Promise<void> {
-  const result = await supabase
-    .from('transaction_types')
-    .update({ name: input.name, kind: input.kind, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select('id')
-    .maybeSingle();
-  requireWrittenRecord(result);
 }
 
 export async function updateAccount(id: string, input: { name: string; description: string }): Promise<void> {

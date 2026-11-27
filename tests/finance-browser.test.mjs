@@ -73,13 +73,14 @@ async function startFixture(t) {
   return { browser, origin: 'http://127.0.0.1:' + server.address().port };
 }
 
-async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }, athlete) {
+async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }, athlete, finance) {
   const page = await browser.newPage({ serviceWorkers: 'allow' });
   const rpcCalls = [];
   const rpcPaths = [];
   const policyViolations = [];
   let ledgerError = false;
   let rejectSavingsWrite = false;
+  const ledger = [...transactions];
   const savings = new Map(savingsActivity.openings.map((entry) => [entry.id, entry]));
   await page.addInitScript(() => {
     window.__financePolicyViolations = [];
@@ -112,6 +113,23 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
       'content-range': rows.length ? `0-${rows.length - 1}/${rows.length}` : '*/0',
       'access-control-expose-headers': 'content-range',
     });
+    if (finance && request.method() === 'GET') {
+      if (url.pathname === '/rest/v1/transaction_types') {
+        return savingsPage(finance.types.filter(({ is_standard }) => !url.searchParams.has('is_standard') || is_standard));
+      }
+      if (url.pathname === '/rest/v1/accounts') return savingsPage(finance.accounts);
+      if (url.pathname === '/rest/v1/categories') return savingsPage(finance.categories);
+      if (url.pathname === '/rest/v1/category_transaction_types') return savingsPage(finance.links);
+      if (url.pathname === '/rest/v1/recurring_entries') return savingsPage(finance.recurring);
+    }
+    if (finance && url.pathname === '/rest/v1/transactions' && request.method() === 'POST') {
+      if (finance.rejectWrite) return json({ code: '42501', message: 'Fixture rejected the save' }, 403);
+      const input = request.postDataJSON();
+      const type = finance.types.find(({ id }) => id === input.transaction_type_id);
+      assert.ok(type.is_standard);
+      ledger.push({ ...transaction, ...input, id: 'saved-' + ledger.length, transaction_kind: type.kind, transaction_type_name: type.kind });
+      return json(null, 201);
+    }
     if (url.pathname === '/rest/v1/savings_entries') {
       if (request.method() === 'GET') {
         assert.equal(url.searchParams.get('user_id'), 'eq.' + fixtureId);
@@ -142,7 +160,8 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
       if (name === 'get_finance_transaction_page') {
         if (ledgerError) return json({ code: 'XX000', message: 'PRIVATE_FIXTURE_DATABASE_DIAGNOSTIC' }, 500);
         assert.equal(request.headers().authorization, 'Bearer ' + token);
-        return json(request.postDataJSON()?.p_after_id ? [] : transactions);
+        const input = request.postDataJSON();
+        return json(input?.p_after_id ? [] : ledger.filter((row) => !input?.p_scheduled_only || row.transaction_source === 'scheduled'));
       }
       if (name === 'get_finance_transaction_usage') return json({ types: { [fixtureId]: 1 }, categories: {} });
       if (name === 'get_ipo_portfolio') return json({ applications: [], demat_accounts: [], allotment_date_supported: true });
@@ -283,6 +302,96 @@ test('production build opens protected routes, preserves history, clears sign-ou
   assert.deepEqual(policyViolations, []);
 });
 
+test('finance entry screens use three fixed types and preserve legacy records', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const status = { is_active: true, deleted_at: null };
+  const finance = {
+    types: [
+      ...['income', 'expense', 'transfer'].map((kind) => ({ id: 'standard-' + kind, kind, is_standard: true })),
+      { id: 'old-groceries', kind: 'expense', is_standard: false },
+    ],
+    accounts: ['Bank account', 'Cash wallet'].map((name, index) => ({
+      id: 'account-' + index, name, opening_balance: 0, opening_balance_date: '2026-01-01', is_liability: false, ...status,
+    })),
+    categories: [
+      { id: 'groceries', name: 'Grocery category', parent_id: null, ...status },
+      { id: 'salary', name: 'Salary category', parent_id: null, ...status },
+    ],
+    links: [
+      { category_id: 'groceries', transaction_type_id: 'standard-expense' },
+      { category_id: 'groceries', transaction_type_id: 'old-groceries' },
+      { category_id: 'salary', transaction_type_id: 'standard-income' },
+    ],
+    recurring: [{
+      id: 'recurring-groceries', name: 'Weekly groceries', transaction_type_id: 'old-groceries', category_id: 'groceries',
+      amount: 10, account_id: 'account-0', frequency: 'weekly', interval_value: 1, interval_unit: 'week',
+      next_date: '2027-01-10', end_date: null, is_active: true,
+    }],
+    rejectWrite: true,
+  };
+  const { page } = await newPage(browser, [{ ...transaction, transaction_type_id: 'old-groceries', transaction_type_name: 'Legacy custom type' }],
+    undefined, undefined, finance);
+  await page.goto(origin + '/transactions');
+  await signIn(page);
+  await waitForHeading(page, 'Transactions');
+  const legacy = page.getByRole('row').filter({ hasText: 'Fixture <draft> & tea' });
+  await legacy.getByRole('cell', { name: 'Expense', exact: true }).waitFor();
+  assert.equal(await page.getByText('Legacy custom type', { exact: true }).count(), 0);
+
+  await page.getByRole('button', { name: 'Add transaction', exact: true }).first().click();
+  const form = page.getByRole('dialog', { name: 'Add transaction' });
+  const type = form.getByRole('combobox', { name: 'Type', exact: true });
+  await type.click();
+  assert.deepEqual(await page.getByRole('listbox').getByRole('option').allTextContents(), ['Income', 'Expense', 'Transfer between accounts']);
+  await page.getByRole('option', { name: 'Transfer between accounts', exact: true }).click();
+  assert.equal(await form.getByRole('combobox', { name: 'Category' }).count(), 0);
+  await form.getByRole('combobox', { name: 'To account' }).waitFor();
+  await type.click();
+  await page.getByRole('option', { name: 'Income', exact: true }).click();
+  const category = form.getByRole('combobox', { name: 'Category', exact: true });
+  await category.click();
+  await page.getByRole('option', { name: 'Salary category', exact: true }).waitFor();
+  assert.equal(await page.getByRole('option', { name: 'Grocery category', exact: true }).count(), 0);
+  await category.press('Escape');
+  await type.click();
+  await page.getByRole('option', { name: 'Expense', exact: true }).click();
+  await category.click();
+  await page.getByRole('option', { name: 'Grocery category', exact: true }).click();
+  await form.getByRole('combobox', { name: 'Account', exact: true }).click();
+  await page.getByRole('option', { name: 'Bank account', exact: true }).click();
+  await form.getByLabel('Amount (₹)').fill('20');
+  await form.getByLabel('Description').fill('New groceries');
+  await form.getByRole('button', { name: 'Save transaction' }).click();
+  await form.getByText('This operation is unavailable for your account.').waitFor();
+  finance.rejectWrite = false;
+  await form.getByRole('button', { name: 'Save transaction' }).click();
+  await form.waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.getByRole('row').filter({ hasText: 'New groceries' }).getByRole('cell', { name: 'Expense', exact: true }).waitFor();
+
+  await page.goto(origin + '/setup');
+  await waitForHeading(page, 'Categories');
+  assert.equal(await page.getByRole('button', { name: 'Add type' }).count(), 0);
+  await page.getByRole('button', { name: 'Add category' }).click();
+  const categoryForm = page.getByRole('dialog', { name: 'Create category' });
+  assert.deepEqual((await categoryForm.getByRole('checkbox').all()).length, 2);
+  await categoryForm.getByRole('checkbox', { name: 'Income', exact: true }).waitFor();
+  await categoryForm.getByRole('checkbox', { name: 'Expense', exact: true }).waitFor();
+
+  await page.goto(origin + '/recurring');
+  await page.getByRole('button', { name: 'View recurring entries' }).click();
+  await page.locator('.recurring-card').filter({ hasText: 'Weekly groceries' }).getByRole('button', { name: 'Edit', exact: true }).click();
+  const recurringForm = page.getByRole('dialog', { name: 'Edit recurring entry' });
+  assert.equal(await recurringForm.getByRole('combobox', { name: 'Type', exact: true }).textContent(), 'Expense');
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(origin + '/mobile');
+  await waitForHeading(page, 'New Transaction');
+  assert.deepEqual(await page.getByRole('tab').allTextContents(), ['Income', 'Expense', 'Transfer between accounts']);
+  assert.ok(await page.getByRole('tablist', { name: 'Transaction kind' }).evaluate((tabs) => tabs.scrollWidth <= tabs.clientWidth));
+  assert.equal(await page.getByRole('combobox', { name: 'Transaction type' }).count(), 0);
+});
+
 test('Analytics offers only filters matching the other selections and selected dates', { timeout: 120000 }, async (t) => {
   const { browser, origin } = await startFixture(t);
   const now = new Date();
@@ -314,31 +423,27 @@ test('Analytics offers only filters matching the other selections and selected d
   }
 
   await checkMenu('Account', ['Bank', 'Cash'], 'Bank');
-  await checkMenu('Transaction type', ['Bills', 'Deposit', 'Groceries']);
   await checkMenu('Category', ['Food', 'Household', 'Uncategorised']);
-  await checkMenu('Classification', ['Expense', 'Transfer'], 'Expense');
-  await checkMenu('Transaction type', ['Bills', 'Groceries']);
+  await checkMenu('Type', ['Expense', 'Transfer between accounts'], 'Expense');
   await checkMenu('Category', ['Food', 'Household'], 'Household');
   await checkMenu('Account', ['Bank']);
-  await checkMenu('Transaction type', ['Bills'], 'Bills');
-  await checkMenu('Classification', ['Expense']);
+  await checkMenu('Type', ['Expense']);
   const statement = page.locator('.finance-analytics-table');
   await statement.getByText('Electricity payment').waitFor();
   assert.equal(await statement.locator('tbody tr').count(), 1);
 
   await page.getByRole('button', { name: 'Daily', exact: true }).click();
   assert.equal(await filter('Account').textContent(), 'Bank');
-  assert.equal(await filter('Transaction type').textContent(), 'All');
   assert.equal(await filter('Category').textContent(), 'All');
-  assert.equal(await filter('Classification').textContent(), 'Expense');
-  await checkMenu('Transaction type', ['Groceries']);
+  assert.equal(await filter('Type').textContent(), 'Expense');
+  await checkMenu('Type', ['Expense', 'Transfer between accounts']);
   await statement.getByText('Grocery purchase').waitFor();
   assert.equal(await statement.locator('tbody tr').count(), 1);
 
   await page.getByRole('button', { name: 'Monthly', exact: true }).click();
   await checkMenu('Category', ['Food', 'Household']);
   await checkMenu('Account', ['Bank', 'Cash'], 'All');
-  await checkMenu('Transaction type', ['Bills', 'Groceries', 'Leisure']);
+  await checkMenu('Type', ['Income', 'Expense', 'Transfer between accounts']);
 });
 
 test('Analytics charts investments and savings and appends statement rows on scroll', { timeout: 120000 }, async (t) => {

@@ -3,16 +3,10 @@ import { RupeeInput } from '@/components/rupee-input';
 import { useState, type ReactNode } from 'react';
 import { CategoryEmojiPicker } from '@/components/category-emoji-picker';
 import { DatePicker } from '@/components/date-picker';
-import { parseAmount, todayKey, type Account, type CategoryOption, type TransactionKind, type TransactionTypeOption } from '@/lib/finance';
+import { parseAmount, todayKey, transactionKindLabels, transactionKinds, type Account, type CategoryOption, type TransactionKind } from '@/lib/finance';
 
 const NEW_OPTION = '__new__';
 const EDIT_OPTION = '__edit__';
-
-export const kindChoices: { value: TransactionKind; label: string }[] = [
-  { value: 'expense', label: 'Expense (money out)' },
-  { value: 'income', label: 'Income (money in)' },
-  { value: 'transfer', label: 'Transfer (between your accounts)' },
-];
 
 export type AccountDraft = {
   name: string;
@@ -74,177 +68,10 @@ function InlineCreate({
   );
 }
 
-export function TypePicker({
-  value,
-  options,
-  onChange,
-  onCreate,
-  onUpdate,
-}: {
-  value: string;
-  options: TransactionTypeOption[];
-  onChange: (id: string) => void;
-  onCreate: (input: { name: string; kind: TransactionKind }) => Promise<string>;
-  onUpdate: (id: string, input: { name: string; kind: TransactionKind }) => Promise<void>;
-}) {
-  const [creating, setCreating] = useState(options.length === 0);
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState('');
-  const [editName, setEditName] = useState('');
-  const [kind, setKind] = useState<TransactionKind>('expense');
-  const [editKind, setEditKind] = useState<TransactionKind>('expense');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const selected = options.find((option) => option.id === value);
-
-  const reset = () => {
-    setCreating(false);
-    setEditing(false);
-    setName('');
-    setEditName('');
-    setEditKind('expense');
-    setError('');
-  };
-
-  const select = (next: string) => {
-    if (next === NEW_OPTION) {
-      setEditing(false);
-      setCreating(true);
-      return;
-    }
-    if (next === EDIT_OPTION && selected) {
-      setCreating(false);
-      setEditing(true);
-      setEditName(selected.name);
-      setEditKind(selected.kind);
-      setError('');
-      return;
-    }
-    reset();
-    onChange(next);
-  };
-
-  const confirm = async () => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError('Give the transaction type a name.');
-      return;
-    }
-    if (hasName(options, trimmed)) {
-      setError(`"${trimmed}" already exists.`);
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      const id = await onCreate({ name: trimmed, kind });
-      onChange(id);
-      reset();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmEdit = async () => {
-    if (!selected) return;
-    const trimmed = editName.trim();
-    if (!trimmed) {
-      setError('Give the transaction type a name.');
-      return;
-    }
-    if (options.some((option) => option.id !== selected.id && option.name.toLowerCase() === trimmed.toLowerCase())) {
-      setError(`"${trimmed}" already exists.`);
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      await onUpdate(selected.id, { name: trimmed, kind: editKind });
-      reset();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <>
-      <label>
-        Transaction type
-        <Select value={creating ? NEW_OPTION : editing ? EDIT_OPTION : value} onChange={(event) => select(event.target.value)}>
-          {value === '' && !creating ? (
-            <option value="" disabled>
-              {options.length === 0 ? 'No transaction types yet' : 'Choose a type'}
-            </option>
-          ) : null}
-          {options.map((option) => (
-            <option value={option.id} key={option.id}>
-              {option.name}
-            </option>
-          ))}
-          {selected ? <option value={EDIT_OPTION}>✎ Edit selected transaction type</option> : null}
-          <option value={NEW_OPTION}>+ Create transaction type</option>
-        </Select>
-      </label>
-      {creating ? (
-        <InlineCreate
-          intro={options.length === 0 ? 'Create your first transaction type to get started.' : 'New transaction type'}
-          error={error}
-          saving={saving}
-          onCancel={options.length === 0 ? undefined : reset}
-          onConfirm={() => void confirm()}
-        >
-          <label className="full-field">
-            Type name
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={32}
-              placeholder="e.g. Groceries"
-              autoFocus
-            />
-          </label>
-          <label className="full-field">
-            Counts as
-            <Select value={kind} onChange={(event) => setKind(event.target.value as TransactionKind)}>
-              {kindChoices.map((choice) => (
-                <option value={choice.value} key={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
-            </Select>
-          </label>
-        </InlineCreate>
-      ) : null}
-      {editing && selected ? (
-        <InlineCreate
-          intro="Correct the name or whether this type counts as income or an expense. Existing transactions will update too."
-          error={error}
-          saving={saving}
-          onCancel={reset}
-          onConfirm={() => void confirmEdit()}
-          confirmLabel="Save changes"
-        >
-          <label className="full-field">
-            Transaction type name
-            <input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={32} autoFocus />
-          </label>
-          <label className="full-field">
-            Counts as
-            <Select value={editKind} onChange={(event) => setEditKind(event.target.value as TransactionKind)} disabled={selected.kind === 'transfer'}>
-              {kindChoices
-                .filter((choice) => (selected.kind === 'transfer' ? choice.value === 'transfer' : choice.value !== 'transfer'))
-                .map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
-            </Select>
-          </label>
-          {selected.kind === 'transfer' ? <p className="form-hint full-field">Transfer types stay as transfers because their existing entries have two accounts.</p> : null}
-        </InlineCreate>
-      ) : null}
-    </>
-  );
+export function TransactionKindSelect({ value, onChange }: { value: TransactionKind; onChange: (kind: TransactionKind) => void }) {
+  return <Select value={value} onChange={(event) => onChange(event.target.value as TransactionKind)}>
+    {transactionKinds.map((kind) => <option key={kind} value={kind}>{transactionKindLabels[kind]}</option>)}
+  </Select>;
 }
 
 export function CategoryPicker({
@@ -395,7 +222,7 @@ export function CategoryPicker({
       ) : null}
       {editing && selected ? (
         <InlineCreate
-          intro="Correct this category's name or emoji. Its transaction type stays unchanged."
+          intro="Edit this category’s name or emoji."
           error={error}
           saving={saving}
           onCancel={reset}
