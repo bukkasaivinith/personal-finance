@@ -16,8 +16,21 @@ export function WorkoutSummary({ details, distanceUnit = 'km' }: { details: Work
     {metrics.length || details.asymmetry ? <dl className="workout-summary">{metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
       {details.asymmetry ? <div><dt>Asymmetry rating</dt><dd>{details.asymmetry}</dd></div> : null}
     </dl> : null}
-    {details.zones?.length ? <section><h3>Heart rate zones</h3>
-      {details.zones.map((zone) => <div className="workout-zone" key={zone.zone}><span>Zone {zone.zone} · {zone.minimum}–{zone.maximum} bpm</span><progress value={zone.percent} max={100} aria-label={'Zone ' + zone.zone + ' percentage'} /><span>{zone.seconds === 0 ? '0:00' : formatDuration(zone.seconds)} · {zone.percent}%</span></div>)}
+    {details.zones?.length ? <section className="workout-zones" aria-label="Heart rate zones"><h3>Heart rate zones</h3>
+      <ul className="workout-zone-list">
+        {[...details.zones].sort((first, second) => first.zone - second.zone).map((zone) => (
+          <li className="workout-zone" data-zone={zone.zone} key={zone.zone}>
+            <div className="workout-zone-label"><strong>Zone {zone.zone}</strong><span>{zone.minimum}–{zone.maximum} bpm</span></div>
+            <div className="workout-zone-track" aria-hidden="true">
+              <span style={{ width: Math.max(0, Math.min(100, zone.percent)) + '%' }} />
+            </div>
+            <div className="workout-zone-value">
+              <span>{zone.seconds === 0 ? '0:00' : formatDuration(zone.seconds)}</span>
+              <strong>{recorded(zone.percent, '%')}</strong>
+            </div>
+          </li>
+        ))}
+      </ul>
     </section> : null}
     {details.laps?.length ? <section><h3>Laps</h3><div className="workout-table"><table>
       <thead><tr><th>Lap</th><th>Time</th><th>Distance</th><th>Heart rate</th><th>Pace</th></tr></thead>

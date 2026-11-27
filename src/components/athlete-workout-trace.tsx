@@ -186,30 +186,37 @@ function RouteMap({ coordinates, distanceUnit }: { coordinates: Coordinate[]; di
       left: Math.min(current.left, point.x), right: Math.max(current.right, point.x),
       low: Math.min(current.low, point.y), high: Math.max(current.high, point.y),
     }), { left: 0, right: 0, low: 0, high: 0 });
-    const scale = Math.min(490 / Math.max(.001, bounds.right - bounds.left), 174 / Math.max(.001, bounds.high - bounds.low));
+    const scale = Math.min(350 / Math.max(.001, bounds.right - bounds.left), 222 / Math.max(.001, bounds.high - bounds.low));
     const midX = (bounds.left + bounds.right) / 2;
     const midY = (bounds.low + bounds.high) / 2;
-    const points = surface.map((point) => ({ x: 300 + (point.x - midX) * scale, y: 125 + (midY - point.y) * scale, segment: point.segment }));
+    const points = surface.map((point) => ({ x: 210 + (point.x - midX) * scale, y: 146 + (midY - point.y) * scale, segment: point.segment }));
     const path = points.map((point, index) => (index && points[index - 1].segment === point.segment ? 'L' : 'M')
       + point.x.toFixed(2) + ',' + point.y.toFixed(2)).join(' ');
     const approxMeters = 86 / scale * 1000;
     const magnitude = 10 ** Math.floor(Math.log10(approxMeters));
-    const scaleMeters = Math.floor(approxMeters / magnitude) * magnitude;
+    const scaleMeters = (approxMeters / magnitude >= 5 ? 5 : approxMeters / magnitude >= 2 ? 2 : 1) * magnitude;
     return { path, first: points[0], last: points[points.length - 1], scaleMeters, scaleWidth: scaleMeters / 1000 * scale };
   }, [coordinates]);
 
   return <section className="surface-card activity-detail-section activity-route">
     <div className="card-title-row"><div><h3>Route map</h3><p>GPS track from this workout</p></div></div>
     {map ? <>
-      <svg className="activity-route-map" viewBox="0 0 600 250" role="img" aria-label="GPS route with start and finish">
-        {Array.from({ length: 9 }, (_, index) => <line className="activity-route-grid" key={'v' + index} x1={index * 75} y1={0} x2={index * 75} y2={250} />)}
-        {Array.from({ length: 6 }, (_, index) => <line className="activity-route-grid" key={'h' + index} x1={0} y1={index * 50} x2={600} y2={index * 50} />)}
-        <text className="activity-route-caption" x={555} y={29}>↑ N</text>
+      <svg className="activity-route-map" viewBox="0 0 420 310" role="img" aria-label="GPS route with start and finish">
+        {Array.from({ length: 11 }, (_, index) => <line className="activity-route-grid" key={'v' + index} x1={index * 42} y1={0} x2={index * 42} y2={310} />)}
+        {Array.from({ length: 8 }, (_, index) => <line className="activity-route-grid" key={'h' + index} x1={0} y1={index * 42} x2={420} y2={index * 42} />)}
+        <path className="activity-route-path activity-route-halo" d={map.path} />
         <path className="activity-route-path" d={map.path} />
-        <circle className="activity-route-finish" cx={map.last.x} cy={map.last.y} r={7} />
-        <circle className="activity-route-start" cx={map.first.x} cy={map.first.y} r={5} />
-        <line className="activity-route-scale" x1={20} y1={221} x2={20 + map.scaleWidth} y2={221} />
-        <text className="activity-route-caption" x={20} y={239}>{map.scaleMeters < 100 && distanceUnit === 'km' ? `${map.scaleMeters} m` : formatDistance(map.scaleMeters, distanceUnit)}</text>
+        <circle className="activity-route-start" cx={map.first.x} cy={map.first.y} r={8} />
+        <rect className="activity-route-finish" x={map.last.x - 4.5} y={map.last.y - 4.5} width={9} height={9} rx={2} />
+        <g aria-hidden="true">
+          <circle className="activity-route-key" cx={385} cy={34} r={20} />
+          <text className="activity-route-caption" x={385} y={31} textAnchor="middle">N</text>
+          <path className="activity-route-scale" d="M380 41 L385 36 L390 41 M385 36 V46" />
+          <rect className="activity-route-key" x={12} y={264} width={111} height={33} rx={7} />
+          <path className="activity-route-scale" d={`M22 272 v4 h${map.scaleWidth} v-4`} />
+          <text className="activity-route-caption" x={22} y={289}>{map.scaleMeters < 1000 && distanceUnit === 'km'
+            ? `${number.format(map.scaleMeters)} m` : formatDistance(map.scaleMeters, distanceUnit, 3)}</text>
+        </g>
       </svg>
       <div className="activity-route-legend"><span><i /> Start</span><span><i /> Finish</span></div>
     </> : <p className="card-note">This activity has no saved GPS points. Import a workout file with location data to draw the route.</p>}
