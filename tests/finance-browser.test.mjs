@@ -24,9 +24,10 @@ const transaction = {
   investment_id: null, transaction_source: 'manual', visible_transfer_direction: null,
 };
 
-async function startFixture(t) {
+async function startFixture(t, mapKey = '') {
   process.env.VITE_SUPABASE_URL = api;
   process.env.VITE_SUPABASE_ANON_KEY = 'sb_publishable_test_value';
+  process.env.VITE_MAPTILER_KEY = mapKey;
   const privateSentinel = 'FOR-BROWSER-TEST-ONLY_PRIVATE_SENTINEL';
   process.env.VITE_UNUSED_PRIVATE_SENTINEL = privateSentinel;
   const temp = await realpath(tmpdir());
@@ -571,7 +572,7 @@ test('Analytics charts investments and savings and appends statement rows on scr
 });
 
 test('Athlete Hub opens a private activity page with a chart, a route, and expandable screenshots', { timeout: 120000 }, async (t) => {
-  const { browser, origin } = await startFixture(t);
+  const { browser, origin } = await startFixture(t, 'fixture-map-key');
   const photo = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJWQAAAAASUVORK5CYII=';
   const activity = {
     id: fixtureId, kind: 'run', activity_date: '2026-11-20', duration_seconds: 1200, distance_meters: 3000,
@@ -580,13 +581,28 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   };
   const fixture = {
     activity,
-    details: { metrics: { steps: 3200, maxHeartRate: 172 }, zones: [{ zone: 4, minimum: 160, maximum: 180, seconds: 15, percent: 20 }],
+    details: { metrics: { steps: 3200, maxHeartRate: 172, averageSpeed: 7.4, maximumSpeed: 9.8, averagePace: 482,
+      temperature: 23, humidity: 52, windSpeed: 18, verticalOscillation: 9.6, stiffness: 35, flightTime: 196, groundContact: 185, regularity: .93 },
+      asymmetry: 'Great',
+      zones: [{ zone: 3, minimum: 142, maximum: 161, seconds: 6, percent: 40 },
+        { zone: 4, minimum: 162, maximum: 181, seconds: 9, percent: 60 }],
+      laps: [{ number: 1, seconds: 5, heartRate: 161 }, { number: 2, seconds: 5, heartRate: 162 }, { number: 3, seconds: 5 }],
       samples: [{ seconds: 0, heartRate: 140, latitude: 17, longitude: 78 }, { seconds: 15, heartRate: 172, latitude: 17.0003, longitude: 78 }] },
     media: [{ id: 'screenshot-1', batch_id: 'initial', name: 'workout.png', mime: 'image/png', created_at: activity.created_at }],
     bytes: new Map([['screenshot-1', photo]]),
     rejectUpload: false,
   };
   const { page, rpcCalls } = await newPage(browser, undefined, undefined, fixture);
+  const tileRequests = [];
+  let rejectImagery = false;
+  await page.route('https://api.maptiler.com/**', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/maps/')) tileRequests.push({ url, referer: request.headers().referer });
+    return rejectImagery
+      ? route.abort()
+      : route.fulfill({ contentType: 'image/png', body: Buffer.from(photo, 'base64') });
+  });
   const activityUrl = origin + '/athlete-hub/activities/' + fixtureId;
   await page.goto(activityUrl);
   assert.equal(await page.getByRole('heading', { name: 'Workout summary' }).count(), 0);
@@ -598,16 +614,52 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   const overview = page.getByRole('img', { name: 'All workout trends chart' });
   await overview.waitFor();
   const colors = await overview.locator('.activity-chart-line').evaluateAll((paths) => paths.map((path) => path.style.stroke));
-  assert.equal(new Set(colors).size, 3);
+  assert.equal(new Set(colors).size, 2);
+  assert.equal(await charts.getByRole('button', { name: 'Speed', exact: true }).count(), 0);
+  assert.equal(await page.getByText(/^(Average speed|Maximum speed|Temperature|Humidity|Wind speed|Vertical oscillation|Stiffness|Flight time|Ground contact|Regularity|Asymmetry rating)$/).count(), 0);
+  await page.getByText('Reported average pace', { exact: true }).waitFor();
+  const lapRows = page.locator('.workout-table tbody tr');
+  await lapRows.nth(0).getByRole('cell', { name: 'Zone 3' }).waitFor();
+  await lapRows.nth(1).getByRole('cell', { name: 'Zone 4' }).waitFor();
+  assert.equal(await lapRows.nth(2).getByRole('cell').nth(3).textContent(), '—');
   await overview.press('End');
   const tooltip = page.getByRole('tooltip');
   await tooltip.getByText('Heart rate 172 bpm', { exact: true }).waitFor();
-  await tooltip.getByText('Speed 8 km/h', { exact: true }).waitFor();
   await tooltip.getByText('Pace 7:30 min/km', { exact: true }).waitFor();
   await overview.press('Escape');
   await charts.getByRole('button', { name: 'Heart rate', exact: true }).click();
   await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
-  await page.getByRole('img', { name: 'GPS route with start and finish' }).waitFor();
+  const routeMap = page.getByRole('img', { name: 'GPS route with start and finish' });
+  await routeMap.waitFor();
+  assert.equal(tileRequests.length, 0);
+  const gpsPath = routeMap.locator('path.activity-route-path:not(.activity-route-halo)');
+  const pathBefore = await gpsPath.getAttribute('d');
+  const satellite = page.getByRole('button', { name: 'Satellite', exact: true });
+  rejectImagery = true;
+  await satellite.click();
+  await page.getByText('Satellite imagery couldn’t load. Showing the GPS route.').waitFor();
+  assert.equal(await satellite.getAttribute('aria-pressed'), 'false');
+  assert.ok(await routeMap.locator('.activity-route-grid').count() > 0);
+  rejectImagery = false;
+  await satellite.click();
+  await page.waitForFunction(() => {
+    const tiles = [...document.querySelectorAll('.activity-route-tiles img')];
+    return tiles.length > 0 && tiles.every((tile) => tile.naturalWidth > 0);
+  });
+  assert.ok(tileRequests.length > 0);
+  for (const { url, referer } of tileRequests) {
+    assert.match(url.pathname, /^\/maps\/satellite-v4\/\d+\/\d+\/\d+\.jpg$/);
+    assert.equal(url.searchParams.get('key'), 'fixture-map-key');
+    assert.equal(referer, origin + '/');
+  }
+  await page.getByRole('link', { name: '© MapTiler' }).waitFor();
+  assert.equal(await gpsPath.getAttribute('d'), pathBefore);
+  assert.equal(await routeMap.locator('.activity-route-grid').count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await routeMap.evaluate((map) => map.getBoundingClientRect().right <= window.innerWidth));
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await satellite.click();
+  assert.equal(await page.locator('.activity-route-tiles img').count(), 0);
   const heartRateChart = page.getByRole('img', { name: 'Heart rate chart in bpm' });
   const chartBounds = await heartRateChart.boundingBox();
   const hoverChart = (fraction) => heartRateChart.hover({ position: { x: chartBounds.width * fraction, y: chartBounds.height / 2 } });
@@ -623,9 +675,6 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await tooltip.getByText('Heart rate 172 bpm', { exact: true }).waitFor();
   assert.equal(await page.getByRole('slider', { name: 'Explore workout timeline' }).count(), 0);
   assert.equal(await page.getByText('Zoom to a time range').count(), 0);
-  await charts.getByRole('button', { name: 'Speed', exact: true }).click();
-  await page.getByRole('img', { name: 'Speed chart in km/h' }).waitFor();
-  await tooltip.getByText('Speed 8 km/h', { exact: true }).waitFor();
   await charts.getByRole('button', { name: 'Pace', exact: true }).click();
   await page.getByRole('img', { name: 'Pace chart in min/km' }).waitFor();
   await tooltip.getByText('Pace 7:30 min/km', { exact: true }).waitFor();
@@ -668,7 +717,19 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.getByRole('link', { name: 'Back to activities' }).click();
   await waitForHeading(page, 'Activity history');
   assert.equal(await page.getByRole('button', { name: 'Speak activity' }).count(), 0);
-  await page.getByRole('link', { name: 'Details', exact: true }).click();
+  assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 0);
+  const activityRow = page.locator('.athlete-linked-activity').first();
+  await activityRow.getByRole('button', { name: 'Edit', exact: true }).click();
+  const editActivity = page.getByRole('dialog', { name: 'Edit activity' });
+  await editActivity.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const deletePrompt = page.waitForEvent('dialog').then(async (dialog) => {
+    await dialog.dismiss();
+    return dialog.message();
+  });
+  await activityRow.getByRole('button', { name: 'Delete', exact: true }).click();
+  assert.match(await deletePrompt, /Delete this run/);
+  const activityDateCell = await activityRow.locator('.athlete-timeline-date').boundingBox();
+  await page.mouse.click(activityDateCell.x + 5, activityDateCell.y + 5);
   await waitForHeading(page, 'Workout summary');
   assert.equal(page.url(), activityUrl);
 
@@ -761,14 +822,14 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.getByRole('option', { name: /Evening track workout/ }).click();
   await screenshotReview.getByRole('button', { name: 'Update existing activity' }).click();
   await screenshotReview.waitFor({ state: 'hidden' });
-  assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('link', { name: /Open Run on/ }).count(), 1);
   assert.ok(rpcCalls.includes('athlete_save_activity_with_media'));
   assert.equal(fixture.activity.notes, 'My manual workout note');
   assert.ok(fixture.media.some((entry) => entry.name === 'session.gpx' && entry.mime === 'application/octet-stream'));
 
   fixture.otherActivity = { ...activity, id: 'a0000000-0000-4000-8000-000000000002', activity_date: '2026-11-19', notes: 'Screenshot copy' };
   fixture.otherMedia = [{ ...fixture.media[0], id: 'other-screenshot', batch_id: 'other-batch' }];
-  await page.getByRole('link', { name: 'Details', exact: true }).click();
+  await page.getByRole('link', { name: /Open Run on/ }).press('Enter');
   await page.getByRole('button', { name: 'Combine activities', exact: true }).click();
   const combine = page.getByRole('dialog', { name: 'Combine activities' });
   await combine.getByRole('combobox', { name: 'Other activity' }).click();
@@ -785,7 +846,14 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(await page.locator('.activity-screenshot-group').count(), 4);
   await page.getByRole('link', { name: 'Back to activities' }).click();
   await waitForHeading(page, 'Activity history');
-  assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('link', { name: /Open Run on/ }).count(), 1);
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  const recentActivity = page.locator('.athlete-activity-list .athlete-linked-activity').first();
+  await recentActivity.locator('.athlete-activity-icon').scrollIntoViewIfNeeded();
+  const icon = await recentActivity.locator('.athlete-activity-icon').boundingBox();
+  await page.mouse.click(icon.x + icon.width / 2, icon.y + icon.height / 2);
+  await waitForHeading(page, 'Workout summary');
+  assert.equal(page.url(), activityUrl);
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

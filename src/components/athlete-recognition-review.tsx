@@ -56,7 +56,7 @@ export function RecognitionConfirmationModal({ pending, settings, onClose, onAdd
         {recognitionDestinations.map((destination) => <option key={destination.value} value={destination.value}>{destination.label}</option>)}
       </Select></label>
       <div className="recognition-summary">{details.map(([label, value]) => <div key={label}><span>{label}</span><b>{value === '—' ? 'Not detected' : value}</b></div>)}</div>
-      {pending.details && route.destination === 'activity' ? <WorkoutSummary details={pending.details} /> : null}
+      {pending.details && route.destination === 'activity' ? <WorkoutSummary details={pending.details} includeAdvancedMetrics /> : null}
       {route.warnings?.length ? <div className="recognition-questions" role="status"><strong>Please check</strong><ul>{route.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
       {missing.length ? <div className="recognition-questions"><strong>Missing details</strong><ul>{missing.map((question) => <li key={question}>{question}</li>)}</ul><p>You can add these to the text below or fill them in the next form.</p></div> : null}
       <details className="recognition-source-text">

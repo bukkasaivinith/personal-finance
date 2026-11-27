@@ -9,7 +9,7 @@ import { WorkoutTrace } from '@/components/athlete-workout-trace';
 import { addAthleteActivityMedia, combineAthleteActivities, loadAthleteActivityMedia, loadAthleteActivityPage, loadAthleteHubData, saveAthleteActivity } from '@/lib/athlete-api';
 import { formatAthleteDate, formatDistance, formatDuration, formatPace } from '@/lib/athlete';
 import { workoutFileMime, type ActivityMedia, type ActivityMediaBatch } from '@/lib/athlete-media';
-import { workoutFileAccept, workoutOptionLabel, type WorkoutDetails } from '@/lib/athlete-workout';
+import { activitySummaryMetrics, workoutFileAccept, workoutOptionLabel, type WorkoutDetails } from '@/lib/athlete-workout';
 import { athleteActivitiesPath } from '@/lib/navigation';
 
 type ActivityPageData = Awaited<ReturnType<typeof loadAthleteActivityPage>>;
@@ -296,7 +296,7 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
     {error ? <div className="surface-card" role="alert"><p className="form-error">{error}</p><button className="text-button" type="button" onClick={refresh}>Try again</button></div> : null}
     <ActivityOverview {...data} />
     <WorkoutTrace details={details} distanceUnit={settings.distanceUnit} />
-    {details && (Object.keys(details.metrics).length || details.asymmetry || details.zones?.length || details.laps?.length) ? (
+    {details && (activitySummaryMetrics.some(([key]) => details.metrics[key] != null) || details.zones?.length || details.laps?.length) ? (
       <section className="surface-card activity-detail-section"><h3>Recorded details</h3><WorkoutSummary details={details} distanceUnit={settings.distanceUnit} /></section>
     ) : null}
     <section className="surface-card activity-detail-section" aria-label="Workout file">

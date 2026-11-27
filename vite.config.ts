@@ -14,13 +14,15 @@ const routeToIndex: Connect.NextHandleFunction = (request, _response, next) => {
 };
 
 export default defineConfig(({ mode, command }) => {
-  const config = browserConfig(loadEnv(mode, process.cwd(), 'VITE_'), command === 'serve');
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  const config = browserConfig(env, command === 'serve');
   return {
     appType: 'mpa',
     envPrefix: [],
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(config.url),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(config.key),
+      'import.meta.env.VITE_MAPTILER_KEY': JSON.stringify(env.VITE_MAPTILER_KEY ?? ''),
     },
     plugins: [
       {

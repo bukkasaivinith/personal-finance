@@ -1,20 +1,22 @@
 import './athlete-workout-details.css';
 import { type DistanceUnit, formatDistance, formatDuration } from '@/lib/athlete';
-import { type WorkoutDetails, workoutMetrics } from '@/lib/athlete-workout';
+import { activitySummaryMetrics, editableWorkoutMetrics, type WorkoutDetails } from '@/lib/athlete-workout';
 
 const format = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 const recorded = (value: number | undefined, suffix = '') => value === undefined ? '—' : format.format(value) + suffix;
 
-export function WorkoutSummary({ details, distanceUnit = 'km' }: { details: WorkoutDetails; distanceUnit?: DistanceUnit }) {
+export function WorkoutSummary({ details, distanceUnit = 'km', includeAdvancedMetrics = false }: {
+  details: WorkoutDetails; distanceUnit?: DistanceUnit; includeAdvancedMetrics?: boolean;
+}) {
   const pace = (seconds: number) => formatDuration(Math.round(seconds * (distanceUnit === 'mi' ? 1.609344 : 1))) + ' /' + distanceUnit;
-  const metrics = workoutMetrics.flatMap(([key, label, unit]) => {
+  const metrics = (includeAdvancedMetrics ? editableWorkoutMetrics : activitySummaryMetrics).flatMap(([key, label, unit]) => {
     const value = details.metrics[key];
     return value == null ? [] : [[label, unit === 's' ? formatDuration(value) : unit === 's/km' ? pace(value) : recorded(value, unit ? ' ' + unit : '')]];
   });
   return <>
     {details.source ? <p className="form-hint">Source · {details.source}</p> : null}
-    {metrics.length || details.asymmetry ? <dl className="workout-summary">{metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-      {details.asymmetry ? <div><dt>Asymmetry rating</dt><dd>{details.asymmetry}</dd></div> : null}
+    {metrics.length || (includeAdvancedMetrics && details.asymmetry) ? <dl className="workout-summary">{metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      {includeAdvancedMetrics && details.asymmetry ? <div><dt>Asymmetry rating</dt><dd>{details.asymmetry}</dd></div> : null}
     </dl> : null}
     {details.zones?.length ? <section className="workout-zones" aria-label="Heart rate zones"><h3>Heart rate zones</h3>
       <ul className="workout-zone-list">
@@ -33,8 +35,19 @@ export function WorkoutSummary({ details, distanceUnit = 'km' }: { details: Work
       </ul>
     </section> : null}
     {details.laps?.length ? <section><h3>Laps</h3><div className="workout-table"><table>
-      <thead><tr><th>Lap</th><th>Time</th><th>Distance</th><th>Heart rate</th><th>Pace</th></tr></thead>
-      <tbody>{details.laps.map((lap) => <tr key={lap.number}><th scope="row">{lap.number}</th><td>{formatDuration(lap.seconds ?? null)}</td><td>{formatDistance(lap.meters ?? null, distanceUnit)}</td><td>{recorded(lap.heartRate, ' bpm')}</td><td>{lap.pace === undefined ? '—' : pace(lap.pace)}</td></tr>)}</tbody>
+      <thead><tr><th>Lap</th><th>Time</th><th>Distance</th><th>Heart rate</th><th>Zone (avg. HR)</th><th>Pace</th></tr></thead>
+      <tbody>{details.laps.map((lap) => {
+        const average = lap.heartRate;
+        const zone = average == null ? undefined : details.zones?.find(({ minimum, maximum }) => average >= minimum && average <= maximum);
+        return <tr key={lap.number}>
+          <th scope="row">{lap.number}</th>
+          <td>{formatDuration(lap.seconds ?? null)}</td>
+          <td>{formatDistance(lap.meters ?? null, distanceUnit)}</td>
+          <td>{recorded(lap.heartRate, ' bpm')}</td>
+          <td>{zone ? <span className="workout-lap-zone" data-zone={zone.zone} title={`${zone.minimum}–${zone.maximum} bpm`}>Zone {zone.zone}</span> : '—'}</td>
+          <td>{lap.pace === undefined ? '—' : pace(lap.pace)}</td>
+        </tr>;
+      })}</tbody>
     </table></div></section> : null}
   </>;
 }
@@ -43,7 +56,7 @@ export function WorkoutDetailsFields({ details, onChange }: { details: WorkoutDe
   return <details className="full-field workout-edit">
     <summary>Advanced metrics and laps</summary>
     <div className="form-grid athlete-form-grid">
-      {workoutMetrics.map(([key, label, unit]) => <label key={key}>{label}{unit ? ' (' + unit + ')' : ''}<input type="number" step="any" value={details.metrics[key] ?? ''} onChange={(event) => {
+      {editableWorkoutMetrics.map(([key, label, unit]) => <label key={key}>{label}{unit ? ' (' + unit + ')' : ''}<input type="number" step="any" value={details.metrics[key] ?? ''} onChange={(event) => {
         const metrics = { ...details.metrics };
         if (event.target.value === '') metrics[key] = null;
         else metrics[key] = event.target.valueAsNumber;

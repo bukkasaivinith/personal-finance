@@ -1,13 +1,13 @@
 import { useId, useMemo, useState, type PointerEvent } from 'react';
 import { Select } from '@/components/select';
 import { distanceFromMeters, formatDistance, type DistanceUnit } from '@/lib/athlete';
+import { fitWorkoutRoute, routeViewport, type RouteCoordinate } from '@/lib/athlete-route-map';
 import { isWorkoutCoordinate, workoutChartSamples, type WorkoutDetails } from '@/lib/athlete-workout';
 
 const chartMetrics = [
   ['heartRate', 'Heart rate', 'bpm', 5, '#a1484b'],
   ['cadence', 'Cadence', 'spm', 5, '#6662a2'],
   ['pace', 'Pace', '', 30, '#296d9c'],
-  ['speed', 'Speed', '', 1, '#237657'],
   ['elevation', 'Elevation', 'm', 5, '#a66a26'],
 ] as const;
 const chartWidth = 625, chartHeight = 224;
@@ -72,15 +72,14 @@ function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutD
     for (const point of points) {
       min = Math.min(min, point[key]!);
       max = Math.max(max, point[key]!);
-      estimated ||= point.estimatedSpeed;
+      estimated ||= key === 'pace' && point.estimatedSpeed;
     }
     const step = Math.max(minimumStep, Math.ceil((max - min) / (minimumStep * 16)) * minimumStep);
     const lower = Math.floor((min - step) / step) * step;
     const minimum = key === 'elevation' ? lower : Math.max(0, lower);
     const maximum = Math.ceil((max + step) / step) * step;
-    const unit = key === 'pace' ? 'min/' + distanceUnit : key === 'speed' ? distanceUnit + '/h' : baseUnit;
-    const formatValue = (value: number) => key === 'pace' ? elapsedTime(value / distanceFactor)
-      : number.format(key === 'speed' ? value * distanceFactor : value);
+    const unit = key === 'pace' ? 'min/' + distanceUnit : baseUnit;
+    const formatValue = (value: number) => key === 'pace' ? elapsedTime(value / distanceFactor) : number.format(value);
     const pointY = (value: number) => chartBottom - (value - minimum) / (maximum - minimum) * plotHeight;
     const path = points.map((point, index) => {
       const previous = points[index - 1];
@@ -194,62 +193,64 @@ function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutD
           return value === undefined || !Number.isFinite(value) ? [] : [entry.label + ' ' + entry.formatValue(value) + ' ' + entry.unit];
         }).join(', ') : ''}</span>
       </> : <p className="card-note">No samples in this time range.</p>}
-      {series.some(({ key, estimated }) => (key === 'speed' || key === 'pace') && estimated)
-        ? <p className="card-note">Speed and pace use GPS estimates where the file has no speed reading.</p> : null}
+      {series.some(({ estimated }) => estimated)
+        ? <p className="card-note">Some pace readings are estimated from GPS.</p> : null}
       {!hasHeartRate ? <p className="card-note">This activity has no timestamped heart-rate readings.</p> : null}
     </>}
   </section>;
 }
 
-type Coordinate = NonNullable<WorkoutDetails['route']>[number];
+const mapTilerKey = import.meta.env.VITE_MAPTILER_KEY?.trim();
 
-function RouteMap({ coordinates, distanceUnit }: { coordinates: Coordinate[]; distanceUnit: DistanceUnit }) {
-  const map = useMemo(() => {
-    if (coordinates.length < 2) return;
-    const origin = coordinates[0];
-    const adjustLongitude = Math.cos(origin.latitude * Math.PI / 180);
-    const surface = coordinates.map((point) => ({
-      x: ((point.longitude - origin.longitude + 540) % 360 - 180) * 111.32 * adjustLongitude,
-      y: (point.latitude - origin.latitude) * 111.32,
-      segment: point.segment,
-    }));
-    const bounds = surface.reduce((current, point) => ({
-      left: Math.min(current.left, point.x), right: Math.max(current.right, point.x),
-      low: Math.min(current.low, point.y), high: Math.max(current.high, point.y),
-    }), { left: 0, right: 0, low: 0, high: 0 });
-    const scale = Math.min(350 / Math.max(.001, bounds.right - bounds.left), 222 / Math.max(.001, bounds.high - bounds.low));
-    const midX = (bounds.left + bounds.right) / 2;
-    const midY = (bounds.low + bounds.high) / 2;
-    const points = surface.map((point) => ({ x: 210 + (point.x - midX) * scale, y: 146 + (midY - point.y) * scale, segment: point.segment }));
-    const path = points.map((point, index) => (index && points[index - 1].segment === point.segment ? 'L' : 'M')
-      + point.x.toFixed(2) + ',' + point.y.toFixed(2)).join(' ');
-    const approxMeters = 86 / scale * 1000;
-    const magnitude = 10 ** Math.floor(Math.log10(approxMeters));
-    const scaleMeters = (approxMeters / magnitude >= 5 ? 5 : approxMeters / magnitude >= 2 ? 2 : 1) * magnitude;
-    return { path, first: points[0], last: points[points.length - 1], scaleMeters, scaleWidth: scaleMeters / 1000 * scale };
-  }, [coordinates]);
+function RouteMap({ coordinates, distanceUnit }: { coordinates: RouteCoordinate[]; distanceUnit: DistanceUnit }) {
+  const map = useMemo(() => fitWorkoutRoute(coordinates), [coordinates]);
+  const [mapView, setMapView] = useState<'route' | 'satellite' | 'unavailable'>('route');
+  const { width, height } = routeViewport;
+  const showSatellite = mapView === 'satellite';
 
   return <section className="surface-card activity-detail-section activity-route">
-    <div className="card-title-row"><div><h3>Route map</h3><p>GPS track from this workout</p></div></div>
+    <div className="card-title-row">
+      <div><h3>Route map</h3><p>GPS track from this workout</p></div>
+      {map && mapTilerKey ? <button className="secondary-button" type="button" aria-pressed={showSatellite}
+        onClick={() => setMapView(showSatellite ? 'route' : 'satellite')}>Satellite</button> : null}
+    </div>
     {map ? <>
-      <svg className="activity-route-map" viewBox="0 0 420 310" role="img" aria-label="GPS route with start and finish">
-        {Array.from({ length: 11 }, (_, index) => <line className="activity-route-grid" key={'v' + index} x1={index * 42} y1={0} x2={index * 42} y2={310} />)}
-        {Array.from({ length: 8 }, (_, index) => <line className="activity-route-grid" key={'h' + index} x1={0} y1={index * 42} x2={420} y2={index * 42} />)}
-        <path className="activity-route-path activity-route-halo" d={map.path} />
-        <path className="activity-route-path" d={map.path} />
-        <circle className="activity-route-start" cx={map.first.x} cy={map.first.y} r={8} />
-        <rect className="activity-route-finish" x={map.last.x - 4.5} y={map.last.y - 4.5} width={9} height={9} rx={2} />
-        <g aria-hidden="true">
-          <circle className="activity-route-key" cx={385} cy={34} r={20} />
-          <text className="activity-route-caption" x={385} y={31} textAnchor="middle">N</text>
-          <path className="activity-route-scale" d="M380 41 L385 36 L390 41 M385 36 V46" />
-          <rect className="activity-route-key" x={12} y={264} width={111} height={33} rx={7} />
-          <path className="activity-route-scale" d={`M22 272 v4 h${map.scaleWidth} v-4`} />
-          <text className="activity-route-caption" x={22} y={289}>{map.scaleMeters < 1000 && distanceUnit === 'km'
-            ? `${number.format(map.scaleMeters)} m` : formatDistance(map.scaleMeters, distanceUnit, 3)}</text>
-        </g>
-      </svg>
-      <div className="activity-route-legend"><span><i /> Start</span><span><i /> Finish</span></div>
+      <div className="activity-route-frame">
+        {showSatellite && mapTilerKey ? <div className="activity-route-tiles" aria-hidden="true">
+          {map.tiles.map((tile) => <img key={tile.id} alt="" referrerPolicy="origin"
+            src={`https://api.maptiler.com/maps/satellite-v4/${tile.zoom}/${tile.x}/${tile.y}.jpg?key=${encodeURIComponent(mapTilerKey)}`}
+            style={{ left: tile.left / width * 100 + '%', top: tile.top / height * 100 + '%',
+              width: tile.size / width * 100 + '%', height: tile.size / height * 100 + '%' }}
+            onError={() => setMapView('unavailable')} />)}
+        </div> : null}
+        <svg className="activity-route-map" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="GPS route with start and finish">
+          {!showSatellite ? <g aria-hidden="true">
+            {Array.from({ length: 11 }, (_, index) => <line className="activity-route-grid" key={'v' + index} x1={index * 42} y1={0} x2={index * 42} y2={height} />)}
+            {Array.from({ length: 8 }, (_, index) => <line className="activity-route-grid" key={'h' + index} x1={0} y1={index * 42} x2={width} y2={index * 42} />)}
+          </g> : null}
+          <path className="activity-route-path activity-route-halo" d={map.path} />
+          <path className="activity-route-path" d={map.path} />
+          <circle className="activity-route-start" cx={map.first.x} cy={map.first.y} r={8} />
+          <rect className="activity-route-finish" x={map.last.x - 4.5} y={map.last.y - 4.5} width={9} height={9} rx={2} />
+          <g aria-hidden="true">
+            <circle className="activity-route-key" cx={385} cy={34} r={20} />
+            <text className="activity-route-caption" x={385} y={31} textAnchor="middle">N</text>
+            <path className="activity-route-scale" d="M380 41 L385 36 L390 41 M385 36 V46" />
+            <rect className="activity-route-key" x={12} y={264} width={111} height={33} rx={7} />
+            <path className="activity-route-scale" d={`M22 272 v4 h${map.scaleWidth} v-4`} />
+            <text className="activity-route-caption" x={22} y={289}>{map.scaleMeters < 1000 && distanceUnit === 'km'
+              ? `${number.format(map.scaleMeters)} m` : formatDistance(map.scaleMeters, distanceUnit, 3)}</text>
+          </g>
+        </svg>
+      </div>
+      <div className="activity-route-footer">
+        <div className="activity-route-legend"><span><i /> Start</span><span><i /> Finish</span></div>
+        {showSatellite ? <div className="activity-route-credits">
+          <a href="https://www.maptiler.com/" target="_blank" rel="noreferrer"><img src="https://api.maptiler.com/resources/logo.svg" alt="MapTiler" /></a>
+          <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noreferrer">© MapTiler</a>
+        </div> : null}
+      </div>
+      {mapView === 'unavailable' ? <p className="card-note" role="status">Satellite imagery couldn’t load. Showing the GPS route.</p> : null}
     </> : <p className="card-note">This activity has no saved GPS points. Import a workout file with location data to draw the route.</p>}
   </section>;
 }

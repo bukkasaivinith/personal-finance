@@ -29,10 +29,11 @@
   font-size: 12px;
 }
 .workout-zone + .workout-zone { border-top: 1px solid var(--line); }
-.workout-zone[data-zone="2"] { --zone-color: #54806a; --zone-tint: #e9f2e9; }
-.workout-zone[data-zone="3"] { --zone-color: #458775; --zone-tint: #e7f2ee; }
-.workout-zone[data-zone="4"] { --zone-color: #b27832; --zone-tint: #faf0e2; }
-.workout-zone[data-zone="5"] { --zone-color: #b75c50; --zone-tint: #faebe8; }
+:is(.workout-zone, .workout-lap-zone)[data-zone="2"] { --zone-color: #54806a; --zone-tint: #e9f2e9; }
+:is(.workout-zone, .workout-lap-zone)[data-zone="3"] { --zone-color: #458775; --zone-tint: #e7f2ee; }
+:is(.workout-zone, .workout-lap-zone)[data-zone="4"] { --zone-color: #b27832; --zone-tint: #faf0e2; }
+:is(.workout-zone, .workout-lap-zone)[data-zone="5"] { --zone-color: #b75c50; --zone-tint: #faebe8; }
+.workout-lap-zone { display: inline-block; padding: 3px 7px; border-radius: 6px; background: var(--zone-tint, #edf2ee); font-weight: 600; }
 .workout-zone-label, .workout-zone-value { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .workout-zone-label strong { padding: 4px 6px; border-radius: 6px; background: var(--zone-tint); }
 .workout-zone-label span, .workout-zone-value span { color: #5f6c63; }
@@ -49,7 +50,13 @@
 .workout-table th, .workout-table td { padding: 0.4rem 0.55rem; text-align: left; border-bottom: 1px solid var(--border, #dee6df); }
 .workout-edit > summary { cursor: pointer; margin-bottom: 0.65rem; }
 .workout-edit fieldset { margin-top: 0.75rem; padding: 0.6rem; border: 1px solid var(--border, #dee6df); }
-.athlete-activity-stats a, .athlete-hub a.text-button, .activity-back { text-decoration: none; }
+.athlete-hub a.text-button, .activity-back { text-decoration: none; }
+.athlete-linked-activity { position: relative; }
+.athlete-linked-activity:has(.athlete-activity-link:hover, .athlete-activity-link:focus-visible) { background: #f5f8f4; border-radius: 8px; }
+.athlete-activity-link { color: inherit; text-decoration: none; font-weight: 700; }
+.athlete-activity-link::after { position: absolute; inset: 0; content: ''; }
+.athlete-activity-link:focus-visible::after { outline: 2px solid var(--green); outline-offset: -2px; border-radius: 8px; }
+.athlete-linked-activity .athlete-activity-stats button { position: relative; z-index: 1; }
 .athlete-activity-page { display: grid; gap: 16px; min-width: 0; }
 .athlete-activity-page .section-heading { align-items: center; margin-bottom: 0; }
 .activity-back { justify-self: start; }
@@ -79,7 +86,8 @@
 .activity-series-key { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
 .activity-timeline .workout-controls { align-items: end; margin-top: 12px; }
 .activity-timeline .workout-controls label { display: grid; gap: 4px; }
-.activity-chart, .activity-route-map { display: block; width: 100%; height: auto; margin-top: 14px; }
+.activity-chart, .activity-route-map { display: block; width: 100%; height: auto; }
+.activity-chart { margin-top: 14px; }
 .activity-chart-frame { position: relative; margin-top: 14px; }
 .activity-chart { margin-top: 0; border-radius: 9px; background: #f6f8f4; cursor: crosshair; }
 .activity-chart:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
@@ -116,7 +124,11 @@
 .activity-chart-cursor { stroke: #6b8675; stroke-dasharray: 4 4; }
 .activity-chart-point { fill: var(--green); stroke: #fff; stroke-width: 1.5px; }
 .activity-route { align-self: start; }
-.activity-route-map { background: radial-gradient(ellipse at center, #f6f9f4, #e9f1e8); border: 1px solid var(--line); border-radius: 12px; }
+.activity-route-frame { position: relative; overflow: hidden; margin-top: 14px; background: radial-gradient(ellipse at center, #f6f9f4, #e9f1e8); border: 1px solid var(--line); border-radius: 12px; }
+.activity-route-map { position: relative; }
+.activity-route-tiles { position: absolute; inset: 0; }
+.activity-route-tiles img { display: block; position: absolute; max-width: none; }
+.activity-route button[aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); }
 .activity-route-grid { stroke: #d8e5d8; stroke-dasharray: 1 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .activity-route-path { stroke: #28614c; stroke-width: 2.5px; stroke-linejoin: round; stroke-linecap: round; }
 .activity-route-halo { stroke: #fff; stroke-width: 5px; opacity: .9; }
@@ -126,10 +138,13 @@
 .activity-route-key { fill: #fff; stroke: #d7e4d8; }
 .activity-route-caption { fill: #365547; font: 13px 'DM Mono', monospace; }
 .activity-route-scale { stroke: #365547; stroke-width: 1.5px; }
-.activity-route-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 11px; color: #53645a; }
+.activity-route-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+.activity-route-legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: #53645a; }
 .activity-route-legend span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .activity-route-legend i { height: 8px; width: 8px; border-radius: 50%; background: #28614c; }
 .activity-route-legend span:last-child i { border-radius: 2px; background: #c47850; }
+.activity-route-credits { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.activity-route-credits img { display: block; width: 64px; height: auto; }
 .activity-screenshot-groups { display: grid; gap: 8px; margin-top: 14px; }
 .activity-screenshot-group { border: 1px solid var(--line); border-radius: 10px; }
 .activity-screenshot-group > summary {

@@ -37,6 +37,11 @@ export const workoutMetrics = [
 ] as const;
 
 export type WorkoutMetric = typeof workoutMetrics[number][0];
+export const editableWorkoutMetrics = workoutMetrics.filter(([key]) => key !== 'averageSpeed' && key !== 'maximumSpeed');
+const advancedMetrics = new Set<WorkoutMetric>([
+  'temperature', 'humidity', 'windSpeed', 'verticalOscillation', 'stiffness', 'flightTime', 'groundContact', 'regularity',
+]);
+export const activitySummaryMetrics = editableWorkoutMetrics.filter(([key]) => !advancedMetrics.has(key));
 export type WorkoutLap = { number: number; seconds?: number; elapsedSeconds?: number; meters?: number; heartRate?: number; pace?: number };
 export type WorkoutZone = { zone: number; minimum: number; maximum: number; seconds: number; percent: number };
 export type WorkoutSample = { seconds: number; heartRate?: number; cadence?: number; elevation?: number; speed?: number; latitude?: number; longitude?: number; segment?: number };

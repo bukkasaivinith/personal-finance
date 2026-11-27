@@ -4,13 +4,29 @@ import { build } from 'esbuild';
 import { Encoder, Profile } from '@garmin/fitsdk';
 
 const bundle = await build({
-  stdin: { contents: "export * from './src/lib/athlete-samsung'; export * from './src/lib/athlete-recognition'; export * from './src/lib/athlete-workout'; export * from './src/lib/athlete-fit'; export * from './src/lib/athlete-recovery';", resolveDir: process.cwd() },
+  stdin: { contents: "export * from './src/lib/athlete-samsung'; export * from './src/lib/athlete-recognition'; export * from './src/lib/athlete-workout'; export * from './src/lib/athlete-fit'; export * from './src/lib/athlete-recovery'; export * from './src/lib/athlete-route-map';", resolveDir: process.cwd() },
   bundle: true, write: false, format: 'esm', platform: 'node',
 });
-const { readSamsungWorkout, recognizeSamsungScreenshots, matchingWorkout, personalBests, parseFitWorkout, recognizeWhoopRecovery, workoutChartSamples } = await import(
+const { readSamsungWorkout, recognizeSamsungScreenshots, matchingWorkout, personalBests, parseFitWorkout, recognizeWhoopRecovery, workoutChartSamples, fitWorkoutRoute } = await import(
   'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64')
 );
 const reading = (text) => ({ text, layoutText: '', confidence: 90, pass: 'original' });
+
+test('satellite tiles and GPS markers align across the antimeridian', () => {
+  const route = fitWorkoutRoute([
+    { latitude: 0, longitude: 180, segment: 0 },
+    { latitude: .001, longitude: -179.999, segment: 0 },
+    { latitude: .002, longitude: 179.999, segment: 1 },
+  ]);
+  assert.ok(route.last.y < route.first.y);
+  assert.equal(route.path.match(/M/g).length, 2);
+  // The equator and antimeridian intersect at the top left of this wrapped tile.
+  const tile = route.tiles.find(({ zoom, x, y }) => x === 0 && y === 2 ** (zoom - 1));
+  assert.ok(tile);
+  assert.ok(Math.abs(tile.left - route.first.x) < 1e-6);
+  assert.ok(Math.abs(tile.top - route.first.y) < 1e-6);
+  assert.ok(route.tiles.some(({ zoom, x }) => x === 2 ** zoom - 1));
+});
 
 test('workout file and screenshot summaries can suggest the same saved run', () => {
   const screenshot = { id: 'screenshot', kind: 'run', activityDate: '2026-11-14', distanceMeters: 6240, durationSeconds: 3011 };
