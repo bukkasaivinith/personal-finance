@@ -49,6 +49,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   assert.equal(updated.samples.length, 1);
 
   const image = { name: 'route.png', mime: 'image/png', data: 'iVBORw0KGgo=' };
+  const workoutFile = { name: 'workout.gpx', mime: 'application/octet-stream', data: 'PGdweC8+' };
   const upload = (id, batch, files) => scalar('SELECT public.athlete_add_activity_media($1,$2,$3)', [id, batch, JSON.stringify(files)]);
   const activityPage = (id) => scalar('SELECT public.athlete_get_activity_page($1)', [id]);
   const mediaContent = (id) => scalar('SELECT public.athlete_get_activity_media($1)', [id]);
@@ -57,11 +58,15 @@ test('workout imports and daily recovery are private, durable and bound to the a
   const combineActivities = (keepId, otherId) => scalar('SELECT public.athlete_combine_activities($1,$2)', [keepId, otherId]);
   const invalidFile = { ...image, mime: 'audio/webm' };
   await assert.rejects(saveWithMedia(randomUUID(), [invalidFile]), /check constraint/);
+  await assert.rejects(saveWithMedia(randomUUID(), [{ ...workoutFile, name: 'unsafe.exe' }]), /check constraint/);
+  await assert.rejects(saveWithMedia(randomUUID(), [workoutFile, workoutFile]), /one workout file/);
   assert.equal((await scalar('SELECT public.athlete_get_dashboard()')).activities.length, 1);
   const batch = randomUUID();
-  const imported = await saveWithMedia(batch, [image]);
-  assert.equal(await saveWithMedia(batch, [image]), imported);
-  assert.equal((await activityPage(imported)).media.length, 1);
+  const imported = await saveWithMedia(batch, [image, workoutFile]);
+  assert.equal(await saveWithMedia(batch, [image, workoutFile]), imported);
+  const savedFiles = (await activityPage(imported)).media;
+  assert.equal(savedFiles.length, 2);
+  assert.equal(await mediaContent(savedFiles[1].id), workoutFile.data);
 
   const group = randomUUID();
   await upload(id, group, [image, { ...image, name: 'heart-rate.png' }]);
@@ -94,9 +99,10 @@ test('workout imports and daily recovery are private, durable and bound to the a
   assert.equal(combined.activity.notes, 'Screenshot summary');
   assert.equal(combined.details.metrics.steps, 4200);
   assert.deepEqual(combined.details.samples, details.samples);
-  assert.equal(combined.media.length, 4);
+  assert.equal(combined.media.length, 5);
   assert.equal(new Set(combined.media.map(({ batch_id }) => batch_id)).size, 3);
   assert.equal(await mediaContent(screenshotGroup[0].id), image.data);
+  assert.equal(await mediaContent(savedFiles[1].id), workoutFile.data);
   await assert.rejects(saveWorkout(null, { metrics: {}, fingerprints: [screenshotFingerprint] }), /already saved/);
   await saveWorkout(id, { metrics: {}, fingerprints: [screenshotFingerprint] });
 
@@ -111,6 +117,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   await assert.rejects(scalar('SELECT public.athlete_get_workout_details($1)', [id]), /unavailable/);
   await assert.rejects(activityPage(id), /unavailable/);
   await assert.rejects(mediaContent(page.media[0].id), /unavailable/);
+  await assert.rejects(mediaContent(savedFiles[1].id), /unavailable/);
   await assert.rejects(upload(id, randomUUID(), [image]), /unavailable/);
   await assert.rejects(combineActivities(id, unrelatedTrack), /unavailable/);
   await assert.rejects(saveWorkout(id), /unavailable/);

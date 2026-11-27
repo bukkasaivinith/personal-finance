@@ -9,7 +9,7 @@ import { recoveryFields } from '@/lib/athlete-recovery';
 import type { WorkoutDetails } from '@/lib/athlete-workout';
 import './athlete-recognition-review.css';
 
-export type PendingRecognition = { id: string; route: AthleteTextDraft; file?: File; files?: File[]; fileName?: string; details?: WorkoutDetails };
+export type PendingRecognition = { route: AthleteTextDraft; files: File[]; details: WorkoutDetails };
 
 function shownDate(date?: string) { return date ? formatAthleteDate(date) : 'Not detected'; }
 function shownNumber(value: number | null | undefined, suffix = '') { return typeof value === 'number' ? `${value}${suffix}` : 'Not detected'; }
@@ -23,11 +23,10 @@ export function RecognitionConfirmationModal({ pending, settings, onClose, onAdd
   const [previews, setPreviews] = useState<Array<{ src: string; filename: string }>>([]);
   const [reviewed, setReviewed] = useState(false);
   useEffect(() => {
-    const files = pending.files ?? (pending.file ? [pending.file] : []);
-    const sources = files.map((file) => ({ src: URL.createObjectURL(file), filename: file.name }));
+    const sources = pending.files.map((file) => ({ src: URL.createObjectURL(file), filename: file.name }));
     setPreviews(sources);
     return () => sources.forEach((entry) => URL.revokeObjectURL(entry.src));
-  }, [pending.file, pending.files]);
+  }, [pending.files]);
   const missing = missingRecognitionFields(route);
   const details: Array<[string, string]> = route.destination === 'activity' ? [
     ['Date', shownDate(route.date)], ['Activity', route.activity.kind ?? 'Not detected'],
@@ -52,7 +51,6 @@ export function RecognitionConfirmationModal({ pending, settings, onClose, onAdd
   return <ModalShell eyebrow="Screenshot review" title="Confirm understood details" labelId="athlete-recognition-title" onClose={onClose}>
     <div className="recognition-confirmation">
       <p className="modal-description">Nothing has been saved. Check the details, fill any gaps, and choose Add info to open the final form.</p>
-      {pending.fileName ? <p className="recognition-filename">{pending.fileName}</p> : null}
       {previews.length ? <details className="recognition-source-image"><summary>Compare with the uploaded screenshots ({previews.length})</summary><div className="workout-preview-grid">{previews.map(({ src, filename }) => <figure key={src}><img src={src} loading="lazy" alt={filename} /><figcaption>{filename}</figcaption></figure>)}</div></details> : null}
       <label className="recognition-destination">This information belongs in<Select value={route.destination} onChange={(event) => { setRoute({ ...route, destination: event.target.value as AthleteTextDraft['destination'] }); setReviewed(false); }}>
         {recognitionDestinations.map((destination) => <option key={destination.value} value={destination.value}>{destination.label}</option>)}

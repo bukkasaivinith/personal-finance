@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Dumbbell,
   FileImage,
+  FileUp,
   Flag,
   Footprints,
   HeartPulse,
@@ -73,8 +74,13 @@ import { downloadReport } from '@/lib/report-export';
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 const athleteTabs = [['dashboard', 'Overview'], ['calendar', 'Calendar'], ['timeline', 'Activities'],
   ['records', 'Personal Bests'], ['recovery', 'Recovery'], ['analysis', 'Analysis']] as const;
-type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean; screenshots?: File[] };
-type ScreenshotDraft = { fileName: string; route: AthleteTextDraft; file?: File; files?: File[]; fingerprint: string; details?: WorkoutDetails };
+type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean; workoutFile?: File };
+type WorkoutFileDraft = Awaited<ReturnType<typeof import('@/lib/athlete-workout-file').readWorkoutFile>> & { file: File };
+type ActivityScreenshotsDraft = { files: File[]; details?: WorkoutDetails; activity?: Partial<AthleteActivityDraft> };
+type ActivityFields = {
+  kind: AthleteActivityKind; activityDate: string; distanceValue: string; hours: string; minutes: string; seconds: string;
+  heartRate: string; calories: string; elevation: string; cadence: string; effort: string; notes: string;
+};
 
 const activityKinds: Array<{ value: AthleteActivityKind; label: string }> = [
   { value: 'run', label: 'Run' },
@@ -137,56 +143,141 @@ export function ActivityModal({
   settings,
   editor,
   matchingActivities,
+  onOtherRecognition,
   onClose,
   onSave,
 }: {
   settings: AthleteSettings;
   editor: ActivityEditor;
   matchingActivities: AthleteActivity[];
+  onOtherRecognition?: (route: AthleteTextDraft) => void;
   onClose: () => void;
   onSave: (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails, batch?: ActivityMediaBatch) => Promise<void>;
 }) {
   const entry = editor.entry;
-  const draft = editor.draft;
-  const source: AthleteActivitySource = entry?.source ?? draft?.source ?? 'manual';
-  const distance = entry?.distanceMeters ? String(Number((entry.distanceMeters / (settings.distanceUnit === 'mi' ? 1609.344 : 1000)).toFixed(6))) : draft?.distanceMeters ? String(Number((draft.distanceMeters / (settings.distanceUnit === 'mi' ? 1609.344 : 1000)).toFixed(6))) : '';
-  const [kind, setKind] = useState<AthleteActivityKind>(entry?.kind ?? draft?.kind ?? 'run');
-  const [activityDate, setActivityDate] = useState(entry?.activityDate ?? (editor.imported ? draft?.activityDate ?? '' : draft?.activityDate || localDateKey()));
-  const [details, setDetails] = useState(editor.details);
+  const [workout, setWorkout] = useState<WorkoutFileDraft>();
+  const [screenshots, setScreenshots] = useState<ActivityScreenshotsDraft>();
+  const [pendingRecognition, setPendingRecognition] = useState<PendingRecognition>();
+  const [reading, setReading] = useState('');
+  const [importError, setImportError] = useState('');
+  const reader = useRef<AbortController | null>(null);
+  const workoutInput = useRef<HTMLInputElement>(null);
+  const screenshotInput = useRef<HTMLInputElement>(null);
+  useEffect(() => () => reader.current?.abort(), []);
+  const [edits, setEdits] = useState<Partial<ActivityFields>>({});
+  const [detailsEdits, setDetailsEdits] = useState<Partial<WorkoutDetails>>();
   const [keepScreenshots, setKeepScreenshots] = useState(true);
   const [mediaBatchId] = useState(() => crypto.randomUUID());
   const [matchChoice, setMatchChoice] = useState<string>();
-  const [distanceValue, setDistanceValue] = useState(distance);
-  const [hours, setHours] = useState(entry?.durationSeconds || draft?.durationSeconds ? String(Math.floor((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) / 3600)) : '');
-  const [minutes, setMinutes] = useState(entry?.durationSeconds || draft?.durationSeconds ? String(Math.floor(((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) % 3600) / 60)) : '');
-  const [seconds, setSeconds] = useState(entry?.durationSeconds || draft?.durationSeconds ? String((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) % 60) : '');
-  const [heartRate, setHeartRate] = useState(entry?.averageHeartRate?.toString() ?? draft?.averageHeartRate?.toString() ?? '');
-  const [calories, setCalories] = useState(entry?.calories?.toString() ?? draft?.calories?.toString() ?? '');
-  const [elevation, setElevation] = useState(entry?.elevationMeters?.toString() ?? draft?.elevationMeters?.toString() ?? '');
-  const [cadence, setCadence] = useState(entry?.cadence?.toString() ?? draft?.cadence?.toString() ?? '');
-  const [effort, setEffort] = useState(entry?.effort?.toString() ?? draft?.effort?.toString() ?? '');
-  const [notes, setNotes] = useState(entry?.notes ?? draft?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const savingRequest = useRef(false);
   const [error, setError] = useState('');
+
+  const screenshotValues = Object.fromEntries(Object.entries(screenshots?.activity ?? {})
+    .filter(([, value]) => value !== null && value !== undefined && value !== ''));
+  const draft = entry ?? { ...editor.draft, ...workout?.draft, ...screenshotValues };
+  const imported = Boolean(editor.imported || workout || screenshots);
+  const source: AthleteActivitySource = draft.source ?? 'manual';
+  const initialDuration = draft.durationSeconds ?? 0;
+  const inMiles = settings.distanceUnit === 'mi';
+  const { kind, activityDate, distanceValue, hours, minutes, seconds, heartRate, calories, elevation, cadence, effort, notes }: ActivityFields = {
+    kind: draft.kind ?? 'run',
+    activityDate: workout?.draft.activityDate || draft.activityDate || (imported ? '' : localDateKey()),
+    distanceValue: draft.distanceMeters == null ? '' : String(Number((draft.distanceMeters / (inMiles ? 1609.344 : 1000)).toFixed(6))),
+    hours: initialDuration ? String(Math.floor(initialDuration / 3600)) : '',
+    minutes: initialDuration ? String(Math.floor((initialDuration % 3600) / 60)) : '',
+    seconds: initialDuration ? String(initialDuration % 60) : '',
+    heartRate: draft.averageHeartRate?.toString() ?? '', calories: draft.calories?.toString() ?? '',
+    elevation: draft.elevationMeters?.toString() ?? '', cadence: draft.cadence?.toString() ?? '',
+    effort: draft.effort?.toString() ?? '', notes: draft.notes ?? '',
+    ...edits,
+  };
+  function editField<Key extends keyof ActivityFields>(key: Key, value: ActivityFields[Key]) {
+    setEdits((current) => ({ ...current, [key]: value }));
+  }
+
+  const fileDetails = workout?.details;
+  const screenshotDetails = screenshots?.details;
+  const details: WorkoutDetails | undefined = editor.details || fileDetails || screenshotDetails ? {
+    ...editor.details, ...screenshotDetails, ...fileDetails, ...detailsEdits,
+    metrics: { ...editor.details?.metrics, ...fileDetails?.metrics, ...screenshotDetails?.metrics, ...detailsEdits?.metrics },
+    fingerprints: [...new Set([...(editor.details?.fingerprints ?? []), ...(fileDetails?.fingerprints ?? []), ...(screenshotDetails?.fingerprints ?? [])])],
+  } : undefined;
+  function editDetails(next: WorkoutDetails) {
+    if (!details) return;
+    const changedMetrics = Object.fromEntries(Object.entries(next.metrics).filter(([key, value]) =>
+      value !== details.metrics[key as keyof WorkoutDetails['metrics']]));
+    setDetailsEdits((current) => ({
+      ...current,
+      metrics: { ...current?.metrics, ...changedMetrics },
+      ...(next.laps !== details.laps ? { laps: next.laps } : {}),
+      ...(next.zones !== details.zones ? { zones: next.zones } : {}),
+    }));
+  }
   const distanceMeters = parseOptionalNumber(distanceValue);
   const durationSeconds = (parseOptionalNumber(hours) ?? 0) * 3600 + (parseOptionalNumber(minutes) ?? 0) * 60 + (parseOptionalNumber(seconds) ?? 0);
   const normalizedDistance = distanceMeters === null ? null : metersFromDistance(distanceMeters, settings.distanceUnit);
   const pace = formatPace(normalizedDistance, durationSeconds || null, settings.distanceUnit);
-  const canLink = !entry && Boolean(editor.imported) && matchingActivities.length > 0;
+  const canLink = !entry && imported && matchingActivities.length > 0;
   const suggested = canLink
     ? matchingWorkout(matchingActivities, { activityDate, kind, distanceMeters: normalizedDistance, durationSeconds })
     : undefined;
   const saveTo = matchChoice ?? suggested?.id ?? '';
   const merge = matchingActivities.find((activity) => activity.id === saveTo);
-  const screenshotImport = Boolean(editor.screenshots?.length);
+  const screenshotImport = Boolean(screenshots?.files.length);
+  const rawFile = workout?.file ?? editor.workoutFile;
+  const mediaFiles = keepScreenshots ? screenshots?.files ?? [] : [];
   const recordedDuration = durationSeconds || null;
   const savedDistance = screenshotImport ? normalizedDistance ?? merge?.distanceMeters : merge?.distanceMeters ?? normalizedDistance;
   const savedDuration = screenshotImport ? recordedDuration ?? merge?.durationSeconds : merge?.durationSeconds ?? recordedDuration;
 
+  const readImport = async (message: string, read: (signal: AbortSignal) => Promise<void>) => {
+    if (reader.current || savingRequest.current) return;
+    const controller = new AbortController();
+    reader.current = controller;
+    setImportError('');
+    setReading(message);
+    try {
+      await read(controller.signal);
+    } catch (caught) {
+      if (!controller.signal.aborted) setImportError(errorMessage(caught));
+    } finally {
+      reader.current = null;
+      if (!controller.signal.aborted) setReading('');
+    }
+  };
+  const readFile = (file: File) => readImport('Reading workout file…', async (signal) => {
+    const { readWorkoutFile } = await import('@/lib/athlete-workout-file');
+    const result = await readWorkoutFile(file, settings.timezone);
+    if (!signal.aborted) setWorkout({ ...result, file });
+  });
+  const readScreenshots = (files: File[]) => readImport('Preparing screenshot reader…', async (signal) => {
+    const { readAthleteScreenshots } = await import('@/lib/athlete-ocr');
+    const results = await readAthleteScreenshots(files, { signal, onProgress: setReading });
+    if (signal.aborted) return;
+    const valid = results.flatMap((result, index) => !result.error && !result.duplicateOf ? [{ result, file: files[index] }] : []);
+    if (!valid.length) throw new Error('No readable screenshots found. Choose PNG, JPG, or WebP images.');
+    const readings = valid.flatMap(({ result }) => result.readings);
+    const reference = recognitionReferenceDate(settings.timezone);
+    const looksSamsung = valid.length > 1 || /workout duration|advanced running metrics|galaxy watch|heart rate zones/i.test(readings[0]?.text ?? '');
+    const samsung = looksSamsung ? recognizeSamsungScreenshots(valid.map(({ result }) => result), settings.distanceUnit, reference) : null;
+    const route = samsung?.route ?? recognizeWhoopRecovery(readings, settings.distanceUnit, settings.timezone)
+      ?? recognizeScreenshot(readings, settings.distanceUnit, reference);
+    const attachedFiles = valid.map(({ file }) => file);
+    const recognized = { metrics: {}, ...samsung?.details, fingerprints: valid.map(({ result }) => result.fingerprint) };
+    if (!route) {
+      setScreenshots({ files: attachedFiles, details: recognized });
+      setImportError('No workout details were detected. The screenshots can still be saved with your manual entry.');
+      return;
+    }
+    const failures = results.filter(({ error }) => error).map(({ fileName, error }) => fileName + ': ' + error);
+    if (failures.length) route.warnings = [...(route.warnings ?? []), ...failures];
+    setPendingRecognition({ route, files: attachedFiles, details: recognized });
+  });
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (savingRequest.current) return;
+    if (savingRequest.current || reader.current) return;
     if (canLink && !saveTo) { setError('Choose an existing activity or save a new one.'); return; }
     const savedDate = merge?.activityDate ?? activityDate;
     if (!savedDate) { setError('Choose the activity date.'); return; }
@@ -208,29 +299,70 @@ export function ActivityModal({
         notes: notes.trim() || merge?.notes || '',
         source: merge?.source ?? source,
       }, entry?.id ?? merge?.id, details,
-      keepScreenshots && editor.screenshots?.length ? { id: mediaBatchId, files: editor.screenshots } : undefined);
+      mediaFiles.length || rawFile ? { id: mediaBatchId, files: mediaFiles, workoutFile: rawFile } : undefined);
     } catch (caught) { savingRequest.current = false; setError(errorMessage(caught)); setSaving(false); }
   };
 
   const attachingFile = entry && editor.imported;
-  return <ModalShell eyebrow={editor.screenshots?.length ? 'Screenshot draft' : 'Athlete Hub'} title={attachingFile ? 'Attach workout data' : entry ? 'Edit activity' : 'Log an activity'} labelId="athlete-activity-title" onClose={() => { if (!savingRequest.current) onClose(); }}>
+  if (pendingRecognition) return <RecognitionConfirmationModal pending={pendingRecognition} settings={settings}
+    onClose={() => setPendingRecognition(undefined)} onAddInfo={(route) => {
+      if (route.destination === 'activity') {
+        setKeepScreenshots(true);
+        setScreenshots({
+          files: pendingRecognition.files,
+          details: pendingRecognition.details,
+          activity: { ...route.activity, source: pendingRecognition.details.source === 'Samsung Health' ? 'samsung_health' : 'image' },
+        });
+      } else {
+        onOtherRecognition?.(route);
+      }
+      setPendingRecognition(undefined);
+    }} />;
+  return <ModalShell eyebrow="Athlete Hub" title={attachingFile ? 'Attach workout data' : entry ? 'Edit activity' : 'Add activity'} labelId="athlete-activity-title"
+    onClose={() => { if (!savingRequest.current) { reader.current?.abort(); onClose(); } }}>
     <form className="modal-form" onSubmit={submit}>
+      {!entry && onOtherRecognition ? <div className="activity-import-fields">
+        <input ref={screenshotInput} type="file" multiple accept="image/png,image/jpeg,image/webp" hidden aria-label="Workout screenshots"
+          onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (files.length) void readScreenshots(files); }} />
+        <input ref={workoutInput} type="file" accept={workoutFileAccept} hidden aria-label="Workout file"
+          onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void readFile(file); }} />
+        <div className="activity-import-actions">
+          <button type="button" className="secondary-button" disabled={Boolean(reading) || saving} onClick={() => screenshotInput.current?.click()}>
+            <FileImage size={15} /> Read screenshots
+          </button>
+          <button type="button" className="secondary-button" disabled={Boolean(reading) || saving} onClick={() => workoutInput.current?.click()}>
+            <FileUp size={15} /> Import workout file
+          </button>
+        </div>
+        {reading ? <p className="form-hint" role="status">{reading}</p> : null}
+        {importError ? <p className="form-error" role="status">{importError}</p> : null}
+        {screenshots ? <div className="activity-import-item">
+          <span>{screenshots.files.length} screenshot{screenshots.files.length === 1 ? '' : 's'} ready</span>
+          <button className="text-button" type="button" disabled={Boolean(reading) || saving} onClick={() => setScreenshots(undefined)}>Remove screenshots</button>
+        </div> : null}
+        {workout ? <div className="activity-import-item">
+          <span>{workout.file.name}</span>
+          <button className="text-button" type="button" disabled={Boolean(reading) || saving} onClick={() => setWorkout(undefined)}>Remove workout file</button>
+        </div> : null}
+      </div> : null}
       {attachingFile ? <p className="form-hint">Save to attach the workout file to this activity.</p>
-        : editor.imported || source !== 'manual' ? <p className="form-hint">Review the prefilled values and confirm the activity date before saving.</p>
-          : <p className="modal-description">Capture the essentials first. Pace is calculated automatically when distance and duration are present.</p>}
+        : imported ? <p className="form-hint">Review the imported values and adjust any fields before saving.</p>
+          : null}
+      {workout?.draft.activityDate && screenshots?.activity?.activityDate && workout.draft.activityDate !== screenshots.activity.activityDate
+        ? <p className="form-hint">The file and screenshots show different dates. Check the activity date before saving.</p> : null}
       <div className="form-grid athlete-form-grid">
-        <label>Activity type<Select value={kind} onChange={(event) => setKind(event.target.value as AthleteActivityKind)}>{activityKinds.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label>
-        <div><DatePicker label="Activity date" value={activityDate} onChange={setActivityDate} /></div>
-        <label>Distance ({settings.distanceUnit})<input value={distanceValue} type="number" min="0" step="any" inputMode="decimal" onChange={(event) => setDistanceValue(event.target.value)} placeholder="e.g. 10" /></label>
+        <label>Activity type<Select value={kind} onChange={(event) => editField('kind', event.target.value as AthleteActivityKind)}>{activityKinds.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label>
+        <div><DatePicker label="Activity date" value={activityDate} onChange={(value) => editField('activityDate', value)} /></div>
+        <label>Distance ({settings.distanceUnit})<input value={distanceValue} type="number" min="0" step="any" inputMode="decimal" onChange={(event) => editField('distanceValue', event.target.value)} placeholder="e.g. 10" /></label>
         <label>Auto pace<input value={pace} disabled aria-label="Calculated pace" /></label>
-        <div className="full-field athlete-duration"><span>Duration</span><div><label>Hours<input type="number" min="0" value={hours} onChange={(event) => setHours(event.target.value)} placeholder="0" /></label><label>Minutes<input type="number" min="0" max="59" value={minutes} onChange={(event) => setMinutes(event.target.value)} placeholder="0" /></label><label>Seconds<input type="number" min="0" max="59" value={seconds} onChange={(event) => setSeconds(event.target.value)} placeholder="0" /></label></div></div>
-        <label>Average HR (bpm)<input type="number" min="20" max="260" value={heartRate} onChange={(event) => setHeartRate(event.target.value)} placeholder="Optional" /></label>
-        <label>Calories<input type="number" min="0" value={calories} onChange={(event) => setCalories(event.target.value)} placeholder="Optional" /></label>
-        <label>Elevation (m)<input type="number" min="0" value={elevation} onChange={(event) => setElevation(event.target.value)} placeholder="Optional" /></label>
-        <label>Cadence (spm)<input type="number" min="1" max="400" value={cadence} onChange={(event) => setCadence(event.target.value)} placeholder="Optional" /></label>
-        <label>Effort · 1–10<input type="number" min="1" max="10" value={effort} onChange={(event) => setEffort(event.target.value)} placeholder="Optional" /></label>
-        {details ? <WorkoutDetailsFields details={details} onChange={setDetails} /> : null}
-        <label className="full-field screenshot-note-field">Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
+        <div className="full-field athlete-duration"><span>Duration</span><div><label>Hours<input type="number" min="0" value={hours} onChange={(event) => editField('hours', event.target.value)} placeholder="0" /></label><label>Minutes<input type="number" min="0" max="59" value={minutes} onChange={(event) => editField('minutes', event.target.value)} placeholder="0" /></label><label>Seconds<input type="number" min="0" max="59" value={seconds} onChange={(event) => editField('seconds', event.target.value)} placeholder="0" /></label></div></div>
+        <label>Average HR (bpm)<input type="number" min="20" max="260" value={heartRate} onChange={(event) => editField('heartRate', event.target.value)} placeholder="Optional" /></label>
+        <label>Calories<input type="number" min="0" value={calories} onChange={(event) => editField('calories', event.target.value)} placeholder="Optional" /></label>
+        <label>Elevation (m)<input type="number" min="0" value={elevation} onChange={(event) => editField('elevation', event.target.value)} placeholder="Optional" /></label>
+        <label>Cadence (spm)<input type="number" min="1" max="400" value={cadence} onChange={(event) => editField('cadence', event.target.value)} placeholder="Optional" /></label>
+        <label>Effort · 1–10<input type="number" min="1" max="10" value={effort} onChange={(event) => editField('effort', event.target.value)} placeholder="Optional" /></label>
+        {details ? <WorkoutDetailsFields details={details} onChange={editDetails} /> : null}
+        <label className="full-field screenshot-note-field">Notes (optional)<textarea value={notes} onChange={(event) => editField('notes', event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
       </div>
       {canLink ? <><label>Save to<Select value={saveTo} onChange={(event) => { setMatchChoice(event.target.value); setError(''); }}>
         <option value="">Choose where to save this import</option>
@@ -241,59 +373,11 @@ export function ActivityModal({
       </Select></label>
         {merge ? <p className="form-hint">This import uses the date and activity type of the selected workout.</p> : null}
       </> : null}
-      {editor.screenshots?.length ? <label className="recognition-check"><input type="checkbox" checked={keepScreenshots} disabled={saving}
+      {screenshots ? <label className="recognition-check"><input type="checkbox" checked={keepScreenshots} disabled={saving}
         onChange={(event) => setKeepScreenshots(event.target.checked)} /> Save screenshots privately with this activity</label> : null}
       {error ? <p className="form-error">{error}</p> : null}
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : attachingFile ? 'Attach file' : merge ? 'Update existing activity' : 'Save activity'}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => { reader.current?.abort(); onClose(); }} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || Boolean(reading)}>{saving ? 'Saving…' : attachingFile ? 'Attach file' : merge ? 'Update existing activity' : 'Save activity'}</button></div>
     </form>
-  </ModalShell>;
-}
-
-function ScreenshotUploadModal({
-  reading,
-  progress,
-  error,
-  onClose,
-  onFiles,
-}: {
-  reading: boolean;
-  progress: string;
-  error: string;
-  onClose: () => void;
-  onFiles: (files: File[], combine: boolean) => Promise<void>;
-}) {
-  const input = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const [combine, setCombine] = useState(false);
-  const selectFiles = (files: FileList | File[]) => {
-    if (reading) return;
-    const next = Array.from(files);
-    if (next.length) void onFiles(next, combine);
-  };
-  return <ModalShell eyebrow="Athlete Hub" title="Read fitness screenshots" labelId="athlete-screenshot-import" onClose={onClose}>
-    <div className="screenshot-import">
-      <p className="modal-description">Add up to 16 fitness screenshots. The reader checks their text and layout on your device, then shows the detected details for review. Screenshots are never uploaded.</p>
-      <label className="recognition-check"><input type="checkbox" checked={combine} disabled={reading} onChange={(event) => setCombine(event.target.checked)} /> These screenshots are from one Samsung Health workout</label>
-      <button
-        className={`screenshot-dropzone ${dragging ? 'dragging' : ''}`}
-        type="button"
-        disabled={reading}
-        onClick={() => input.current?.click()}
-        onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
-        onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-        onDragLeave={(event) => { event.preventDefault(); setDragging(false); }}
-        onDrop={(event) => { event.preventDefault(); setDragging(false); selectFiles(event.dataTransfer.files); }}
-      >
-        <span><FileImage size={22} /></span>
-        <b>{reading ? 'Reading screenshots…' : 'Drop screenshots here'}</b>
-        <small>{reading ? 'This may take a moment for each image.' : 'or click to choose multiple images · PNG, JPG, or WebP · 10 MB each'}</small>
-      </button>
-      <input ref={input} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { const files = event.target.files; if (files) selectFiles(files); event.currentTarget.value = ''; }} />
-      {reading ? <p className="screenshot-reader-status" role="status">{progress || 'Starting the local image reader…'}</p> : null}
-      {error ? <p className="form-error screenshot-reader-error" role="alert">{error}</p> : null}
-      <div className="screenshot-import-note"><Sparkles size={14} /><span>The reader runs from this app. Review every extracted activity before it is saved.</span></div>
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>{reading ? 'Cancel reading' : 'Cancel'}</button></div>
-    </div>
   </ModalShell>;
 }
 
@@ -419,9 +503,6 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [customEnd, setCustomEnd] = useState(localDateKey());
   const [calendarMonth, setCalendarMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1, 12); });
   const [activityEditor, setActivityEditor] = useState<ActivityEditor | null>(null);
-  const workoutFileInput = useRef<HTMLInputElement>(null);
-  const workoutPending = useRef(false);
-  const [readingWorkout, setReadingWorkout] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [planDraft, setPlanDraft] = useState<Partial<PlannedWorkoutDraft> | null>(null);
   const [showScore, setShowScore] = useState(false);
@@ -439,16 +520,6 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const [calendarDate, setCalendarDate] = useState('');
   const [customBestDistance, setCustomBestDistance] = useState('');
   const [exporting, setExporting] = useState(false);
-  const screenshotBusy = useRef(false);
-  const screenshotAbort = useRef<AbortController | null>(null);
-  const [readingImage, setReadingImage] = useState(false);
-  const [screenshotProgress, setScreenshotProgress] = useState('');
-  const [screenshotReaderError, setScreenshotReaderError] = useState('');
-  const [screenshotImportOpen, setScreenshotImportOpen] = useState(false);
-  const [screenshotDrafts, setScreenshotDrafts] = useState<ScreenshotDraft[]>([]);
-  const [pendingRecognition, setPendingRecognition] = useState<PendingRecognition | null>(null);
-  useEffect(() => () => screenshotAbort.current?.abort(), []);
-
   const settings = data?.settings;
   const bounds = periodBounds(period, customStart, customEnd);
   const activities = data?.activities ?? emptyActivities;
@@ -465,7 +536,8 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const nextRace = (data?.races ?? []).filter((race) => race.raceDate >= localDateKey()).sort((first, second) => first.raceDate.localeCompare(second.raceDate))[0];
   const personalRecords = useMemo(() => personalBests(activities), [activities]);
 
-  const openRecognizedRecord = ({ route, details, file, files }: PendingRecognition) => {
+  const openOtherRecognizedRecord = (route: AthleteTextDraft) => {
+    setActivityEditor(null);
     if (route.destination === 'recovery') {
       const existing = data?.recoveryScores.find((entry) => entry.recoveryDate === route.recovery.recoveryDate);
       setRecoveryDraft({ ...existing, ...route.recovery, notes: existing?.notes ?? '', metrics: { ...existing?.metrics, ...Object.fromEntries(Object.entries(route.recovery.metrics ?? {}).filter(([, value]) => value !== undefined)) } });
@@ -476,47 +548,11 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     if (route.destination === 'goal') { setGoalDraft(route.goal); setShowGoal(true); return; }
     if (route.destination === 'race') { setRaceDraft(route.race); setShowRace(true); return; }
     if (route.destination === 'plan') { setPlanDraft(route.plan); setShowPlan(true); return; }
-    setActivityEditor({ draft: { ...route.activity, source: details?.source === 'Samsung Health' ? 'samsung_health' : 'image' },
-      details, imported: true, screenshots: files ?? (file ? [file] : []) });
-  };
-  const reviewRecognizedRecord = (image: ScreenshotDraft) => {
-    setPendingRecognition({ ...image, id: crypto.randomUUID() });
-    onNotify('Screenshot details are ready for confirmation.');
-  };
-  const advanceScreenshotDraft = () => {
-    if (!screenshotDrafts.length) return false;
-    const remaining = screenshotDrafts.slice(1);
-    setScreenshotDrafts(remaining);
-    if (remaining[0]) { reviewRecognizedRecord(remaining[0]); onNotify(`${remaining.length} screenshot draft${remaining.length === 1 ? '' : 's'} remaining.`); }
-    else onNotify('All screenshot drafts were saved.');
-    return true;
-  };
-  const discardScreenshotDrafts = () => {
-    if (!screenshotDrafts.length) return;
-    setScreenshotDrafts([]);
-    onNotify('Remaining screenshot drafts were discarded. No unconfirmed record was saved.');
-  };
-  const discardPendingRecognition = () => {
-    if (!pendingRecognition) return;
-    if (screenshotDrafts.length) {
-      const remaining = screenshotDrafts.slice(1);
-      setScreenshotDrafts(remaining);
-      setPendingRecognition(null);
-      if (remaining[0]) reviewRecognizedRecord(remaining[0]);
-      else onNotify('Screenshot draft discarded.');
-      return;
-    }
-    setPendingRecognition(null);
-    onNotify('Recognized details discarded.');
   };
 
   const saveActivity = async (draft: AthleteActivityDraft, id?: string, details?: WorkoutDetails, batch?: ActivityMediaBatch) => {
     await saveAthleteActivity(draft, id, details, batch);
     await refresh();
-    if (screenshotDrafts.length) {
-      setActivityEditor(null);
-      if (advanceScreenshotDraft()) return;
-    }
     setActivityEditor(null);
     onNotify(id ? 'Activity updated.' : 'Activity logged. Your Athlete Hub has been updated.');
   };
@@ -536,82 +572,6 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const deleteAll = async () => {
     if (!window.confirm('Delete every Athlete Hub activity, goal, plan, recovery score, race and gym entry? This cannot be undone.')) return;
     try { await deleteAllAthleteData(); await refresh(); onNotify('All Athlete Hub data was deleted.'); } catch (caught) { onNotify(errorMessage(caught)); }
-  };
-
-  const closeActivityEditor = () => {
-    discardScreenshotDrafts();
-    setActivityEditor(null);
-  };
-  const importWorkout = async (file: File) => {
-    if (workoutPending.current) return;
-    workoutPending.current = true;
-    setReadingWorkout(true);
-    try {
-      const { readWorkoutFile } = await import('@/lib/athlete-workout-file');
-      const imported = await readWorkoutFile(file, settings?.timezone ?? 'Asia/Kolkata');
-      setActivityEditor({ ...imported, imported: true });
-    } catch (caught) {
-      onNotify(errorMessage(caught));
-    } finally {
-      workoutPending.current = false;
-      setReadingWorkout(false);
-    }
-  };
-
-  const readScreenshots = async (files: File[], combine: boolean) => {
-    if (screenshotBusy.current) return;
-    screenshotBusy.current = true;
-    const controller = new AbortController();
-    screenshotAbort.current = controller;
-    setScreenshotReaderError('');
-    setScreenshotProgress('Preparing the local image reader…');
-    setReadingImage(true);
-    try {
-      const { readAthleteScreenshots } = await import('@/lib/athlete-ocr');
-      const results = await readAthleteScreenshots(files, { signal: controller.signal, onProgress: setScreenshotProgress });
-      if (controller.signal.aborted) return;
-      const drafts: ScreenshotDraft[] = [];
-      const failures: string[] = [];
-      let duplicates = 0;
-      const bundle: typeof results = [];
-      const unit = settings?.distanceUnit ?? 'km';
-      const reference = recognitionReferenceDate(settings?.timezone ?? 'Asia/Kolkata');
-      for (const [index, result] of results.entries()) {
-        if (result.duplicateOf) { duplicates += 1; continue; }
-        if (result.error) { failures.push(`${result.fileName}: ${result.error}`); continue; }
-        if (combine) { bundle.push(result); continue; }
-        const parsed = /workout duration|advanced running metrics|galaxy watch|heart rate zones/i.test(result.readings[0]?.text ?? '')
-          ? recognizeSamsungScreenshots([result], unit, reference) : null;
-        const route = parsed?.route ?? recognizeWhoopRecovery(result.readings, unit, settings?.timezone ?? 'Asia/Kolkata') ?? recognizeScreenshot(result.readings, unit, reference);
-        if (!route) { failures.push(result.fileName + ': no reliable fitness metrics found'); continue; }
-        const details = parsed?.details ?? (route.destination === 'activity' ? { metrics: {}, fingerprints: [result.fingerprint] } : undefined);
-        drafts.push({ fileName: result.fileName, route, file: files[index], fingerprint: result.fingerprint, details });
-      }
-      if (combine && bundle.length) {
-        const parsed = recognizeSamsungScreenshots(bundle, unit, reference);
-        if (parsed) {
-          const group = results.flatMap((result, index) => result.fingerprint && !result.duplicateOf ? [{ result, file: files[index] }] : []);
-          drafts.push({ route: parsed.route, fileName: group.length + ' screenshots · one workout', files: group.map(({ file }) => file),
-            fingerprint: bundle[0].fingerprint, details: { ...parsed.details, fingerprints: group.map(({ result }) => result.fingerprint) } });
-        }
-      }
-      if (!drafts.length) {
-        setScreenshotReaderError(failures.join('\n') || 'No readable fitness details found. Try a clearer screenshot with the activity labels and values.');
-        return;
-      }
-      if (failures.length) drafts[0].route.warnings = [...(drafts[0].route.warnings ?? []), ...failures];
-      setScreenshotDrafts(drafts);
-      reviewRecognizedRecord(drafts[0]);
-      setScreenshotImportOpen(false);
-      onNotify(`${drafts.length} screenshot draft${drafts.length === 1 ? '' : 's'} ready. ${duplicates ? `${duplicates} repeated file(s) skipped. ` : ''}${failures.length ? `${failures.length} file(s) could not be read; see review details.` : 'Nothing is saved until you confirm.'}`);
-    } catch (caught) {
-      if (!controller.signal.aborted) setScreenshotReaderError(`The screenshot could not be read. ${errorMessage(caught)}`);
-    } finally {
-      screenshotBusy.current = false;
-      screenshotAbort.current = null;
-      setReadingImage(false);
-      setScreenshotProgress('');
-    }
   };
 
   if (loading || !data || !settings) return <div className="surface-card"><EmptyPanel icon={<Activity size={20} />} title={error ? 'Athlete Hub could not load' : 'Loading Athlete Hub'} description={error || 'Your private training records are loading.'} action={error ? <button type="button" className="secondary-button" onClick={() => void refresh()}>Try again</button> : undefined} /></div>;
@@ -672,8 +632,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
 
   return <div className="athlete-hub">
     {calendarDay}
-    <input type="file" ref={workoutFileInput} accept={workoutFileAccept} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importWorkout(file); }} />
-    <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><button className="secondary-button" type="button" onClick={() => setShowSettings(true)}><Settings size={15} /> Settings</button><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => setScreenshotImportOpen(true)}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshots'}</button><button className="secondary-button" type="button" disabled={readingWorkout} onClick={() => workoutFileInput.current?.click()}>{readingWorkout ? 'Reading workout…' : 'Import workout file'}</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
+    <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><button className="secondary-button" type="button" onClick={() => setShowSettings(true)}><Settings size={15} /> Settings</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
     <nav className="athlete-analysis-nav" aria-label="Athlete Hub pages">
       {athleteTabs.map(([id, label]) =>
         <button type="button" key={id} className={athletePage === id ? 'active' : undefined} aria-current={athletePage === id ? 'page' : undefined} onClick={() => setAthletePage(id)}>{label}</button>)}
@@ -693,14 +652,12 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <div className="content-grid athlete-bottom-grid"><section className="surface-card athlete-goals-card"><div className="card-title-row"><div><h3>Distance goals</h3><p>Progress updates from your completed activity log.</p></div><button type="button" className="text-button" onClick={() => setShowGoal(true)}><Plus size={14} /> Goal</button></div>{data.goals.filter((goal) => goal.isActive).length ? <div className="athlete-goal-list">{data.goals.filter((goal) => goal.isActive).map((goal) => { const covered = activities.filter((activity) => inRange(activity.activityDate, goal.startsOn, goal.endsOn)).reduce((sum, activity) => sum + (activity.distanceMeters ?? 0), 0); return <div className="athlete-goal-row" key={goal.id}><ProgressRow label={goal.title} detail={<>{formatDistance(covered, settings.distanceUnit)} of <b>{formatDistance(goal.targetDistanceMeters, settings.distanceUnit)}</b> · ends {formatAthleteDate(goal.endsOn)}</>} progress={covered / goal.targetDistanceMeters * 100} /><button className="ghost-button danger" type="button" aria-label={`Delete ${goal.title}`} onClick={() => void deleteRecord('goal', goal.id, goal.title)}><Trash2 size={13} /></button></div>; })}</div> : <div className="athlete-empty-inline"><Target size={16} /><span>Create a running-distance goal for clear momentum.</span></div>}</section><section className="surface-card athlete-strength-card"><div className="card-title-row"><div><h3>Strength for runners</h3><p>Minimal gym logging that supports your training.</p></div><button type="button" className="text-button" onClick={() => setShowGym(true)}><Plus size={14} /> Log strength</button></div>{data.gymSessions.length ? <div className="athlete-strength-summary"><Dumbbell size={19} /><div><b>{data.gymSessions[0].title}</b><small>{formatAthleteDate(data.gymSessions[0].sessionDate)}{data.gymSessions[0].durationMinutes ? ` · ${data.gymSessions[0].durationMinutes} min` : ''}</small></div><button className="ghost-button danger" type="button" aria-label={`Delete ${data.gymSessions[0].title}`} onClick={() => void deleteRecord('gym_session', data.gymSessions[0].id, data.gymSessions[0].title)}><Trash2 size={13} /></button></div> : <div className="athlete-empty-inline"><Dumbbell size={16} /><span>Log simple strength sessions when they help your running.</span></div>}</section></div>
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><Link className="ghost-button" to={athleteActivityPath(activity.id)}>Details</Link><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     </> : null}
-    {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} progress={screenshotProgress} error={screenshotReaderError} onClose={() => { screenshotAbort.current?.abort(); setScreenshotImportOpen(false); }} onFiles={readScreenshots} /> : null}
-    {pendingRecognition ? <RecognitionConfirmationModal key={pendingRecognition.id} pending={pendingRecognition} settings={settings} onClose={discardPendingRecognition} onAddInfo={(route) => { const next = { ...pendingRecognition, route }; setPendingRecognition(null); openRecognizedRecord(next); }} /> : null}
-    {activityEditor ? <ActivityModal settings={settings} matchingActivities={activities} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
-    {showScore ? <RecoveryEditor initial={recoveryDraft} onClose={() => { setShowScore(false); setRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
-    {showPlan ? <PlanModal settings={settings} initial={planDraft} onClose={() => { setShowPlan(false); setPlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setPlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}
-    {showRace ? <RaceModal settings={settings} initial={raceDraft} onClose={() => { setShowRace(false); setRaceDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setRaceDraft(null); if (advanceScreenshotDraft()) return; onNotify('Race added.'); }} /> : null}
-    {showGym ? <GymModal settings={settings} initial={gymDraft} onClose={() => { setShowGym(false); setGymDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setGymDraft(null); if (advanceScreenshotDraft()) return; onNotify('Strength session saved.'); }} /> : null}
-    {showGoal ? <GoalModal settings={settings} initial={goalDraft} onClose={() => { setShowGoal(false); setGoalDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setGoalDraft(null); if (advanceScreenshotDraft()) return; onNotify('Running goal saved.'); }} /> : null}
+    {activityEditor ? <ActivityModal settings={settings} matchingActivities={activities} editor={activityEditor} onOtherRecognition={openOtherRecognizedRecord} onClose={() => setActivityEditor(null)} onSave={saveActivity} /> : null}
+    {showScore ? <RecoveryEditor initial={recoveryDraft} onClose={() => { setShowScore(false); setRecoveryDraft(null); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setRecoveryDraft(null); onNotify('Recovery score saved.'); }} /> : null}
+    {showPlan ? <PlanModal settings={settings} initial={planDraft} onClose={() => { setShowPlan(false); setPlanDraft(null); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setPlanDraft(null); onNotify('Workout planned.'); }} /> : null}
+    {showRace ? <RaceModal settings={settings} initial={raceDraft} onClose={() => { setShowRace(false); setRaceDraft(null); }} onSave={async (input) => { await saveRace(input); await refresh(); setShowRace(false); setRaceDraft(null); onNotify('Race added.'); }} /> : null}
+    {showGym ? <GymModal settings={settings} initial={gymDraft} onClose={() => { setShowGym(false); setGymDraft(null); }} onSave={async (input) => { await saveGymSession(input); await refresh(); setShowGym(false); setGymDraft(null); onNotify('Strength session saved.'); }} /> : null}
+    {showGoal ? <GoalModal settings={settings} initial={goalDraft} onClose={() => { setShowGoal(false); setGoalDraft(null); }} onSave={async (input) => { await saveAthleteGoal(input); await refresh(); setShowGoal(false); setGoalDraft(null); onNotify('Running goal saved.'); }} /> : null}
     {showSettings ? <AthleteSettingsModal settings={settings} onClose={() => setShowSettings(false)} onSave={saveSettings} onDelete={deleteAll} /> : null}
   </div>;
 }

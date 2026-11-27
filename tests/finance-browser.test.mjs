@@ -171,8 +171,8 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
           if (p_payload) Object.assign(athlete.activity, p_payload);
           if (p_details) athlete.details = { ...athlete.details, ...p_details, metrics: { ...athlete.details.metrics, ...p_details.metrics } };
           for (const { data, name, mime } of p_media) {
-            assert.equal(mime, 'image/jpeg');
-            const id = `screenshot-${athlete.media.length + 1}`;
+            assert.ok(mime === 'image/jpeg' || mime === 'application/octet-stream');
+            const id = `attachment-${athlete.media.length + 1}`;
             athlete.media.push({ id, batch_id: p_batch_id, name, mime, created_at: athlete.activity.created_at });
             athlete.bytes.set(id, data);
           }
@@ -244,7 +244,8 @@ test('production build opens protected routes, preserves history, clears sign-ou
   await waitForHeading(page, 'Dashboard');
 
   await page.goto(origin + '/athlete-hub');
-  await page.getByRole('button', { name: 'Read screenshots', exact: true }).click();
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add activity' }).getByRole('button', { name: 'Read screenshots', exact: true }).waitFor();
   const png = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 620;
@@ -488,12 +489,23 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await signIn(page);
   await waitForHeading(page, 'Workout summary');
   assert.ok(!rpcCalls.includes('athlete_get_dashboard'));
+  const charts = page.getByRole('group', { name: 'Chart metric' });
+  const overview = page.getByRole('img', { name: 'All workout trends chart' });
+  await overview.waitFor();
+  const colors = await overview.locator('.activity-chart-line').evaluateAll((paths) => paths.map((path) => path.style.stroke));
+  assert.equal(new Set(colors).size, 3);
+  await overview.press('End');
+  const tooltip = page.getByRole('tooltip');
+  await tooltip.getByText('Heart rate 172 bpm', { exact: true }).waitFor();
+  await tooltip.getByText('Speed 8 km/h', { exact: true }).waitFor();
+  await tooltip.getByText('Pace 7:30 min/km', { exact: true }).waitFor();
+  await overview.press('Escape');
+  await charts.getByRole('button', { name: 'Heart rate', exact: true }).click();
   await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
   await page.getByRole('img', { name: 'GPS route with start and finish' }).waitFor();
   const heartRateChart = page.getByRole('img', { name: 'Heart rate chart in bpm' });
   const chartBounds = await heartRateChart.boundingBox();
   const hoverChart = (fraction) => heartRateChart.hover({ position: { x: chartBounds.width * fraction, y: chartBounds.height / 2 } });
-  const tooltip = page.getByRole('tooltip');
   await hoverChart(.1);
   await tooltip.getByText('0:00 elapsed', { exact: true }).waitFor();
   await tooltip.getByText('Heart rate 140 bpm', { exact: true }).waitFor();
@@ -506,7 +518,6 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await tooltip.getByText('Heart rate 172 bpm', { exact: true }).waitFor();
   assert.equal(await page.getByRole('slider', { name: 'Explore workout timeline' }).count(), 0);
   assert.equal(await page.getByText('Zoom to a time range').count(), 0);
-  const charts = page.getByRole('group', { name: 'Chart metric' });
   await charts.getByRole('button', { name: 'Speed', exact: true }).click();
   await page.getByRole('img', { name: 'Speed chart in km/h' }).waitFor();
   await tooltip.getByText('Speed 8 km/h', { exact: true }).waitFor();
@@ -521,6 +532,9 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   const image = page.getByRole('img', { name: 'workout.png' });
   await image.waitFor();
   await page.waitForFunction(() => document.querySelector('img[alt="workout.png"]')?.naturalWidth > 0);
+  const screenshotDownload = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Download workout.png' }).click();
+  assert.equal((await screenshotDownload).suggestedFilename(), 'workout.png');
   await page.getByText('1 screenshot', { exact: true }).click();
 
   await page.getByText('Attach screenshots', { exact: true }).click();
@@ -556,6 +570,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   delete fixture.details.samples;
   await page.reload();
   await waitForHeading(page, 'Workout summary');
+  await page.getByText('Workout file not uploaded.', { exact: true }).waitFor();
   const start = Date.parse(activity.created_at);
   const points = Array.from({ length: 121 }, (_, index) => (
     '<trkpt lat="' + (17 + index * .00022483) + '" lon="78"><ele>' + (12 + index / 10) + '</ele>'
@@ -572,7 +587,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   };
   await attachWorkout(gpx.replaceAll('2026-11-20', '2026-11-19'));
   await page.getByText(/This file is dated .* Open the activity for that date/).waitFor();
-  assert.ok(!rpcCalls.includes('athlete_save_workout'));
+  assert.ok(!rpcCalls.includes('athlete_save_activity_with_media'));
   await attachWorkout(gpx);
   const review = page.getByRole('dialog', { name: 'Attach workout data' });
   fixture.rejectUpload = true;
@@ -583,6 +598,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await review.getByRole('button', { name: 'Attach file' }).click();
   await review.waitFor({ state: 'hidden' });
   await page.reload();
+  await charts.getByRole('button', { name: 'Heart rate', exact: true }).click();
   await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
   await heartRateChart.press('End');
   await tooltip.getByText('Heart rate 176 bpm', { exact: true }).waitFor();
@@ -594,10 +610,25 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(await page.locator('.activity-screenshot-group').count(), 2);
   assert.equal(fixture.details.metrics.steps, 3200);
   assert.equal(fixture.activity.notes, 'Evening track workout');
+  const originalDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download samsung-run.gtx' }).click();
+  const original = await originalDownload;
+  assert.equal(original.suggestedFilename(), 'samsung-run.gtx');
+  assert.equal(await readFile(await original.path(), 'utf8'), gpx);
 
   await page.getByRole('link', { name: 'Back to activities' }).click();
   await waitForHeading(page, 'Activity history');
-  await page.getByRole('button', { name: 'Read screenshots', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Read screenshots', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Import workout file', exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
+  const draft = page.getByRole('dialog', { name: 'Add activity' });
+  await draft.getByRole('button', { name: 'Read screenshots', exact: true }).waitFor();
+  await draft.getByRole('button', { name: 'Import workout file', exact: true }).waitFor();
+  await draft.getByLabel('Notes (optional)').fill('My manual workout note');
+  await draft.getByLabel('Workout file', { exact: true }).setInputFiles({
+    name: 'session.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(gpx),
+  });
+  await draft.getByText('session.gpx', { exact: true }).waitFor();
   const workoutScreenshot = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 620;
@@ -618,13 +649,17 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await waitForHeading(page, 'Confirm understood details');
   await page.getByRole('checkbox', { name: /I have checked the detected details/ }).check();
   await page.getByRole('button', { name: 'Add info' }).click();
-  const screenshotReview = page.getByRole('dialog', { name: 'Log an activity' });
+  const screenshotReview = draft;
+  await screenshotReview.getByText('1 screenshot ready', { exact: true }).waitFor();
+  assert.equal(await draft.getByLabel('Notes (optional)').inputValue(), 'My manual workout note');
   await screenshotReview.getByRole('combobox', { name: 'Save to' }).click();
   await page.getByRole('option', { name: /Evening track workout/ }).click();
   await screenshotReview.getByRole('button', { name: 'Update existing activity' }).click();
   await screenshotReview.waitFor({ state: 'hidden' });
   assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 1);
   assert.ok(rpcCalls.includes('athlete_save_activity_with_media'));
+  assert.equal(fixture.activity.notes, 'My manual workout note');
+  assert.ok(fixture.media.some((entry) => entry.name === 'session.gpx' && entry.mime === 'application/octet-stream'));
 
   fixture.otherActivity = { ...activity, id: 'a0000000-0000-4000-8000-000000000002', activity_date: '2026-11-19', notes: 'Screenshot copy' };
   fixture.otherMedia = [{ ...fixture.media[0], id: 'other-screenshot', batch_id: 'other-batch' }];
@@ -641,7 +676,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await submit.click();
   await combine.waitFor({ state: 'hidden' });
   await page.reload();
-  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
+  await overview.waitFor();
   assert.equal(await page.locator('.activity-screenshot-group').count(), 4);
   await page.getByRole('link', { name: 'Back to activities' }).click();
   await waitForHeading(page, 'Activity history');

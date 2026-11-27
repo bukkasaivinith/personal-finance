@@ -5,7 +5,8 @@ export type ActivityMedia = {
   mime: string;
   created_at: string;
 };
-export type ActivityMediaBatch = { id: string; files: File[] };
+export type ActivityMediaBatch = { id: string; files: File[]; workoutFile?: File };
+export const workoutFileMime = 'application/octet-stream';
 
 const megabyte = 1024 * 1024;
 
@@ -42,8 +43,9 @@ function asBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function prepareActivityMedia(inputs: File[]) {
-  if (!inputs.length || inputs.length > 24) throw new Error('Choose between 1 and 24 activity attachments.');
+export async function prepareActivityMedia(inputs: File[], workoutFile?: File) {
+  const count = inputs.length + Number(Boolean(workoutFile));
+  if (!count || count > 24) throw new Error('Choose between 1 and 24 activity attachments.');
   const media: { name: string; mime: string; data: string }[] = [];
   let bytes = 0;
   for (const input of inputs) {
@@ -53,6 +55,14 @@ export async function prepareActivityMedia(inputs: File[]) {
       throw new Error('Choose attachments under 4 MB each and 12 MB in total.');
     }
     media.push({ name: Array.from(input.name.trim() || 'Screenshot').slice(0, 120).join(''), mime: blob.type, data: await asBase64(blob) });
+  }
+  if (workoutFile) {
+    const extension = /[.](?:gpx|gtx|tcx|fit)$/i.exec(workoutFile.name)?.[0];
+    if (!extension || !workoutFile.size || workoutFile.size > 10 * megabyte) {
+      throw new Error('Choose a GPX, TCX, GTX, or FIT workout file up to 10 MB.');
+    }
+    const basename = Array.from(workoutFile.name.slice(0, -extension.length)).slice(0, 120 - extension.length).join('');
+    media.push({ name: (basename || 'Workout') + extension, mime: workoutFileMime, data: await asBase64(workoutFile) });
   }
   return media;
 }

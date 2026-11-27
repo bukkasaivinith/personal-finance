@@ -76,6 +76,7 @@
 .activity-metric-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .activity-metric-picker .secondary-button { min-height: 36px; padding: 5px 10px; font-size: 12px; }
 .activity-metric-picker button[aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); color: var(--green); font-weight: 600; }
+.activity-series-key { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
 .activity-timeline .workout-controls { align-items: end; margin-top: 12px; }
 .activity-timeline .workout-controls label { display: grid; gap: 4px; }
 .activity-chart, .activity-route-map { display: block; width: 100%; height: auto; margin-top: 14px; }
@@ -99,7 +100,9 @@
   font-size: 12px;
 }
 .activity-chart-tooltip[data-below="true"] { transform: translate(-50%, 8px); }
+.activity-chart-tooltip[data-overview="true"] { transform: translateX(-50%); }
 .activity-chart-tooltip span { color: var(--muted); font-size: 11px; }
+.activity-chart-tooltip strong { display: flex; align-items: center; gap: 6px; }
 .activity-chart-gridline { stroke: #d9e3d8; vector-effect: non-scaling-stroke; }
 .activity-chart-axis { fill: #627067; font: 13px 'DM Mono', monospace; }
 .activity-chart-zone { fill: #dce8d8; opacity: .68; }
@@ -150,6 +153,39 @@
 .activity-screenshot { min-width: 0; margin: 0; }
 .activity-screenshot img { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; background: #f3f5f0; }
 .activity-screenshot figcaption { margin-top: 5px; overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }
+.activity-screenshot figcaption .text-button { display: flex; width: fit-content; text-decoration: none; }
+.activity-attachment-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.activity-attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+  padding-block: 8px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.activity-attachment-row .form-error { grid-column: 1 / -1; margin-top: 0; }
+.activity-import-fields {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5f8f4;
+}
+.activity-import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.activity-import-fields :is(.form-error, .form-hint) { margin: 0; }
+.activity-import-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-import-item .text-button { flex: 0 0 auto; }
 .activity-screenshot-placeholder { padding: 10px; background: #f3f5f0; border-radius: 8px; }
 .activity-screenshot-upload { margin-top: 14px; }
 .activity-screenshot-upload summary { color: var(--green); cursor: pointer; }

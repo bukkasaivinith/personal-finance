@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { Activity, ArrowLeft, FileImage, FileUp, Merge, Pencil } from 'lucide-react';
+import { Activity, ArrowLeft, Download, FileImage, FileUp, Merge, Pencil } from 'lucide-react';
 import { ActivityModal } from '@/components/athlete-hub';
 import { EmptyPanel, ModalShell, SectionHeading } from '@/components/ui';
 import { Select } from '@/components/select';
@@ -8,7 +8,7 @@ import { WorkoutSummary } from '@/components/athlete-workout-details';
 import { WorkoutTrace } from '@/components/athlete-workout-trace';
 import { addAthleteActivityMedia, combineAthleteActivities, loadAthleteActivityMedia, loadAthleteActivityPage, loadAthleteHubData, saveAthleteActivity } from '@/lib/athlete-api';
 import { formatAthleteDate, formatDistance, formatDuration, formatPace } from '@/lib/athlete';
-import type { ActivityMedia, ActivityMediaBatch } from '@/lib/athlete-media';
+import { workoutFileMime, type ActivityMedia, type ActivityMediaBatch } from '@/lib/athlete-media';
 import { workoutFileAccept, workoutOptionLabel, type WorkoutDetails } from '@/lib/athlete-workout';
 import { athleteActivitiesPath } from '@/lib/navigation';
 
@@ -18,6 +18,41 @@ const sourceNames = { manual: 'Manual entry', image: 'Screenshot import', samsun
 const groupDate = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' });
 const activityIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+
+function DownloadWorkoutFile({ item }: { item: ActivityMedia }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
+  const download = async () => {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(true);
+    setError('');
+    try {
+      const file = await loadAthleteActivityMedia(item.id, item.mime, controller.signal);
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = item.name;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (caught) {
+      if (!controller.signal.aborted) setError(errorMessage(caught));
+    } finally {
+      request.current = null;
+      if (!controller.signal.aborted) setPending(false);
+    }
+  };
+  return <li className="activity-attachment-row">
+    <span>{item.name}</span>
+    <button className="secondary-button" type="button" disabled={pending} onClick={() => void download()}
+      aria-label={`Download ${item.name}`}><Download size={15} /> {pending ? 'Preparing…' : 'Download'}</button>
+    {error ? <p className="form-error" role="alert">{error}</p> : null}
+  </li>;
+}
 
 function StoredScreenshot({ item }: { item: ActivityMedia }) {
   const { id, mime } = item;
@@ -43,7 +78,12 @@ function StoredScreenshot({ item }: { item: ActivityMedia }) {
       <p className="form-error">{image.error}</p>
       <button className="text-button" type="button" onClick={() => { setImage(undefined); setAttempt((current) => current + 1); }}>Try again</button>
     </div> : <p className="activity-screenshot-placeholder" role="status">Loading screenshot…</p>}
-    <figcaption>{item.name}</figcaption>
+    <figcaption>
+      <span>{item.name}</span>
+      {image?.url ? <a className="text-button" href={image.url}
+        download={mime === 'image/jpeg' ? item.name.replace(/(?:[.][^.]*)?$/, '.jpg') : item.name}
+        aria-label={`Download ${item.name}`}><Download size={14} /> Download</a> : null}
+    </figcaption>
   </figure>;
 }
 
@@ -94,7 +134,7 @@ function ActivityScreenshots({ id, media, onChanged }: { id: string; media: Acti
     <h3 id="activity-screenshots-title">Screenshots</h3>
     {media.length ? <div className="activity-screenshot-groups">
       {[...groups].map(([key, items]) => <ScreenshotGroup key={key} items={items} />)}
-    </div> : <p className="card-note">No screenshots are saved for this activity.</p>}
+    </div> : <p className="card-note">Screenshots not uploaded.</p>}
     <details className="activity-screenshot-upload">
       <summary>Attach screenshots</summary>
       <form onSubmit={submit}>
@@ -195,7 +235,7 @@ function CombineActivitiesModal({ activity, settings, onClose, onCombined }: Pic
 export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (message: string) => void }) {
   const [data, setData] = useState<ActivityPageData>();
   const [error, setError] = useState('');
-  const [editor, setEditor] = useState<{ imported?: WorkoutDetails } | null>(null);
+  const [editor, setEditor] = useState<{ imported?: WorkoutDetails; file?: File } | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [combining, setCombining] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -222,6 +262,8 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
   }
 
   const { activity, settings, details, media } = data;
+  const workoutFiles = media.filter(({ mime }) => mime === workoutFileMime);
+  const screenshots = media.filter(({ mime }) => mime.startsWith('image/'));
   const attachWorkoutFile = async (file: File) => {
     setReadingFile(true);
     try {
@@ -231,7 +273,12 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
         onNotify('This file is dated ' + formatAthleteDate(workout.draft.activityDate) + '. Open the activity for that date.');
         return;
       }
-      setEditor({ imported: workout.details });
+      setEditor({
+        imported: details?.samples?.length
+          ? { ...details, fingerprints: workout.details.fingerprints }
+          : workout.details,
+        file,
+      });
     } catch (caught) {
       onNotify(errorMessage(caught));
     } finally {
@@ -243,16 +290,6 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
     {back}
     <SectionHeading title={activityNames[activity.kind]} description={`${formatAthleteDate(activity.activityDate)} · ${details?.source ?? sourceNames[activity.source]}`}
       action={<>
-        {!details?.samples?.length ? <>
-          <input ref={fileInput} type="file" accept={workoutFileAccept} hidden onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = '';
-            if (file && !readingFile) void attachWorkoutFile(file);
-          }} />
-          <button className="secondary-button" type="button" disabled={readingFile} onClick={() => fileInput.current?.click()}>
-            <FileUp size={15} /> {readingFile ? 'Reading workout…' : 'Attach workout file'}
-          </button>
-        </> : null}
         <button className="secondary-button" type="button" disabled={readingFile} onClick={() => setCombining(true)}><Merge size={15} /> Combine activities</button>
         <button className="secondary-button" type="button" disabled={readingFile} onClick={() => setEditor({})}><Pencil size={15} /> Edit activity</button>
       </>} />
@@ -262,12 +299,30 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
     {details && (Object.keys(details.metrics).length || details.asymmetry || details.zones?.length || details.laps?.length) ? (
       <section className="surface-card activity-detail-section"><h3>Recorded details</h3><WorkoutSummary details={details} distanceUnit={settings.distanceUnit} /></section>
     ) : null}
-    <ActivityScreenshots id={id} media={media} onChanged={() => { refresh(); onNotify('Screenshot group saved.'); }} />
+    <section className="surface-card activity-detail-section" aria-label="Workout file">
+      <div className="card-title-row">
+        <h3>Workout file</h3>
+        {!workoutFiles.length ? <>
+          <input ref={fileInput} type="file" accept={workoutFileAccept} hidden onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file && !readingFile) void attachWorkoutFile(file);
+          }} />
+          <button className="secondary-button" type="button" disabled={readingFile} onClick={() => fileInput.current?.click()}>
+            <FileUp size={15} /> {readingFile ? 'Reading workout…' : 'Attach workout file'}
+          </button>
+        </> : null}
+      </div>
+      {workoutFiles.length ? <ul className="activity-attachment-list">
+        {workoutFiles.map((item) => <DownloadWorkoutFile key={item.id} item={item} />)}
+      </ul> : <p className="card-note">{details?.samples?.length ? 'Original workout file not uploaded.' : 'Workout file not uploaded.'}</p>}
+    </section>
+    <ActivityScreenshots id={id} media={screenshots} onChanged={() => { refresh(); onNotify('Screenshot group saved.'); }} />
     {combining ? <CombineActivitiesModal activity={activity} settings={settings} onClose={() => setCombining(false)}
       onCombined={() => { setCombining(false); refresh(); onNotify('Activities combined.'); }} /> : null}
-    {editor ? <ActivityModal editor={{ entry: activity, details: editor.imported ?? details ?? { metrics: {} }, imported: Boolean(editor.imported) }}
-      settings={settings} matchingActivities={[]} onClose={() => setEditor(null)} onSave={async (draft, activityId, workout) => {
-        await saveAthleteActivity(draft, activityId, workout);
+    {editor ? <ActivityModal editor={{ entry: activity, details: editor.imported ?? details ?? { metrics: {} }, imported: Boolean(editor.imported), workoutFile: editor.file }}
+      settings={settings} matchingActivities={[]} onClose={() => setEditor(null)} onSave={async (draft, activityId, workout, batch) => {
+        await saveAthleteActivity(draft, activityId, workout, batch);
         setEditor(null);
         refresh();
         onNotify(editor.imported ? 'Workout file attached.' : 'Activity updated.');

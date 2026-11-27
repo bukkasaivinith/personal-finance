@@ -115,14 +115,15 @@ export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: stri
     cadence: draft.cadence, effort: draft.effort, notes: draft.notes, source: draft.source,
   };
   const args = { p_activity_id: id ?? null, p_payload: payload };
-  const { data, error } = batch?.files.length
+  const hasAttachments = batch && (batch.files.length > 0 || Boolean(batch.workoutFile));
+  const { data, error } = hasAttachments
     ? await supabase.rpc('athlete_save_activity_with_media', {
-      ...args, p_details: details ?? null, p_batch_id: batch.id, p_media: await prepareActivityMedia(batch.files),
+      ...args, p_details: details ?? null, p_batch_id: batch.id, p_media: await prepareActivityMedia(batch.files, batch.workoutFile),
     })
     : details ? await supabase.rpc('athlete_save_workout', { ...args, p_details: details })
       : await supabase.rpc('athlete_save_activity', args);
   if (error) {
-    if (batch?.files.length) activityMediaError(error);
+    if (hasAttachments) activityMediaError(error);
     fail(error);
   }
   if (typeof data !== 'string' || !data || (id && data !== id)) {
