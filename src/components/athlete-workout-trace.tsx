@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type PointerEvent } from 'react';
 import { Select } from '@/components/select';
 import { distanceFromMeters, formatDistance, type DistanceUnit } from '@/lib/athlete';
 import { isWorkoutCoordinate, workoutChartSamples, type WorkoutDetails } from '@/lib/athlete-workout';
@@ -16,13 +16,26 @@ function elapsedTime(seconds: number) {
 
 type ChartSample = ReturnType<typeof workoutChartSamples>[number];
 
+function closestSampleIndex(samples: ChartSample[], second: number) {
+  if (!samples.length) return -1;
+  let first = 0;
+  let last = samples.length - 1;
+  while (first < last) {
+    const middle = Math.floor((first + last) / 2);
+    if (samples[middle].seconds < second) first = middle + 1;
+    else last = middle;
+  }
+  const current = samples[first];
+  const previous = samples[first - 1];
+  return previous && second - previous.seconds <= current.seconds - second ? first - 1 : first;
+}
+
 function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutDetails; samples: ChartSample[]; distanceUnit: DistanceUnit }) {
   const metrics = useMemo(() => chartMetrics.filter(([key]) => samples.some((sample) => Number.isFinite(sample[key]))), [samples]);
   const [choice, setChoice] = useState('');
   const [lap, setLap] = useState('');
-  const [zoomFrom, setZoomFrom] = useState('');
-  const [zoomTo, setZoomTo] = useState('');
-  const [selectedSecond, setSelectedSecond] = useState(0);
+  const [selectedSecond, setSelectedSecond] = useState<number>();
+  const [hoveredSecond, setHoveredSecond] = useState<number>();
   const chartId = useId();
   const [metric, label, defaultUnit, minimumStep] = metrics.find(([key]) => key === choice) ?? metrics[0] ?? chartMetrics[0];
   const unit = metric === 'pace' ? `min/${distanceUnit}` : metric === 'speed' ? `${distanceUnit}/h` : defaultUnit;
@@ -40,21 +53,26 @@ function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutD
     elapsed += length;
   }
   const interval = laps.find(({ number }) => String(number) === lap);
-  const start = interval?.from ?? 0;
-  const end = interval?.to ?? last;
-  const requestedFrom = zoomFrom === '' ? start : Math.max(start, Number(zoomFrom));
-  const requestedTo = zoomTo === '' ? end : Math.min(end, Number(zoomTo));
-  const invalid = (zoomFrom !== '' || zoomTo !== '') && requestedFrom >= requestedTo;
-  const from = invalid ? start : requestedFrom;
-  const to = invalid ? end : requestedTo;
+  const from = interval?.from ?? 0;
+  const to = interval?.to ?? last;
   const visible = useMemo(() => samples.filter((sample) =>
     sample.seconds >= from && sample.seconds <= to && Number.isFinite(sample[metric])), [samples, metric, from, to]);
-  const focus = visible.reduce<ChartSample | undefined>((nearest, sample) =>
-    !nearest || Math.abs(sample.seconds - selectedSecond) < Math.abs(nearest.seconds - selectedSecond) ? sample : nearest, undefined);
+  const selected = selectedSecond === undefined ? undefined : visible[closestSampleIndex(visible, selectedSecond)];
+  const focus = hoveredSecond === undefined ? selected : visible[closestSampleIndex(visible, hoveredSecond)];
 
+  const chartWidth = 625, chartHeight = 224;
   const left = 50, top = 15, width = 557, height = 170, right = left + width, bottom = top + height;
-  const rawMin = visible.reduce((min, point) => Math.min(min, point[metric]!), Infinity);
-  const rawMax = visible.reduce((max, point) => Math.max(max, point[metric]!), -Infinity);
+  const { rawMin, rawMax, hasEstimatedSpeed } = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    let estimated = false;
+    for (const point of visible) {
+      min = Math.min(min, point[metric]!);
+      max = Math.max(max, point[metric]!);
+      estimated ||= point.estimatedSpeed;
+    }
+    return { rawMin: min, rawMax: max, hasEstimatedSpeed: estimated };
+  }, [visible, metric]);
   const step = Math.max(minimumStep, Math.ceil((rawMax - rawMin) / (minimumStep * 16)) * minimumStep);
   const lowerBound = Math.floor((rawMin - step) / step) * step;
   const minimum = metric === 'elevation' ? lowerBound : Math.max(0, lowerBound);
@@ -62,6 +80,10 @@ function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutD
   const duration = Math.max(1, to - from);
   const x = (second: number) => left + (second - from) / duration * width;
   const y = (value: number) => bottom - (value - minimum) / (maximum - minimum) * height;
+  const pointerFraction = (event: PointerEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return ((event.clientX - bounds.left) * chartWidth / bounds.width - left) / width;
+  };
   const path = useMemo(() => visible.map((point, index) => {
     const previous = visible[index - 1];
     const join = previous && previous.segment === point.segment && point.seconds - previous.seconds <= 60;
@@ -79,51 +101,71 @@ function WorkoutTimeline({ details, samples, distanceUnit }: { details: WorkoutD
     </div> : null}
     {!metrics.length ? <p className="card-note">The charts need timed GPS points or timestamped measurements. Recorded averages and heart-rate zones appear in the workout details.</p> : <>
       {laps.length ? <div className="workout-controls"><label>Time range
-        <Select aria-label="Timeline lap" value={lap} onChange={(event) => { setLap(event.target.value); setSelectedSecond(0); setZoomFrom(''); setZoomTo(''); }}>
+        <Select aria-label="Timeline lap" value={lap} onChange={(event) => { setLap(event.target.value); setSelectedSecond(undefined); }}>
           <option value="">Whole activity</option>{laps.map((entry) => <option key={entry.number} value={entry.number}>Lap {entry.number}</option>)}
         </Select></label></div> : null}
-      {focus ? <>
-        <svg className="activity-chart" viewBox="0 0 625 224" role="img" aria-label={`${label} chart in ${unit}`}
-          onPointerDown={(event) => {
-            const bounds = event.currentTarget.getBoundingClientRect();
-            const position = (event.clientX - bounds.left) * 625 / bounds.width;
-            setSelectedSecond(from + Math.max(0, Math.min(1, (position - left) / width)) * duration);
-          }}>
-          {metric === 'heartRate' ? details.zones?.map((zone) => {
-            const minimumBpm = Math.max(minimum, zone.minimum);
-            const maximumBpm = Math.min(maximum, zone.maximum);
-            return maximumBpm > minimumBpm ? <rect className={`activity-chart-zone zone-${zone.zone}`} key={zone.zone}
-              x={left} y={y(maximumBpm)} width={width} height={y(minimumBpm) - y(maximumBpm)} /> : null;
-          }) : null}
-          {ticks.map((fraction) => <g key={fraction}>
-            <line className="activity-chart-gridline" x1={left} y1={bottom - fraction * height} x2={right} y2={bottom - fraction * height} />
-            <text className="activity-chart-axis" textAnchor="end" x={left - 7} y={bottom - fraction * height + 4}>{formatValue(minimum + fraction * (maximum - minimum))}</text>
-            <text className="activity-chart-axis" textAnchor={fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}
-              x={left + fraction * width} y={bottom + 22}>{elapsedTime(from + fraction * (to - from))}</text>
-          </g>)}
-          <line className="activity-chart-cursor" x1={x(focus.seconds)} y1={top} x2={x(focus.seconds)} y2={bottom} />
-          <path className="activity-chart-line" d={path} />
-          <circle className="activity-chart-point" cx={x(focus.seconds)} cy={y(focus[metric]!)} r={4} />
-        </svg>
-        <div className="activity-chart-readout">
-          <label>Elapsed time
-            <input type="range" min={from} max={Math.max(from + 1, to)} step="any" value={Math.max(from, Math.min(to, selectedSecond))}
-              onChange={(event) => setSelectedSecond(event.target.valueAsNumber)} aria-label="Explore workout timeline" />
-          </label>
-          <output><span>{elapsedTime(focus.seconds)}</span><strong>{formatValue(focus[metric]!)} {unit}</strong></output>
+      {visible.length ? <>
+        <span className="sr-only" id={chartId + '-keys'}>Use the arrow keys to explore readings, or Escape to clear the selection.</span>
+        <div className="activity-chart-frame">
+          <svg className="activity-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${label} chart in ${unit}`}
+            tabIndex={0} aria-describedby={chartId + '-keys'}
+            onPointerMove={(event) => {
+              if (event.pointerType === 'touch') return;
+              const fraction = pointerFraction(event);
+              setHoveredSecond(fraction >= 0 && fraction <= 1 ? visible[closestSampleIndex(visible, from + fraction * duration)].seconds : undefined);
+            }}
+            onPointerLeave={() => setHoveredSecond(undefined)}
+            onPointerCancel={() => setHoveredSecond(undefined)}
+            onPointerDown={(event) => {
+              const fraction = pointerFraction(event);
+              if (fraction < 0 || fraction > 1) return;
+              setSelectedSecond(visible[closestSampleIndex(visible, from + fraction * duration)].seconds);
+            }}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(event.key)) return;
+              event.preventDefault();
+              setHoveredSecond(undefined);
+              if (event.key === 'Escape') {
+                setSelectedSecond(undefined);
+                return;
+              }
+              const current = selected ? closestSampleIndex(visible, selected.seconds) : undefined;
+              const lastIndex = visible.length - 1;
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? lastIndex
+                : event.key === 'ArrowLeft' ? Math.max(0, (current ?? visible.length) - 1)
+                  : Math.min(lastIndex, (current ?? -1) + 1);
+              setSelectedSecond(visible[next].seconds);
+            }}>
+            {metric === 'heartRate' ? details.zones?.map((zone) => {
+              const minimumBpm = Math.max(minimum, zone.minimum);
+              const maximumBpm = Math.min(maximum, zone.maximum);
+              return maximumBpm > minimumBpm ? <rect className={`activity-chart-zone zone-${zone.zone}`} key={zone.zone}
+                x={left} y={y(maximumBpm)} width={width} height={y(minimumBpm) - y(maximumBpm)} /> : null;
+            }) : null}
+            {ticks.map((fraction) => <g key={fraction}>
+              <line className="activity-chart-gridline" x1={left} y1={bottom - fraction * height} x2={right} y2={bottom - fraction * height} />
+              <text className="activity-chart-axis" textAnchor="end" x={left - 7} y={bottom - fraction * height + 4}>{formatValue(minimum + fraction * (maximum - minimum))}</text>
+              <text className="activity-chart-axis" textAnchor={fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}
+                x={left + fraction * width} y={bottom + 22}>{elapsedTime(from + fraction * (to - from))}</text>
+            </g>)}
+            <path className="activity-chart-line" d={path} />
+            {focus ? <>
+              <line className="activity-chart-cursor" x1={x(focus.seconds)} y1={top} x2={x(focus.seconds)} y2={bottom} />
+              <circle className="activity-chart-point" cx={x(focus.seconds)} cy={y(focus[metric]!)} r={4} />
+            </> : visible.length === 1 ? <circle className="activity-chart-point" cx={x(visible[0].seconds)} cy={y(visible[0][metric]!)} r={4} /> : null}
+          </svg>
+          {focus ? <div className="activity-chart-tooltip" role="tooltip"
+            data-below={y(focus[metric]!) < (top + bottom) / 2}
+            style={{ left: `clamp(5.75rem, ${x(focus.seconds) / chartWidth * 100}%, calc(100% - 5.75rem))`, top: `${y(focus[metric]!) / chartHeight * 100}%` }}>
+            <span>{elapsedTime(focus.seconds)} elapsed</span>
+            <strong>{label} {formatValue(focus[metric]!)} {unit}</strong>
+          </div> : null}
         </div>
+        <span className="sr-only" role="status">{selected ? elapsedTime(selected.seconds) + ' elapsed, ' + label + ' ' + formatValue(selected[metric]!) + ' ' + unit : ''}</span>
       </> : <p className="card-note">No {label.toLowerCase()} samples in this time range.</p>}
-      {(metric === 'speed' || metric === 'pace') && visible.some((point) => point.estimatedSpeed)
+      {(metric === 'speed' || metric === 'pace') && hasEstimatedSpeed
         ? <p className="card-note">Estimated from GPS where the file has no speed reading.</p> : null}
       {!hasHeartRate ? <p className="card-note">This activity has no timestamped heart-rate readings.</p> : null}
-      {end > start ? <details className="workout-edit activity-chart-zoom"><summary>Zoom to a time range</summary>
-        <div className="workout-controls">
-          <label>Start (seconds)<input type="number" min={start} max={end} value={zoomFrom} onChange={(event) => setZoomFrom(event.target.value)} /></label>
-          <label>End (seconds)<input type="number" min={start} max={end} value={zoomTo} onChange={(event) => setZoomTo(event.target.value)} /></label>
-          <button className="text-button" type="button" onClick={() => { setZoomFrom(''); setZoomTo(''); }}>Reset zoom</button>
-        </div>
-        {invalid ? <p className="form-hint">Choose a start and end within the selected activity or lap.</p> : null}
-      </details> : null}
     </>}
   </section>;
 }
