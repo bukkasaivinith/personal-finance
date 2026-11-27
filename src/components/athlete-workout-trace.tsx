@@ -204,7 +204,7 @@ const mapTilerKey = import.meta.env.VITE_MAPTILER_KEY?.trim();
 
 function RouteMap({ coordinates, distanceUnit }: { coordinates: RouteCoordinate[]; distanceUnit: DistanceUnit }) {
   const map = useMemo(() => fitWorkoutRoute(coordinates), [coordinates]);
-  const [mapView, setMapView] = useState<'route' | 'satellite' | 'unavailable'>('route');
+  const [mapView, setMapView] = useState<'route' | 'satellite' | 'unavailable'>(mapTilerKey ? 'satellite' : 'route');
   const { width, height } = routeViewport;
   const showSatellite = mapView === 'satellite';
 

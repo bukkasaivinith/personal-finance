@@ -82,7 +82,7 @@ English metric labels are the supported screenshot format. Users can correct the
 
 Select a row in **Activities** to open the workout page. FIT, GPX and TCX files can provide timestamped measurements and GPS tracks for timelines and route maps. Run the parser, OCR-layout and recognition regression suite with `npm run test:athlete`, the browser suite with `npm run test:browser`, and the production build with `npm run build`.
 
-To enable the **Satellite** map option, set `VITE_MAPTILER_KEY` to a MapTiler browser key restricted to your site’s domain, then redeploy. MapTiler receives imagery requests when the satellite layer is selected. The GPS line is drawn locally. [MapTiler key setup](https://docs.maptiler.com/guides/developer/credentials/api-key/)
+To show **Satellite** by default on workouts with GPS data, set `VITE_MAPTILER_KEY` to a MapTiler browser key restricted to your site’s domain, then redeploy. Opening a workout with GPS data requests imagery from MapTiler. The GPS line is drawn locally. [MapTiler key setup](https://docs.maptiler.com/guides/developer/credentials/api-key/)
 
 ## Security note
 

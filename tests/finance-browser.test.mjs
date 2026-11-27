@@ -607,6 +607,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.goto(activityUrl);
   assert.equal(await page.getByRole('heading', { name: 'Workout summary' }).count(), 0);
   assert.ok(!rpcCalls.includes('athlete_get_activity_page'));
+  assert.equal(tileRequests.length, 0);
   await signIn(page);
   await waitForHeading(page, 'Workout summary');
   assert.ok(!rpcCalls.includes('athlete_get_dashboard'));
@@ -627,25 +628,17 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await tooltip.getByText('Heart rate 172 bpm', { exact: true }).waitFor();
   await tooltip.getByText('Pace 7:30 min/km', { exact: true }).waitFor();
   await overview.press('Escape');
-  await charts.getByRole('button', { name: 'Heart rate', exact: true }).click();
-  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
   const routeMap = page.getByRole('img', { name: 'GPS route with start and finish' });
   await routeMap.waitFor();
-  assert.equal(tileRequests.length, 0);
   const gpsPath = routeMap.locator('path.activity-route-path:not(.activity-route-halo)');
   const pathBefore = await gpsPath.getAttribute('d');
   const satellite = page.getByRole('button', { name: 'Satellite', exact: true });
-  rejectImagery = true;
-  await satellite.click();
-  await page.getByText('Satellite imagery couldn’t load. Showing the GPS route.').waitFor();
-  assert.equal(await satellite.getAttribute('aria-pressed'), 'false');
-  assert.ok(await routeMap.locator('.activity-route-grid').count() > 0);
-  rejectImagery = false;
-  await satellite.click();
-  await page.waitForFunction(() => {
+  const waitForSatelliteTiles = () => page.waitForFunction(() => {
     const tiles = [...document.querySelectorAll('.activity-route-tiles img')];
     return tiles.length > 0 && tiles.every((tile) => tile.naturalWidth > 0);
   });
+  await waitForSatelliteTiles();
+  assert.equal(await satellite.getAttribute('aria-pressed'), 'true');
   assert.ok(tileRequests.length > 0);
   for (const { url, referer } of tileRequests) {
     assert.match(url.pathname, /^\/maps\/satellite-v4\/\d+\/\d+\/\d+\.jpg$/);
@@ -660,6 +653,20 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.setViewportSize({ width: 1280, height: 720 });
   await satellite.click();
   assert.equal(await page.locator('.activity-route-tiles img').count(), 0);
+  assert.equal(await satellite.getAttribute('aria-pressed'), 'false');
+  assert.ok(await routeMap.locator('.activity-route-grid').count() > 0);
+  rejectImagery = true;
+  await page.reload();
+  await page.getByText('Satellite imagery couldn’t load. Showing the GPS route.').waitFor();
+  assert.equal(await satellite.getAttribute('aria-pressed'), 'false');
+  assert.ok(await routeMap.locator('.activity-route-grid').count() > 0);
+  assert.equal(await gpsPath.getAttribute('d'), pathBefore);
+  rejectImagery = false;
+  await satellite.click();
+  await waitForSatelliteTiles();
+  assert.equal(await satellite.getAttribute('aria-pressed'), 'true');
+  await charts.getByRole('button', { name: 'Heart rate', exact: true }).click();
+  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
   const heartRateChart = page.getByRole('img', { name: 'Heart rate chart in bpm' });
   const chartBounds = await heartRateChart.boundingBox();
   const hoverChart = (fraction) => heartRateChart.hover({ position: { x: chartBounds.width * fraction, y: chartBounds.height / 2 } });
@@ -736,6 +743,9 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   delete fixture.details.samples;
   await page.reload();
   await waitForHeading(page, 'Workout summary');
+  await page.getByText('This activity has no saved GPS points.', { exact: false }).waitFor();
+  assert.equal(await satellite.count(), 0);
+  assert.equal(await page.locator('.activity-route-tiles img').count(), 0);
   await page.getByText('Workout file not uploaded.', { exact: true }).waitFor();
   const start = Date.parse(activity.created_at);
   const points = Array.from({ length: 121 }, (_, index) => (
@@ -822,14 +832,16 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.getByRole('option', { name: /Evening track workout/ }).click();
   await screenshotReview.getByRole('button', { name: 'Update existing activity' }).click();
   await screenshotReview.waitFor({ state: 'hidden' });
-  assert.equal(await page.getByRole('link', { name: /Open Run on/ }).count(), 1);
+  const savedActivity = page.getByRole('link', { name: /Open Run on/ });
+  await savedActivity.first().waitFor();
+  assert.equal(await savedActivity.count(), 1);
   assert.ok(rpcCalls.includes('athlete_save_activity_with_media'));
   assert.equal(fixture.activity.notes, 'My manual workout note');
   assert.ok(fixture.media.some((entry) => entry.name === 'session.gpx' && entry.mime === 'application/octet-stream'));
 
   fixture.otherActivity = { ...activity, id: 'a0000000-0000-4000-8000-000000000002', activity_date: '2026-11-19', notes: 'Screenshot copy' };
   fixture.otherMedia = [{ ...fixture.media[0], id: 'other-screenshot', batch_id: 'other-batch' }];
-  await page.getByRole('link', { name: /Open Run on/ }).press('Enter');
+  await savedActivity.press('Enter');
   await page.getByRole('button', { name: 'Combine activities', exact: true }).click();
   const combine = page.getByRole('dialog', { name: 'Combine activities' });
   await combine.getByRole('combobox', { name: 'Other activity' }).click();
