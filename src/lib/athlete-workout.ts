@@ -1,6 +1,27 @@
-import type { AthleteActivity, AthleteActivityDraft } from './athlete';
+import { formatAthleteDate, formatDistance, formatDuration, type AthleteActivity, type AthleteActivityDraft, type DistanceUnit } from './athlete';
 
 export const workoutFileAccept = '.gpx,.gtx,.tcx,.fit';
+
+export function matchingWorkout(
+  activities: AthleteActivity[],
+  { activityDate, kind, distanceMeters, durationSeconds }: Partial<AthleteActivityDraft>,
+) {
+  if (!activityDate || !kind || !distanceMeters || !durationSeconds) return;
+  // A route export can include pauses and use a slightly different GPS distance than the screenshots.
+  const matches = activities.filter((activity) => activity.activityDate === activityDate && activity.kind === kind
+    && activity.distanceMeters !== null && activity.durationSeconds !== null
+    && Math.abs(activity.distanceMeters - distanceMeters) <= Math.max(50, distanceMeters * .02)
+    && Math.abs(activity.durationSeconds - durationSeconds) <= Math.max(30, durationSeconds * .03));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function workoutOptionLabel(activity: AthleteActivity, distanceUnit: DistanceUnit) {
+  const kind = activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1);
+  return [
+    formatAthleteDate(activity.activityDate), kind, formatDistance(activity.distanceMeters, distanceUnit),
+    formatDuration(activity.durationSeconds), activity.notes.trim().slice(0, 40),
+  ].filter(Boolean).join(' · ');
+}
 
 export const workoutMetrics = [
   ['elapsedSeconds', 'Total duration', 's'], ['totalCalories', 'Total calories', 'kcal'],

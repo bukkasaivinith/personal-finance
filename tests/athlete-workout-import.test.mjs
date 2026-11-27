@@ -7,10 +7,22 @@ const bundle = await build({
   stdin: { contents: "export * from './src/lib/athlete-samsung'; export * from './src/lib/athlete-recognition'; export * from './src/lib/athlete-workout'; export * from './src/lib/athlete-fit'; export * from './src/lib/athlete-recovery';", resolveDir: process.cwd() },
   bundle: true, write: false, format: 'esm', platform: 'node',
 });
-const { readSamsungWorkout, recognizeSamsungScreenshots, personalBests, parseFitWorkout, recognizeWhoopRecovery, workoutChartSamples } = await import(
+const { readSamsungWorkout, recognizeSamsungScreenshots, matchingWorkout, personalBests, parseFitWorkout, recognizeWhoopRecovery, workoutChartSamples } = await import(
   'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64')
 );
 const reading = (text) => ({ text, layoutText: '', confidence: 90, pass: 'original' });
+
+test('workout file and screenshot summaries can suggest the same saved run', () => {
+  const screenshot = { id: 'screenshot', kind: 'run', activityDate: '2026-11-14', distanceMeters: 6240, durationSeconds: 3011 };
+  const file = { id: 'file', kind: 'run', activityDate: '2026-11-14', distanceMeters: 6310, durationSeconds: 3024 };
+  assert.equal(matchingWorkout([screenshot], file), screenshot);
+  assert.equal(matchingWorkout([file], screenshot), file);
+  assert.equal(matchingWorkout([screenshot, { ...screenshot, id: 'other' }], file), undefined);
+  assert.equal(matchingWorkout([screenshot], { ...file, activityDate: '2026-11-20' }), undefined);
+  assert.equal(matchingWorkout([screenshot], { ...file, kind: 'walk' }), undefined);
+  assert.equal(matchingWorkout([screenshot], { ...file, durationSeconds: null }), undefined);
+  assert.equal(matchingWorkout([screenshot], { ...file, distanceMeters: 5000 }), undefined);
+});
 
 test('timed GPS yields speed and pace without crossing stops or track segments', () => {
   const points = workoutChartSamples([

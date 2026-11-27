@@ -18,7 +18,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   );
   const directory = new URL('../supabase/migrations/', import.meta.url);
   for (const migration of (await readdir(directory)).filter((name) => name.endsWith('.sql') &&
-    (name < '20261115160000' || name.startsWith('2026112323') || name.endsWith('_athlete_activity_media.sql'))).sort()) {
+    (name < '20261115160000' || name.startsWith('2026112323') || name.startsWith('20261127'))).sort()) {
     await db.exec(await readFile(new URL(migration, directory), 'utf8'));
   }
   const owner = randomUUID();
@@ -54,6 +54,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   const mediaContent = (id) => scalar('SELECT public.athlete_get_activity_media($1)', [id]);
   const saveWithMedia = (batch, files) => scalar('SELECT public.athlete_save_activity_with_media(NULL,$1,NULL,$2,$3)',
     [JSON.stringify(workout), batch, JSON.stringify(files)]);
+  const combineActivities = (keepId, otherId) => scalar('SELECT public.athlete_combine_activities($1,$2)', [keepId, otherId]);
   const invalidFile = { ...image, mime: 'audio/webm' };
   await assert.rejects(saveWithMedia(randomUUID(), [invalidFile]), /check constraint/);
   assert.equal((await scalar('SELECT public.athlete_get_dashboard()')).activities.length, 1);
@@ -74,6 +75,31 @@ test('workout imports and daily recovery are private, durable and bound to the a
   assert.equal(page.media[0].content, undefined);
   assert.equal(await mediaContent(page.media[0].id), image.data);
 
+  const screenshotFingerprint = 'c'.repeat(64);
+  await scalar('SELECT public.athlete_save_workout($1,$2,$3)', [imported,
+    JSON.stringify({ ...workout, activity_date: '2026-11-19', calories: 200, notes: 'Screenshot summary' }),
+    JSON.stringify({ metrics: { steps: 4200 }, source: 'Samsung Health', fingerprints: [screenshotFingerprint] })]);
+  await upload(imported, group, [{ ...image, name: 'summary.png' }]);
+  const screenshotGroup = (await activityPage(imported)).media;
+  await assert.rejects(combineActivities(id, id), /two different activities/);
+  const unrelatedTrack = await saveWorkout(null, { metrics: {}, samples: [{ seconds: 1, heartRate: 90 }] });
+  await assert.rejects(combineActivities(id, unrelatedTrack), /different workout timelines/);
+  assert.equal((await activityPage(unrelatedTrack)).details.samples[0].heartRate, 90);
+  await assert.rejects(combineActivities(id, randomUUID()), /unavailable/);
+  assert.equal(await combineActivities(id, imported), id);
+  await assert.rejects(activityPage(imported), /unavailable/);
+  const combined = await activityPage(id);
+  assert.equal(combined.activity.activity_date, workout.activity_date);
+  assert.equal(combined.activity.calories, 200);
+  assert.equal(combined.activity.notes, 'Screenshot summary');
+  assert.equal(combined.details.metrics.steps, 4200);
+  assert.deepEqual(combined.details.samples, details.samples);
+  assert.equal(combined.media.length, 4);
+  assert.equal(new Set(combined.media.map(({ batch_id }) => batch_id)).size, 3);
+  assert.equal(await mediaContent(screenshotGroup[0].id), image.data);
+  await assert.rejects(saveWorkout(null, { metrics: {}, fingerprints: [screenshotFingerprint] }), /already saved/);
+  await saveWorkout(id, { metrics: {}, fingerprints: [screenshotFingerprint] });
+
   const recovery = { recovery_date: '2026-11-20', source: 'whoop', score: 0, metrics: { hrv: 55, strain: 12.5 } };
   const saveRecovery = (input) => scalar('SELECT public.athlete_save_recovery($1)', [JSON.stringify(input)]);
   const recoveryId = await saveRecovery(recovery);
@@ -86,6 +112,7 @@ test('workout imports and daily recovery are private, durable and bound to the a
   await assert.rejects(activityPage(id), /unavailable/);
   await assert.rejects(mediaContent(page.media[0].id), /unavailable/);
   await assert.rejects(upload(id, randomUUID(), [image]), /unavailable/);
+  await assert.rejects(combineActivities(id, unrelatedTrack), /unavailable/);
   await assert.rejects(saveWorkout(id), /unavailable/);
   await assert.rejects(db.query('SELECT public.athlete_delete_recovery($1)', [recoveryId]), /unavailable/);
   assert.notEqual(await saveWorkout(null), id);

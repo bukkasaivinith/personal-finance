@@ -115,18 +115,20 @@ export async function saveAthleteActivity(draft: AthleteActivityDraft, id?: stri
     cadence: draft.cadence, effort: draft.effort, notes: draft.notes, source: draft.source,
   };
   const args = { p_activity_id: id ?? null, p_payload: payload };
-  if (batch?.files.length) {
-    const { data, error } = await supabase.rpc('athlete_save_activity_with_media', {
+  const { data, error } = batch?.files.length
+    ? await supabase.rpc('athlete_save_activity_with_media', {
       ...args, p_details: details ?? null, p_batch_id: batch.id, p_media: await prepareActivityMedia(batch.files),
-    });
-    if (error) activityMediaError(error);
-    return String(data);
+    })
+    : details ? await supabase.rpc('athlete_save_workout', { ...args, p_details: details })
+      : await supabase.rpc('athlete_save_activity', args);
+  if (error) {
+    if (batch?.files.length) activityMediaError(error);
+    fail(error);
   }
-  const { data, error } = details
-    ? await supabase.rpc('athlete_save_workout', { ...args, p_details: details })
-    : await supabase.rpc('athlete_save_activity', args);
-  if (error) fail(error);
-  return String(data);
+  if (typeof data !== 'string' || !data || (id && data !== id)) {
+    throw new Error('Could not confirm that the activity was saved.');
+  }
+  return data;
 }
 
 export async function loadWorkoutDetails(id: string): Promise<WorkoutDetails | null> {
@@ -138,6 +140,12 @@ export async function loadWorkoutDetails(id: string): Promise<WorkoutDetails | n
 export async function deleteAthleteActivity(id: string): Promise<void> {
   const { error } = await supabase.rpc('athlete_delete_activity', { p_activity_id: id });
   if (error) fail(error);
+}
+
+export async function combineAthleteActivities(keepId: string, otherId: string): Promise<void> {
+  const { data, error } = await supabase.rpc('athlete_combine_activities', { p_keep_id: keepId, p_other_id: otherId });
+  if (error) fail(error);
+  if (data !== keepId) throw new Error('Could not confirm that the activities were combined.');
 }
 
 export async function saveAthleteSettings(settings: AthleteSettings): Promise<void> {

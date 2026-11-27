@@ -64,7 +64,7 @@ import { recognitionReferenceDate, recognizeSamsungScreenshots, recognizeScreens
 import { WorkoutDetailsFields } from '@/components/athlete-workout-details';
 import type { ActivityMediaBatch } from '@/lib/athlete-media';
 import { athleteActivityPath } from '@/lib/navigation';
-import { bestAtDistance, personalBests, runningKinds, workoutFileAccept, type WorkoutDetails } from '@/lib/athlete-workout';
+import { bestAtDistance, matchingWorkout, personalBests, runningKinds, workoutFileAccept, workoutOptionLabel, type WorkoutDetails } from '@/lib/athlete-workout';
 import { AthleteAnalysis } from '@/components/athlete-analysis';
 import { RecoveryEditor, RecoveryHistory } from '@/components/athlete-recovery';
 import { recognizeWhoopRecovery, whoopTone } from '@/lib/athlete-recovery';
@@ -73,7 +73,7 @@ import { downloadReport } from '@/lib/report-export';
 type Period = 'week' | 'month' | 'year' | 'all' | 'custom';
 const athleteTabs = [['dashboard', 'Overview'], ['calendar', 'Calendar'], ['timeline', 'Activities'],
   ['records', 'Personal Bests'], ['recovery', 'Recovery'], ['analysis', 'Analysis']] as const;
-type ActivityEditor = { entry?: AthleteActivity; activityId?: string; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean; screenshots?: File[] };
+type ActivityEditor = { entry?: AthleteActivity; draft?: Partial<AthleteActivityDraft>; details?: WorkoutDetails; imported?: boolean; screenshots?: File[] };
 type ScreenshotDraft = { fileName: string; route: AthleteTextDraft; file?: File; files?: File[]; fingerprint: string; details?: WorkoutDetails };
 
 const activityKinds: Array<{ value: AthleteActivityKind; label: string }> = [
@@ -155,7 +155,7 @@ export function ActivityModal({
   const [details, setDetails] = useState(editor.details);
   const [keepScreenshots, setKeepScreenshots] = useState(true);
   const [mediaBatchId] = useState(() => crypto.randomUUID());
-  const [matchChoice, setMatchChoice] = useState<{ id: string; action: string }>();
+  const [matchChoice, setMatchChoice] = useState<string>();
   const [distanceValue, setDistanceValue] = useState(distance);
   const [hours, setHours] = useState(entry?.durationSeconds || draft?.durationSeconds ? String(Math.floor((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) / 3600)) : '');
   const [minutes, setMinutes] = useState(entry?.durationSeconds || draft?.durationSeconds ? String(Math.floor(((entry?.durationSeconds ?? draft?.durationSeconds ?? 0) % 3600) / 60)) : '');
@@ -173,30 +173,33 @@ export function ActivityModal({
   const durationSeconds = (parseOptionalNumber(hours) ?? 0) * 3600 + (parseOptionalNumber(minutes) ?? 0) * 60 + (parseOptionalNumber(seconds) ?? 0);
   const normalizedDistance = distanceMeters === null ? null : metersFromDistance(distanceMeters, settings.distanceUnit);
   const pace = formatPace(normalizedDistance, durationSeconds || null, settings.distanceUnit);
-  const similar = !entry && !editor.activityId && editor.imported && activityDate && normalizedDistance && durationSeconds
-    ? matchingActivities.find((activity) => activity.activityDate === activityDate && activity.kind === kind
-      && activity.distanceMeters !== null && activity.durationSeconds !== null
-      && Math.abs(activity.distanceMeters - normalizedDistance) <= Math.max(10, normalizedDistance * .005)
-      && Math.abs(activity.durationSeconds - durationSeconds) <= 5)
+  const canLink = !entry && Boolean(editor.imported) && matchingActivities.length > 0;
+  const suggested = canLink
+    ? matchingWorkout(matchingActivities, { activityDate, kind, distanceMeters: normalizedDistance, durationSeconds })
     : undefined;
-  const duplicateAction = similar && matchChoice?.id === similar.id ? matchChoice.action : '';
-  const merge = duplicateAction === 'merge' ? similar : undefined;
+  const saveTo = matchChoice ?? suggested?.id ?? '';
+  const merge = matchingActivities.find((activity) => activity.id === saveTo);
+  const screenshotImport = Boolean(editor.screenshots?.length);
+  const recordedDuration = durationSeconds || null;
+  const savedDistance = screenshotImport ? normalizedDistance ?? merge?.distanceMeters : merge?.distanceMeters ?? normalizedDistance;
+  const savedDuration = screenshotImport ? recordedDuration ?? merge?.durationSeconds : merge?.durationSeconds ?? recordedDuration;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRequest.current) return;
-    if (!activityDate) { setError('Choose the activity date.'); return; }
-    if (similar && !duplicateAction) { setError('Choose how to handle the matching activity.'); return; }
+    if (canLink && !saveTo) { setError('Choose an existing activity or save a new one.'); return; }
+    const savedDate = merge?.activityDate ?? activityDate;
+    if (!savedDate) { setError('Choose the activity date.'); return; }
     if (distanceMeters !== null && distanceMeters < 0) { setError('Distance cannot be negative.'); return; }
     if (durationSeconds < 0) { setError('Duration cannot be negative.'); return; }
     savingRequest.current = true;
     setSaving(true); setError('');
     try {
       await onSave({
-        kind,
-        activityDate,
-        distanceMeters: normalizedDistance,
-        durationSeconds: durationSeconds || null,
+        kind: merge?.kind ?? kind,
+        activityDate: savedDate,
+        distanceMeters: savedDistance ?? null,
+        durationSeconds: savedDuration ?? null,
         averageHeartRate: parseOptionalNumber(heartRate) ?? merge?.averageHeartRate ?? null,
         calories: parseOptionalNumber(calories) ?? merge?.calories ?? null,
         elevationMeters: parseOptionalNumber(elevation) ?? merge?.elevationMeters ?? null,
@@ -204,7 +207,7 @@ export function ActivityModal({
         effort: parseOptionalNumber(effort) ?? merge?.effort ?? null,
         notes: notes.trim() || merge?.notes || '',
         source: merge?.source ?? source,
-      }, entry?.id ?? editor.activityId ?? merge?.id, details,
+      }, entry?.id ?? merge?.id, details,
       keepScreenshots && editor.screenshots?.length ? { id: mediaBatchId, files: editor.screenshots } : undefined);
     } catch (caught) { savingRequest.current = false; setError(errorMessage(caught)); setSaving(false); }
   };
@@ -229,11 +232,19 @@ export function ActivityModal({
         {details ? <WorkoutDetailsFields details={details} onChange={setDetails} /> : null}
         <label className="full-field screenshot-note-field">Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1500} placeholder="Route, intervals, how it felt…" /></label>
       </div>
-      {similar ? <label>Possible duplicate<Select value={duplicateAction} onChange={(event) => { setMatchChoice({ id: similar.id, action: event.target.value }); setError(''); }}><option value="">Choose what to do</option><option value="merge">Update the matching activity</option><option value="separate">Save as a separate activity</option></Select></label> : null}
+      {canLink ? <><label>Save to<Select value={saveTo} onChange={(event) => { setMatchChoice(event.target.value); setError(''); }}>
+        <option value="">Choose where to save this import</option>
+        {matchingActivities.map((activity) => <option key={activity.id} value={activity.id}>
+          {workoutOptionLabel(activity, settings.distanceUnit)}{activity.id === suggested?.id ? ' (suggested match)' : ''}
+        </option>)}
+        <option value="new">New activity</option>
+      </Select></label>
+        {merge ? <p className="form-hint">This import uses the date and activity type of the selected workout.</p> : null}
+      </> : null}
       {editor.screenshots?.length ? <label className="recognition-check"><input type="checkbox" checked={keepScreenshots} disabled={saving}
         onChange={(event) => setKeepScreenshots(event.target.checked)} /> Save screenshots privately with this activity</label> : null}
       {error ? <p className="form-error">{error}</p> : null}
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : attachingFile ? 'Attach file' : 'Save activity'}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : attachingFile ? 'Attach file' : merge ? 'Update existing activity' : 'Save activity'}</button></div>
     </form>
   </ModalShell>;
 }
@@ -454,7 +465,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
   const nextRace = (data?.races ?? []).filter((race) => race.raceDate >= localDateKey()).sort((first, second) => first.raceDate.localeCompare(second.raceDate))[0];
   const personalRecords = useMemo(() => personalBests(activities), [activities]);
 
-  const openRecognizedRecord = ({ route, details, file, files }: PendingRecognition, existing?: AthleteActivity) => {
+  const openRecognizedRecord = ({ route, details, file, files }: PendingRecognition) => {
     if (route.destination === 'recovery') {
       const existing = data?.recoveryScores.find((entry) => entry.recoveryDate === route.recovery.recoveryDate);
       setRecoveryDraft({ ...existing, ...route.recovery, notes: existing?.notes ?? '', metrics: { ...existing?.metrics, ...Object.fromEntries(Object.entries(route.recovery.metrics ?? {}).filter(([, value]) => value !== undefined)) } });
@@ -465,10 +476,8 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     if (route.destination === 'goal') { setGoalDraft(route.goal); setShowGoal(true); return; }
     if (route.destination === 'race') { setRaceDraft(route.race); setShowRace(true); return; }
     if (route.destination === 'plan') { setPlanDraft(route.plan); setShowPlan(true); return; }
-    const suggested = Object.fromEntries(Object.entries(route.activity).filter(([, value]) => value !== null && value !== undefined && value !== ''));
-    const draft = existing ? { ...existing, ...suggested, notes: existing.notes, source: existing.source } : route.activity;
-    setActivityEditor({ draft: { ...draft, source: existing?.source ?? (details?.source === 'Samsung Health' ? 'samsung_health' : 'image') },
-      details, imported: true, activityId: existing?.id, screenshots: files ?? (file ? [file] : []) });
+    setActivityEditor({ draft: { ...route.activity, source: details?.source === 'Samsung Health' ? 'samsung_health' : 'image' },
+      details, imported: true, screenshots: files ?? (file ? [file] : []) });
   };
   const reviewRecognizedRecord = (image: ScreenshotDraft) => {
     setPendingRecognition({ ...image, id: crypto.randomUUID() });
@@ -685,7 +694,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
     <section className="surface-card athlete-activity-card"><div className="card-title-row"><div><h3>Recent activity</h3><p>Your latest confirmed training. Open the full timeline for complete history and filters.</p></div><button type="button" className="text-button" onClick={() => setAthletePage('timeline')}>View full timeline</button></div>{recentActivities.length ? <div className="athlete-activity-list">{recentActivities.map((activity) => <article key={activity.id}><span className="athlete-activity-icon"><IconForActivity kind={activity.kind} /></span><div><b>{activity.kind === 'treadmill' ? 'Treadmill run' : activity.kind[0].toUpperCase() + activity.kind.slice(1)}</b><small>{formatAthleteDate(activity.activityDate)} · {formatDistance(activity.distanceMeters, settings.distanceUnit)} · {formatDuration(activity.durationSeconds)} · {formatPace(activity.distanceMeters, activity.durationSeconds, settings.distanceUnit)}</small>{activity.notes ? <p>{activity.notes}</p> : null}</div><div className="athlete-activity-stats"><span>{activity.averageHeartRate ? `${activity.averageHeartRate} bpm` : activity.calories ? `${activity.calories} cal` : 'Manual'}</span><Link className="ghost-button" to={athleteActivityPath(activity.id)}>Details</Link><button className="ghost-button" type="button" onClick={() => setActivityEditor({ entry: activity })}><Pencil size={14} /> Edit</button><button className="ghost-button danger" type="button" onClick={() => void deleteActivity(activity)}><Trash2 size={14} /> Delete</button></div></article>)}</div> : <EmptyPanel icon={<Footprints size={20} />} title="Your training starts here" description="Log a run manually or read a fitness screenshot. Nothing is saved until you confirm it." action={<button className="primary-button" type="button" onClick={() => setActivityEditor({})}><Plus size={16} /> Log your first run</button>} />}</section>
     </> : null}
     {screenshotImportOpen ? <ScreenshotUploadModal reading={readingImage} progress={screenshotProgress} error={screenshotReaderError} onClose={() => { screenshotAbort.current?.abort(); setScreenshotImportOpen(false); }} onFiles={readScreenshots} /> : null}
-    {pendingRecognition ? <RecognitionConfirmationModal key={pendingRecognition.id} pending={pendingRecognition} settings={settings} activities={activities} onClose={discardPendingRecognition} onAddInfo={(route, existing) => { const next = { ...pendingRecognition, route }; setPendingRecognition(null); openRecognizedRecord(next, existing); }} /> : null}
+    {pendingRecognition ? <RecognitionConfirmationModal key={pendingRecognition.id} pending={pendingRecognition} settings={settings} onClose={discardPendingRecognition} onAddInfo={(route) => { const next = { ...pendingRecognition, route }; setPendingRecognition(null); openRecognizedRecord(next); }} /> : null}
     {activityEditor ? <ActivityModal settings={settings} matchingActivities={activities} editor={activityEditor} onClose={closeActivityEditor} onSave={saveActivity} /> : null}
     {showScore ? <RecoveryEditor initial={recoveryDraft} onClose={() => { setShowScore(false); setRecoveryDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await saveRecoveryScore(input); await refresh(); setShowScore(false); setRecoveryDraft(null); if (advanceScreenshotDraft()) return; onNotify('Recovery score saved.'); }} /> : null}
     {showPlan ? <PlanModal settings={settings} initial={planDraft} onClose={() => { setShowPlan(false); setPlanDraft(null); discardScreenshotDrafts(); }} onSave={async (input) => { await savePlannedWorkout(input); await refresh(); setShowPlan(false); setPlanDraft(null); if (advanceScreenshotDraft()) return; onNotify('Workout planned.'); }} /> : null}

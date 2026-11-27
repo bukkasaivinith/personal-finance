@@ -1,6 +1,6 @@
 import { readSamsungWorkout } from './athlete-samsung';
 import type { WorkoutLap } from './athlete-workout';
-import { routeAthleteText, type AthleteActivity, type DistanceUnit, type AthleteTextDraft } from './athlete';
+import { routeAthleteText, type DistanceUnit, type AthleteTextDraft } from './athlete';
 
 export type ScreenshotReading = { text: string; layoutText: string; confidence: number; pass: string; laps?: WorkoutLap[] };
 export const recognitionDestinations: Array<{ value: AthleteTextDraft['destination']; label: string }> = [
@@ -117,10 +117,4 @@ export function missingRecognitionFields(route: AthleteTextDraft): string[] {
     if (!route.goal.startsOn || !route.goal.endsOn) missing.push('When does the goal start and end?');
   }
   return missing;
-}
-
-export function similarActivity(route: AthleteTextDraft, activities: AthleteActivity[]): AthleteActivity | undefined {
-  if (route.destination !== 'activity' || !route.date || !route.activity.distanceMeters || !route.activity.durationSeconds) return;
-  return activities.find((activity) => activity.activityDate === route.date && activity.kind === route.activity.kind
-    && activity.distanceMeters === route.activity.distanceMeters && activity.durationSeconds === route.activity.durationSeconds);
 }

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { Activity, ArrowLeft, FileImage, FileUp, Pencil } from 'lucide-react';
+import { Activity, ArrowLeft, FileImage, FileUp, Merge, Pencil } from 'lucide-react';
 import { ActivityModal } from '@/components/athlete-hub';
-import { EmptyPanel, SectionHeading } from '@/components/ui';
+import { EmptyPanel, ModalShell, SectionHeading } from '@/components/ui';
+import { Select } from '@/components/select';
 import { WorkoutSummary } from '@/components/athlete-workout-details';
 import { WorkoutTrace } from '@/components/athlete-workout-trace';
-import { addAthleteActivityMedia, loadAthleteActivityMedia, loadAthleteActivityPage, saveAthleteActivity } from '@/lib/athlete-api';
+import { addAthleteActivityMedia, combineAthleteActivities, loadAthleteActivityMedia, loadAthleteActivityPage, loadAthleteHubData, saveAthleteActivity } from '@/lib/athlete-api';
 import { formatAthleteDate, formatDistance, formatDuration, formatPace } from '@/lib/athlete';
 import type { ActivityMedia, ActivityMediaBatch } from '@/lib/athlete-media';
-import { workoutFileAccept, type WorkoutDetails } from '@/lib/athlete-workout';
+import { workoutFileAccept, workoutOptionLabel, type WorkoutDetails } from '@/lib/athlete-workout';
 import { athleteActivitiesPath } from '@/lib/navigation';
 
 type ActivityPageData = Awaited<ReturnType<typeof loadAthleteActivityPage>>;
@@ -136,11 +137,67 @@ function ActivityOverview({ activity, settings, details }: ActivityPageData) {
   </section>;
 }
 
+function CombineActivitiesModal({ activity, settings, onClose, onCombined }: Pick<ActivityPageData, 'activity' | 'settings'> & {
+  onClose: () => void;
+  onCombined: () => void;
+}) {
+  const [options, setOptions] = useState<ActivityPageData['activity'][]>();
+  const [otherId, setOtherId] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const savingRequest = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadAthleteHubData(controller.signal).then(({ activities }) => {
+      if (!controller.signal.aborted) setOptions(activities.filter(({ id }) => id !== activity.id));
+    }, (caught: unknown) => {
+      if (!controller.signal.aborted) setError(errorMessage(caught));
+    });
+    return () => controller.abort();
+  }, [activity.id]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!otherId || savingRequest.current) return;
+    savingRequest.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      await combineAthleteActivities(activity.id, otherId);
+      onCombined();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      savingRequest.current = false;
+      setSaving(false);
+    }
+  };
+
+  return <ModalShell eyebrow="Athlete Hub" title="Combine activities" labelId="athlete-combine-title"
+    onClose={() => { if (!savingRequest.current) onClose(); }}>
+    <form className="modal-form" onSubmit={submit}>
+      <p className="modal-description">Keep the current activity dated {formatAthleteDate(activity.activityDate)}. Its values take priority. The other entry’s screenshots, notes, and additional workout details move here, and its separate entry is removed.</p>
+      <label>Other activity
+        <Select value={otherId} disabled={!options?.length || saving} onChange={(event) => setOtherId(event.target.value)}>
+          <option value="">{!options ? error ? 'Activities unavailable' : 'Loading activities…' : options.length ? 'Choose the other copy of this workout' : 'No other activities'}</option>
+          {options?.map((option) => <option key={option.id} value={option.id}>{workoutOptionLabel(option, settings.distanceUnit)}</option>)}
+        </Select>
+      </label>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <div className="modal-actions">
+        <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="primary-button" type="submit" disabled={!otherId || saving}>{saving ? 'Combining…' : 'Combine into this activity'}</button>
+      </div>
+    </form>
+  </ModalShell>;
+}
+
 export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (message: string) => void }) {
   const [data, setData] = useState<ActivityPageData>();
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<{ imported?: WorkoutDetails } | null>(null);
   const [readingFile, setReadingFile] = useState(false);
+  const [combining, setCombining] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const [attempt, setAttempt] = useState(0);
   const refresh = () => { setError(''); setAttempt((current) => current + 1); };
@@ -196,6 +253,7 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
             <FileUp size={15} /> {readingFile ? 'Reading workout…' : 'Attach workout file'}
           </button>
         </> : null}
+        <button className="secondary-button" type="button" disabled={readingFile} onClick={() => setCombining(true)}><Merge size={15} /> Combine activities</button>
         <button className="secondary-button" type="button" disabled={readingFile} onClick={() => setEditor({})}><Pencil size={15} /> Edit activity</button>
       </>} />
     {error ? <div className="surface-card" role="alert"><p className="form-error">{error}</p><button className="text-button" type="button" onClick={refresh}>Try again</button></div> : null}
@@ -205,6 +263,8 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
       <section className="surface-card activity-detail-section"><h3>Recorded details</h3><WorkoutSummary details={details} distanceUnit={settings.distanceUnit} /></section>
     ) : null}
     <ActivityScreenshots id={id} media={media} onChanged={() => { refresh(); onNotify('Screenshot group saved.'); }} />
+    {combining ? <CombineActivitiesModal activity={activity} settings={settings} onClose={() => setCombining(false)}
+      onCombined={() => { setCombining(false); refresh(); onNotify('Activities combined.'); }} /> : null}
     {editor ? <ActivityModal editor={{ entry: activity, details: editor.imported ?? details ?? { metrics: {} }, imported: Boolean(editor.imported) }}
       settings={settings} matchingActivities={[]} onClose={() => setEditor(null)} onSave={async (draft, activityId, workout) => {
         await saveAthleteActivity(draft, activityId, workout);

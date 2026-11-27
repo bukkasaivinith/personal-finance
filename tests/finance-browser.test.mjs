@@ -148,7 +148,7 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
       if (name === 'get_ipo_portfolio') return json({ applications: [], demat_accounts: [], allotment_date_supported: true });
       if (name === 'ipo_finance_links') return json({ accounts: [], investments: [] });
       if (athlete) {
-        if (name === 'athlete_get_dashboard') return json({ activities: [athlete.activity] });
+        if (name === 'athlete_get_dashboard') return json({ activities: [athlete.activity, athlete.otherActivity].filter(Boolean) });
         if (name === 'athlete_get_activity_page') {
           assert.equal(request.postDataJSON().p_activity_id, athlete.activity.id);
           return json({ activity: athlete.activity, distance_unit: 'km', timezone: 'Asia/Kolkata', details: athlete.details, media: athlete.media });
@@ -164,17 +164,28 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
           athlete.details = { ...athlete.details, ...p_details, metrics: { ...athlete.details.metrics, ...p_details.metrics } };
           return json(p_activity_id);
         }
-        if (name === 'athlete_add_activity_media') {
-          const { p_activity_id, p_batch_id, p_media } = request.postDataJSON();
+        if (name === 'athlete_add_activity_media' || name === 'athlete_save_activity_with_media') {
+          const { p_activity_id, p_batch_id, p_media, p_payload, p_details } = request.postDataJSON();
           assert.equal(p_activity_id, athlete.activity.id);
           if (athlete.rejectUpload) return json({ code: '42501', message: 'Fixture rejected the upload' }, 403);
+          if (p_payload) Object.assign(athlete.activity, p_payload);
+          if (p_details) athlete.details = { ...athlete.details, ...p_details, metrics: { ...athlete.details.metrics, ...p_details.metrics } };
           for (const { data, name, mime } of p_media) {
             assert.equal(mime, 'image/jpeg');
             const id = `screenshot-${athlete.media.length + 1}`;
             athlete.media.push({ id, batch_id: p_batch_id, name, mime, created_at: athlete.activity.created_at });
             athlete.bytes.set(id, data);
           }
-          return json(null);
+          return json(p_payload ? p_activity_id : null);
+        }
+        if (name === 'athlete_combine_activities') {
+          const { p_keep_id, p_other_id } = request.postDataJSON();
+          assert.equal(p_keep_id, athlete.activity.id);
+          assert.equal(p_other_id, athlete.otherActivity.id);
+          if (athlete.rejectUpload) return json({ code: '42501', message: 'Fixture rejected the merge' }, 403);
+          athlete.media.push(...athlete.otherMedia);
+          athlete.otherActivity = undefined;
+          return json(p_keep_id);
         }
       }
       return json(null);
@@ -569,6 +580,58 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(await page.locator('.activity-screenshot-group').count(), 2);
   assert.equal(fixture.details.metrics.steps, 3200);
   assert.equal(fixture.activity.notes, 'Evening track workout');
+
+  await page.getByRole('link', { name: 'Back to activities' }).click();
+  await waitForHeading(page, 'Activity history');
+  await page.getByRole('button', { name: 'Read screenshots', exact: true }).click();
+  const workoutScreenshot = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 620;
+    canvas.height = 230;
+    const context = canvas.getContext('2d');
+    context.fillStyle = 'white';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'black';
+    context.font = '32px sans-serif';
+    context.fillText('Workout duration', 28, 65);
+    context.fillText('19:50', 28, 112);
+    context.fillText('3.00 km', 28, 165);
+    return canvas.toDataURL().split(',')[1];
+  });
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: 'workout-summary.png', mimeType: 'image/png', buffer: Buffer.from(workoutScreenshot, 'base64'),
+  });
+  await waitForHeading(page, 'Confirm understood details');
+  await page.getByRole('checkbox', { name: /I have checked the detected details/ }).check();
+  await page.getByRole('button', { name: 'Add info' }).click();
+  const screenshotReview = page.getByRole('dialog', { name: 'Log an activity' });
+  await screenshotReview.getByRole('combobox', { name: 'Save to' }).click();
+  await page.getByRole('option', { name: /Evening track workout/ }).click();
+  await screenshotReview.getByRole('button', { name: 'Update existing activity' }).click();
+  await screenshotReview.waitFor({ state: 'hidden' });
+  assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 1);
+  assert.ok(rpcCalls.includes('athlete_save_activity_with_media'));
+
+  fixture.otherActivity = { ...activity, id: 'a0000000-0000-4000-8000-000000000002', activity_date: '2026-11-19', notes: 'Screenshot copy' };
+  fixture.otherMedia = [{ ...fixture.media[0], id: 'other-screenshot', batch_id: 'other-batch' }];
+  await page.getByRole('link', { name: 'Details', exact: true }).click();
+  await page.getByRole('button', { name: 'Combine activities', exact: true }).click();
+  const combine = page.getByRole('dialog', { name: 'Combine activities' });
+  await combine.getByRole('combobox', { name: 'Other activity' }).click();
+  await page.getByRole('option', { name: /Screenshot copy/ }).click();
+  fixture.rejectUpload = true;
+  const submit = combine.getByRole('button', { name: 'Combine into this activity' });
+  await submit.click();
+  await combine.getByRole('alert').getByText('This operation is unavailable for your account.').waitFor();
+  fixture.rejectUpload = false;
+  await submit.click();
+  await combine.waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
+  assert.equal(await page.locator('.activity-screenshot-group').count(), 4);
+  await page.getByRole('link', { name: 'Back to activities' }).click();
+  await waitForHeading(page, 'Activity history');
+  assert.equal(await page.getByRole('link', { name: 'Details', exact: true }).count(), 1);
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

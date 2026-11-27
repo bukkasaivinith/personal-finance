@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const result = await build({ entryPoints: ['src/lib/athlete-recognition.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
-const { recognizeScreenshot, recognitionReferenceDate, similarActivity, missingRecognitionFields } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+const { recognizeScreenshot, recognitionReferenceDate, missingRecognitionFields } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 const reference = new Date(2026, 10, 16, 12);
 const reading = (text, extras = {}) => ({ text, layoutText: '', confidence: 90, pass: 'original', ...extras });
 
@@ -49,13 +49,6 @@ test('conflicting dates require user selection', () => {
 test('low-confidence noise does not override a confident pass', () => {
   const route = recognizeScreenshot([reading('Run\nDistance: 5 km'), reading('Run\nDistance: 8 km', {confidence:20})], 'km', reference);
   assert.equal(route.activity.distanceMeters, 5000);
-});
-test('possible duplicates require all key fields, not just a matching amount', () => {
-  const route = recognizeScreenshot([reading('Run 2026-11-10\nDistance: 5 km\nDuration: 30:00')], 'km', reference);
-  const activity = {id:'run-one',kind:'run',activityDate:'2026-11-10',distanceMeters:5000,durationSeconds:1800};
-  assert.equal(similarActivity(route,[activity])?.id,'run-one');
-  assert.equal(similarActivity(route,[{...activity,activityDate:'2026-11-11'}]),undefined);
-  assert.equal(similarActivity({...route,activity:{...route.activity,durationSeconds:null}},[activity]),undefined);
 });
 test('relative dates use the athlete timezone across UTC midnight', () => {
   const date = recognitionReferenceDate('Asia/Kolkata',new Date('2026-11-15T20:00:00Z'));
