@@ -64,7 +64,7 @@ import { recognitionReferenceDate, recognizeSamsungScreenshots, recognizeScreens
 import { WorkoutDetailsFields } from '@/components/athlete-workout-details';
 import type { ActivityMediaBatch } from '@/lib/athlete-media';
 import { athleteActivityPath } from '@/lib/navigation';
-import { bestAtDistance, personalBests, runningKinds, type WorkoutDetails } from '@/lib/athlete-workout';
+import { bestAtDistance, personalBests, runningKinds, workoutFileAccept, type WorkoutDetails } from '@/lib/athlete-workout';
 import { AthleteAnalysis } from '@/components/athlete-analysis';
 import { RecoveryEditor, RecoveryHistory } from '@/components/athlete-recovery';
 import { recognizeWhoopRecovery, whoopTone } from '@/lib/athlete-recovery';
@@ -209,9 +209,12 @@ export function ActivityModal({
     } catch (caught) { savingRequest.current = false; setError(errorMessage(caught)); setSaving(false); }
   };
 
-  return <ModalShell eyebrow={editor.screenshots?.length ? 'Screenshot draft' : 'Athlete Hub'} title={entry ? 'Edit activity' : 'Log an activity'} labelId="athlete-activity-title" onClose={() => { if (!savingRequest.current) onClose(); }}>
+  const attachingFile = entry && editor.imported;
+  return <ModalShell eyebrow={editor.screenshots?.length ? 'Screenshot draft' : 'Athlete Hub'} title={attachingFile ? 'Attach workout data' : entry ? 'Edit activity' : 'Log an activity'} labelId="athlete-activity-title" onClose={() => { if (!savingRequest.current) onClose(); }}>
     <form className="modal-form" onSubmit={submit}>
-      {editor.imported || source !== 'manual' ? <p className="form-hint">Review the prefilled values and confirm the activity date before saving.</p> : <p className="modal-description">Capture the essentials first. Pace is calculated automatically when distance and duration are present.</p>}
+      {attachingFile ? <p className="form-hint">Save to attach the workout file to this activity.</p>
+        : editor.imported || source !== 'manual' ? <p className="form-hint">Review the prefilled values and confirm the activity date before saving.</p>
+          : <p className="modal-description">Capture the essentials first. Pace is calculated automatically when distance and duration are present.</p>}
       <div className="form-grid athlete-form-grid">
         <label>Activity type<Select value={kind} onChange={(event) => setKind(event.target.value as AthleteActivityKind)}>{activityKinds.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label>
         <div><DatePicker label="Activity date" value={activityDate} onChange={setActivityDate} /></div>
@@ -230,7 +233,7 @@ export function ActivityModal({
       {editor.screenshots?.length ? <label className="recognition-check"><input type="checkbox" checked={keepScreenshots} disabled={saving}
         onChange={(event) => setKeepScreenshots(event.target.checked)} /> Save screenshots privately with this activity</label> : null}
       {error ? <p className="form-error">{error}</p> : null}
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : entry ? 'Save activity' : 'Save activity'}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : attachingFile ? 'Attach file' : 'Save activity'}</button></div>
     </form>
   </ModalShell>;
 }
@@ -660,7 +663,7 @@ export function AthleteHub({ onNotify }: { onNotify: (message: string) => void }
 
   return <div className="athlete-hub">
     {calendarDay}
-    <input type="file" ref={workoutFileInput} accept=".gpx,.tcx,.fit" hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importWorkout(file); }} />
+    <input type="file" ref={workoutFileInput} accept={workoutFileAccept} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importWorkout(file); }} />
     <SectionHeading title="Athlete Hub" description="A private training journal for your runs, recovery, races and essential strength work." action={<><button className="secondary-button" type="button" onClick={() => setShowSettings(true)}><Settings size={15} /> Settings</button><button className="secondary-button athlete-screenshot-button" type="button" disabled={readingImage} onClick={() => setScreenshotImportOpen(true)}><FileImage size={15} />{readingImage ? 'Reading…' : 'Read screenshots'}</button><button className="secondary-button" type="button" disabled={readingWorkout} onClick={() => workoutFileInput.current?.click()}>{readingWorkout ? 'Reading workout…' : 'Import workout file'}</button><button className="primary-button header-action athlete-add-activity" type="button" onClick={() => setActivityEditor({})}><span className="header-action-icon" aria-hidden="true"><Plus size={15} strokeWidth={2} /></span><span>Add activity</span></button></>} />
     <nav className="athlete-analysis-nav" aria-label="Athlete Hub pages">
       {athleteTabs.map(([id, label]) =>

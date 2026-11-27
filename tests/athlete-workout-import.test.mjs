@@ -7,10 +7,29 @@ const bundle = await build({
   stdin: { contents: "export * from './src/lib/athlete-samsung'; export * from './src/lib/athlete-recognition'; export * from './src/lib/athlete-workout'; export * from './src/lib/athlete-fit'; export * from './src/lib/athlete-recovery';", resolveDir: process.cwd() },
   bundle: true, write: false, format: 'esm', platform: 'node',
 });
-const { readSamsungWorkout, recognizeSamsungScreenshots, personalBests, parseFitWorkout, recognizeWhoopRecovery } = await import(
+const { readSamsungWorkout, recognizeSamsungScreenshots, personalBests, parseFitWorkout, recognizeWhoopRecovery, workoutChartSamples } = await import(
   'data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64')
 );
 const reading = (text) => ({ text, layoutText: '', confidence: 90, pass: 'original' });
+
+test('timed GPS yields speed and pace without crossing stops or track segments', () => {
+  const points = workoutChartSamples([
+    { seconds: 0, latitude: 0, longitude: 0, segment: 0 },
+    { seconds: 10, latitude: .00027, longitude: 0, segment: 0 },
+    { seconds: 20, latitude: .00054, longitude: 0, segment: 0, speed: 12 },
+    { seconds: 90, latitude: .00081, longitude: 0, segment: 0 },
+    { seconds: 100, latitude: .00108, longitude: 0, segment: 1 },
+    { seconds: 110, latitude: .00108, longitude: 0, segment: 1 },
+  ]);
+  assert.ok(Math.abs(points[1].speed - 10.8) < .02);
+  assert.ok(Math.abs(points[1].pace - 333.3) < 1);
+  assert.equal(points[1].estimatedSpeed, true);
+  assert.equal(points[2].pace, 300);
+  assert.equal(points[2].estimatedSpeed, false);
+  assert.deepEqual(points.map(({ speed }) => speed).slice(3), [undefined, undefined, 0]);
+  assert.equal(points[5].pace, undefined);
+  assert.ok(points.every(({ heartRate, cadence }) => heartRate === undefined && cadence === undefined));
+});
 
 test('Samsung workout bundle keeps workout duration, elapsed time, zones and conflicts distinct', () => {
   const screens = [

@@ -54,7 +54,9 @@
 .activity-detail-notes p { margin-top: 4px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .activity-visuals { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
 .activity-visuals .card-title-row { align-items: center; flex-wrap: wrap; }
-.activity-metric-picker { min-width: min(10rem, 100%); }
+.activity-metric-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.activity-metric-picker .secondary-button { min-height: 36px; padding: 5px 10px; font-size: 12px; }
+.activity-metric-picker button[aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); color: var(--green); font-weight: 600; }
 .activity-timeline .workout-controls { align-items: end; margin-top: 12px; }
 .activity-timeline .workout-controls label { display: grid; gap: 4px; }
 .activity-chart, .activity-route-map { display: block; width: 100%; height: auto; margin-top: 14px; }

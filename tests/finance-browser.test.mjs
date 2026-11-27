@@ -151,10 +151,18 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
         if (name === 'athlete_get_dashboard') return json({ activities: [athlete.activity] });
         if (name === 'athlete_get_activity_page') {
           assert.equal(request.postDataJSON().p_activity_id, athlete.activity.id);
-          return json({ activity: athlete.activity, distance_unit: 'km', details: athlete.details, media: athlete.media });
+          return json({ activity: athlete.activity, distance_unit: 'km', timezone: 'Asia/Kolkata', details: athlete.details, media: athlete.media });
         }
         if (name === 'athlete_get_activity_media') {
           return json(athlete.bytes.get(request.postDataJSON().p_media_id));
+        }
+        if (name === 'athlete_save_workout') {
+          const { p_activity_id, p_payload, p_details } = request.postDataJSON();
+          assert.equal(p_activity_id, athlete.activity.id);
+          if (athlete.rejectUpload) return json({ code: '42501', message: 'Fixture rejected the upload' }, 403);
+          Object.assign(athlete.activity, p_payload);
+          athlete.details = { ...athlete.details, ...p_details, metrics: { ...athlete.details.metrics, ...p_details.metrics } };
+          return json(p_activity_id);
         }
         if (name === 'athlete_add_activity_media') {
           const { p_activity_id, p_batch_id, p_media } = request.postDataJSON();
@@ -456,7 +464,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   const fixture = {
     activity,
     details: { metrics: { steps: 3200, maxHeartRate: 172 }, zones: [{ zone: 4, minimum: 160, maximum: 180, seconds: 15, percent: 20 }],
-      samples: [{ seconds: 0, heartRate: 140, latitude: 17, longitude: 78 }, { seconds: 15, heartRate: 172, latitude: 17.001, longitude: 78.002 }] },
+      samples: [{ seconds: 0, heartRate: 140, latitude: 17, longitude: 78 }, { seconds: 15, heartRate: 172, latitude: 17.0003, longitude: 78 }] },
     media: [{ id: 'screenshot-1', batch_id: 'initial', name: 'workout.png', mime: 'image/png', created_at: activity.created_at }],
     bytes: new Map([['screenshot-1', photo]]),
     rejectUpload: false,
@@ -474,6 +482,13 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.getByRole('slider', { name: 'Explore workout timeline' }).focus();
   await page.keyboard.press('End');
   await page.locator('.activity-chart-readout').getByText('172 bpm', { exact: true }).waitFor();
+  const charts = page.getByRole('group', { name: 'Chart metric' });
+  await charts.getByRole('button', { name: 'Speed', exact: true }).click();
+  await page.getByRole('img', { name: 'Speed chart in km/h' }).waitFor();
+  await page.locator('.activity-chart-readout').getByText('8 km/h', { exact: true }).waitFor();
+  await charts.getByRole('button', { name: 'Pace', exact: true }).click();
+  await page.getByRole('img', { name: 'Pace chart in min/km' }).waitFor();
+  await page.locator('.activity-chart-readout').getByText('7:30 min/km', { exact: true }).waitFor();
   assert.equal(await page.getByRole('img', { name: 'workout.png' }).count(), 0);
   assert.ok(!rpcCalls.includes('athlete_get_activity_media'));
   await page.getByText('1 screenshot', { exact: true }).click();
@@ -511,6 +526,49 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   await page.getByRole('link', { name: 'Details', exact: true }).click();
   await waitForHeading(page, 'Workout summary');
   assert.equal(page.url(), activityUrl);
+
+  delete fixture.details.samples;
+  await page.reload();
+  await waitForHeading(page, 'Workout summary');
+  const start = Date.parse(activity.created_at);
+  const points = Array.from({ length: 121 }, (_, index) => (
+    '<trkpt lat="' + (17 + index * .00022483) + '" lon="78"><ele>' + (12 + index / 10) + '</ele>'
+    + '<time>' + new Date(start + index * 10_000).toISOString() + '</time>'
+    + '<extensions><t:TrackPointExtension><t:hr>' + (index === 120 ? 176 : 140)
+    + '</t:hr><t:cad>160</t:cad></t:TrackPointExtension></extensions></trkpt>'
+  ));
+  const gpx = '<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:t="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
+    + '<trk><trkseg>' + points.join('') + '</trkseg></trk></gpx>';
+  const attachWorkout = async (xml) => {
+    const picker = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Attach workout file' }).click();
+    await (await picker).setFiles({ name: 'samsung-run.gtx', mimeType: 'application/xml', buffer: Buffer.from(xml) });
+  };
+  await attachWorkout(gpx.replaceAll('2026-11-20', '2026-11-19'));
+  await page.getByText(/This file is dated .* Open the activity for that date/).waitFor();
+  assert.ok(!rpcCalls.includes('athlete_save_workout'));
+  await attachWorkout(gpx);
+  const review = page.getByRole('dialog', { name: 'Attach workout data' });
+  fixture.rejectUpload = true;
+  await review.getByRole('button', { name: 'Attach file' }).click();
+  await review.getByText('This operation is unavailable for your account.').waitFor();
+  assert.equal(fixture.details.samples, undefined);
+  fixture.rejectUpload = false;
+  await review.getByRole('button', { name: 'Attach file' }).click();
+  await review.waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.getByRole('img', { name: 'Heart rate chart in bpm' }).waitFor();
+  await page.getByRole('slider', { name: 'Explore workout timeline' }).focus();
+  await page.keyboard.press('End');
+  await page.locator('.activity-chart-readout').getByText('176 bpm', { exact: true }).waitFor();
+  await charts.getByRole('button', { name: 'Cadence', exact: true }).click();
+  await page.getByRole('img', { name: 'Cadence chart in spm' }).waitFor();
+  await charts.getByRole('button', { name: 'Elevation', exact: true }).click();
+  await page.getByRole('img', { name: 'Elevation chart in m' }).waitFor();
+  await page.getByRole('img', { name: 'GPS route with start and finish' }).waitFor();
+  assert.equal(await page.locator('.activity-screenshot-group').count(), 2);
+  assert.equal(fixture.details.metrics.steps, 3200);
+  assert.equal(fixture.activity.notes, 'Evening track workout');
 });
 
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {

@@ -1,5 +1,7 @@
 import type { AthleteActivity, AthleteActivityDraft } from './athlete';
 
+export const workoutFileAccept = '.gpx,.gtx,.tcx,.fit';
+
 export const workoutMetrics = [
   ['elapsedSeconds', 'Total duration', 's'], ['totalCalories', 'Total calories', 'kcal'],
   ['steps', 'Steps', ''], ['averagePace', 'Reported average pace', 's/km'], ['bestPace', 'Best pace', 's/km'],
@@ -27,6 +29,43 @@ export type WorkoutDetails = {
   source?: 'Samsung Health' | 'WHOOP' | 'GPX' | 'TCX' | 'FIT';
   fingerprints?: string[];
 };
+
+type WorkoutCoordinate = NonNullable<WorkoutDetails['route']>[number];
+
+export function isWorkoutCoordinate<Point extends Pick<WorkoutSample, 'latitude' | 'longitude'>>(point: Point): point is Point & WorkoutCoordinate {
+  const { latitude, longitude } = point;
+  return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== undefined && longitude !== undefined
+    && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
+}
+
+export function workoutDistanceBetween(a: WorkoutCoordinate, b: WorkoutCoordinate) {
+  const radians = Math.PI / 180;
+  const ratio = Math.sin((b.latitude - a.latitude) * radians / 2) ** 2
+    + Math.cos(a.latitude * radians) * Math.cos(b.latitude * radians) * Math.sin((b.longitude - a.longitude) * radians / 2) ** 2;
+  return 12_742_000 * Math.asin(Math.sqrt(Math.min(1, ratio)));
+}
+
+export function workoutChartSamples(source: WorkoutSample[]) {
+  const ordered = source.filter(({ seconds }) => Number.isFinite(seconds) && seconds >= 0)
+    .sort((a, b) => a.seconds - b.seconds);
+  return ordered.map((point, index) => {
+    const previous = ordered[index - 1];
+    const interval = previous ? point.seconds - previous.seconds : 0;
+    let speed = Number.isFinite(point.speed) ? point.speed : undefined;
+    let estimatedSpeed = false;
+    if (speed === undefined && previous && interval > 0 && interval <= 60
+      && point.segment === previous.segment && isWorkoutCoordinate(previous) && isWorkoutCoordinate(point)) {
+      const estimate = workoutDistanceBetween(previous, point) / interval * 3.6;
+      if (estimate <= 360) {
+        speed = estimate;
+        estimatedSpeed = true;
+      }
+    }
+    // GPS jitter near a stop can yield very large, uninformative pace values.
+    const pace = speed !== undefined && speed >= 1 && Number.isFinite(speed) ? 3600 / speed : undefined;
+    return { ...point, speed, pace, estimatedSpeed };
+  });
+}
 
 export const runningKinds = new Set<AthleteActivityDraft['kind']>(['run', 'treadmill', 'race']);
 

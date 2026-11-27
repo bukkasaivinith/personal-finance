@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { Activity, ArrowLeft, FileImage, Pencil } from 'lucide-react';
+import { Activity, ArrowLeft, FileImage, FileUp, Pencil } from 'lucide-react';
 import { ActivityModal } from '@/components/athlete-hub';
 import { EmptyPanel, SectionHeading } from '@/components/ui';
 import { WorkoutSummary } from '@/components/athlete-workout-details';
@@ -8,6 +8,7 @@ import { WorkoutTrace } from '@/components/athlete-workout-trace';
 import { addAthleteActivityMedia, loadAthleteActivityMedia, loadAthleteActivityPage, saveAthleteActivity } from '@/lib/athlete-api';
 import { formatAthleteDate, formatDistance, formatDuration, formatPace } from '@/lib/athlete';
 import type { ActivityMedia, ActivityMediaBatch } from '@/lib/athlete-media';
+import { workoutFileAccept, type WorkoutDetails } from '@/lib/athlete-workout';
 import { athleteActivitiesPath } from '@/lib/navigation';
 
 type ActivityPageData = Awaited<ReturnType<typeof loadAthleteActivityPage>>;
@@ -138,7 +139,9 @@ function ActivityOverview({ activity, settings, details }: ActivityPageData) {
 export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (message: string) => void }) {
   const [data, setData] = useState<ActivityPageData>();
   const [error, setError] = useState('');
-  const [editing, setEditing] = useState(false);
+  const [editor, setEditor] = useState<{ imported?: WorkoutDetails } | null>(null);
+  const [readingFile, setReadingFile] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [attempt, setAttempt] = useState(0);
   const refresh = () => { setError(''); setAttempt((current) => current + 1); };
 
@@ -162,10 +165,39 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
   }
 
   const { activity, settings, details, media } = data;
+  const attachWorkoutFile = async (file: File) => {
+    setReadingFile(true);
+    try {
+      const { readWorkoutFile } = await import('@/lib/athlete-workout-file');
+      const workout = await readWorkoutFile(file, settings.timezone);
+      if (workout.draft.activityDate && workout.draft.activityDate !== activity.activityDate) {
+        onNotify('This file is dated ' + formatAthleteDate(workout.draft.activityDate) + '. Open the activity for that date.');
+        return;
+      }
+      setEditor({ imported: workout.details });
+    } catch (caught) {
+      onNotify(errorMessage(caught));
+    } finally {
+      setReadingFile(false);
+    }
+  };
+
   return <div className="athlete-activity-page">
     {back}
     <SectionHeading title={activityNames[activity.kind]} description={`${formatAthleteDate(activity.activityDate)} · ${details?.source ?? sourceNames[activity.source]}`}
-      action={<button className="secondary-button" type="button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit activity</button>} />
+      action={<>
+        {!details?.samples?.length ? <>
+          <input ref={fileInput} type="file" accept={workoutFileAccept} hidden onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file && !readingFile) void attachWorkoutFile(file);
+          }} />
+          <button className="secondary-button" type="button" disabled={readingFile} onClick={() => fileInput.current?.click()}>
+            <FileUp size={15} /> {readingFile ? 'Reading workout…' : 'Attach workout file'}
+          </button>
+        </> : null}
+        <button className="secondary-button" type="button" disabled={readingFile} onClick={() => setEditor({})}><Pencil size={15} /> Edit activity</button>
+      </>} />
     {error ? <div className="surface-card" role="alert"><p className="form-error">{error}</p><button className="text-button" type="button" onClick={refresh}>Try again</button></div> : null}
     <ActivityOverview {...data} />
     <WorkoutTrace details={details} distanceUnit={settings.distanceUnit} />
@@ -173,12 +205,12 @@ export function AthleteActivityPage({ id, onNotify }: { id: string; onNotify: (m
       <section className="surface-card activity-detail-section"><h3>Recorded details</h3><WorkoutSummary details={details} distanceUnit={settings.distanceUnit} /></section>
     ) : null}
     <ActivityScreenshots id={id} media={media} onChanged={() => { refresh(); onNotify('Screenshot group saved.'); }} />
-    {editing ? <ActivityModal editor={{ entry: activity, details: details ?? { metrics: {} } }} settings={settings} matchingActivities={[]}
-      onClose={() => setEditing(false)} onSave={async (draft, activityId, workout) => {
+    {editor ? <ActivityModal editor={{ entry: activity, details: editor.imported ?? details ?? { metrics: {} }, imported: Boolean(editor.imported) }}
+      settings={settings} matchingActivities={[]} onClose={() => setEditor(null)} onSave={async (draft, activityId, workout) => {
         await saveAthleteActivity(draft, activityId, workout);
-        setEditing(false);
+        setEditor(null);
         refresh();
-        onNotify('Activity updated.');
+        onNotify(editor.imported ? 'Workout file attached.' : 'Activity updated.');
       }} /> : null}
   </div>;
 }
