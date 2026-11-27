@@ -581,7 +581,9 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   };
   const fixture = {
     activity,
-    details: { metrics: { steps: 3200, maxHeartRate: 172, averageSpeed: 7.4, maximumSpeed: 9.8, averagePace: 482,
+    details: { metrics: { elapsedSeconds: 1200, totalCalories: 220, steps: 3200, maxHeartRate: 172, maxCadence: 170,
+      averageSpeed: 7.4, maximumSpeed: 9.8, averagePace: 482, bestPace: 401, lowestElevation: 582,
+      highestElevation: 591, totalAscent: 50, totalDescent: 130, vo2Max: 44.4, sweatLoss: 775,
       temperature: 23, humidity: 52, windSpeed: 18, verticalOscillation: 9.6, stiffness: 35, flightTime: 196, groundContact: 185, regularity: .93 },
       asymmetry: 'Great',
       zones: [{ zone: 3, minimum: 142, maximum: 161, seconds: 6, percent: 40 },
@@ -619,6 +621,26 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(await charts.getByRole('button', { name: 'Speed', exact: true }).count(), 0);
   assert.equal(await page.getByText(/^(Average speed|Maximum speed|Temperature|Humidity|Wind speed|Vertical oscillation|Stiffness|Flight time|Ground contact|Regularity|Asymmetry rating)$/).count(), 0);
   await page.getByText('Reported average pace', { exact: true }).waitFor();
+  const recordedMetrics = page.locator('.athlete-activity-page .workout-summary');
+  const verifyMetricGrid = async () => {
+    const layout = await recordedMetrics.evaluate((grid) => {
+      const cards = [...grid.children];
+      const boxes = cards.map((card) => card.getBoundingClientRect());
+      return {
+        count: cards.length,
+        rows: new Set(boxes.map(({ top }) => Math.round(top))).size,
+        sameSize: boxes.every(({ width, height }) =>
+          Math.abs(width - boxes[0].width) < 1 && Math.abs(height - boxes[0].height) < 1),
+        fits: grid.scrollWidth <= grid.clientWidth && grid.getBoundingClientRect().right <= window.innerWidth
+          && cards.every((card) => card.scrollWidth <= card.clientWidth),
+      };
+    });
+    assert.equal(layout.count, 13);
+    assert.ok(layout.sameSize && layout.fits, JSON.stringify(layout));
+    return layout.rows;
+  };
+  const desktopMetricRows = await verifyMetricGrid();
+  assert.ok(desktopMetricRows > 1);
   const lapRows = page.locator('.workout-table tbody tr');
   await lapRows.nth(0).getByRole('cell', { name: 'Zone 3' }).waitFor();
   await lapRows.nth(1).getByRole('cell', { name: 'Zone 4' }).waitFor();
@@ -650,6 +672,7 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(await routeMap.locator('.activity-route-grid').count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await routeMap.evaluate((map) => map.getBoundingClientRect().right <= window.innerWidth));
+  assert.ok(await verifyMetricGrid() > desktopMetricRows);
   await page.setViewportSize({ width: 1280, height: 720 });
   await satellite.click();
   assert.equal(await page.locator('.activity-route-tiles img').count(), 0);

@@ -16,6 +16,23 @@
   padding: 0.65rem;
 }
 .workout-summary dd { margin: 0.25rem 0 0; font-weight: 650; }
+.athlete-activity-page .workout-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+  grid-auto-rows: 1fr;
+}
+.athlete-activity-page .workout-summary > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.75rem;
+  background: #f6f8f4;
+  overflow-wrap: anywhere;
+}
+.athlete-activity-page .workout-summary dt { color: #53645a; font-size: 0.8rem; line-height: 1.35; }
+.athlete-activity-page .workout-summary dd { margin: 0; font-size: 1.05rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .workout-zones { margin-block: 18px; }
 .workout-zone-list { list-style: none; margin: 12px 0 0; padding: 4px 13px; border: 1px solid var(--line); border-radius: 12px; }
 .workout-zone {

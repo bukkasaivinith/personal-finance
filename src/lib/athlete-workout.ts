@@ -24,13 +24,13 @@ export function workoutOptionLabel(activity: AthleteActivity, distanceUnit: Dist
 }
 
 export const workoutMetrics = [
-  ['elapsedSeconds', 'Total duration', 's'], ['totalCalories', 'Total calories', 'kcal'],
-  ['steps', 'Steps', ''], ['averagePace', 'Reported average pace', 's/km'], ['bestPace', 'Best pace', 's/km'],
+  ['elapsedSeconds', 'Total duration', 's'], ['steps', 'Steps', ''], ['totalCalories', 'Total calories', 'kcal'],
+  ['averagePace', 'Reported average pace', 's/km'], ['bestPace', 'Best pace', 's/km'], ['maxCadence', 'Maximum cadence', 'spm'],
   ['averageSpeed', 'Average speed', 'km/h'], ['maximumSpeed', 'Maximum speed', 'km/h'],
-  ['maxHeartRate', 'Maximum heart rate', 'bpm'], ['maxCadence', 'Maximum cadence', 'spm'],
+  ['maxHeartRate', 'Maximum heart rate', 'bpm'], ['vo2Max', 'VO₂ max', ''],
   ['lowestElevation', 'Lowest elevation', 'm'], ['highestElevation', 'Highest elevation', 'm'],
   ['totalAscent', 'Total ascent', 'm'], ['totalDescent', 'Total descent', 'm'],
-  ['vo2Max', 'VO₂ max', ''], ['sweatLoss', 'Estimated sweat loss', 'mL'],
+  ['sweatLoss', 'Estimated sweat loss', 'mL'],
   ['temperature', 'Temperature', '°C'], ['humidity', 'Humidity', '%'], ['windSpeed', 'Wind speed', 'km/h'],
   ['verticalOscillation', 'Vertical oscillation', 'cm'], ['stiffness', 'Stiffness', 'kNm'],
   ['flightTime', 'Flight time', 'ms'], ['groundContact', 'Ground contact', 'ms'], ['regularity', 'Regularity', ''],
