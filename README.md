@@ -61,6 +61,13 @@ Do not deploy the new frontend before this migration has succeeded, because it r
 
 If that migration has already been run, apply newer migrations in filename order as they are added. The current follow-ups are [20261111110000_fix_workspace_validation_triggers.sql](supabase/migrations/20261111110000_fix_workspace_validation_triggers.sql), [20261111130000_add_detailed_activity_log.sql](supabase/migrations/20261111130000_add_detailed_activity_log.sql), [20261111150000_add_investments.sql](supabase/migrations/20261111150000_add_investments.sql), and [20261111170000_return_investments_to_funding_account.sql](supabase/migrations/20261111170000_return_investments_to_funding_account.sql). They repair validation, add richer audit details, and introduce investment tracking; none deletes finance data.
 
+### Separate email accounts
+
+1. Apply [20261128120000_private_workspaces_per_user.sql](supabase/migrations/20261128120000_private_workspaces_per_user.sql) after the earlier migrations and before deploying the frontend. In **Supabase → SQL Editor**, run the complete file.
+2. Sign in once with the original account before opening registrations so it can finish claiming any eligible legacy records.
+3. In **Authentication → Sign In / Providers**, enable **Allow new users to sign up** and keep **Confirm email** on for the email provider. Configure custom SMTP to send confirmation links to addresses outside the Supabase project team. Use your production website as the **Site URL**. [Supabase sign-up settings](https://supabase.com/docs/guides/auth/general-configuration) · [Email delivery setup](https://supabase.com/docs/guides/auth/auth-smtp)
+4. Deploy the frontend. Open **Create account** from the sign-in screen and confirm the new email. A new account opens its own workspace with the three standard transaction types.
+
 ### Single-device session protection
 
 Apply [20261112120000_single_device_sessions.sql](supabase/migrations/20261112120000_single_device_sessions.sql) before deploying the matching frontend. It creates one hashed active-session record per user, adds a restrictive RLS session check to every finance/workspace table, and provides the administrator session-status and sign-out controls.

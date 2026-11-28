@@ -1,5 +1,7 @@
 # Single-owner workspace setup
 
+For the current sign-up and deployment steps, see [Separate email accounts](../README.md#separate-email-accounts). The steps below cover the earlier single-owner migration.
+
 This update limits the finance website and its database access to the existing verified account for `bukkasaivinith@gmail.com`. Signup and password recovery remain available. Signup creates an Auth account without granting access to the owner's finance records.
 
 The update removes the workspace switcher, account sharing, invitation and member controls, sharing notifications, and the admin workspace. It also closes the corresponding database access. The migration keeps all users, financial records, and historical sharing and admin entries.

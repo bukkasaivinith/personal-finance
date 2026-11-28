@@ -53,7 +53,10 @@ export async function createAccount(email: string, password: string, firstName: 
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { first_name: firstName.trim(), last_name: lastName.trim() } },
+    options: {
+      data: { first_name: firstName.trim(), last_name: lastName.trim() },
+      emailRedirectTo: window.location.origin,
+    },
   });
   if (!error) {
     return Boolean(data.session);
@@ -90,7 +93,7 @@ export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (!error) {
     try {
-      await requireFinanceOwner();
+      await requireFinanceWorkspaceAccess();
       await activateCurrentSingleDeviceSession();
       // Supabase revokes every older refresh token while the database guard
       // immediately blocks old access tokens from finance data.
@@ -106,6 +109,7 @@ export async function signIn(email: string, password: string): Promise<void> {
     return;
   }
   if (error.status === 429) throw new Error('Too many attempts. Please wait and try again.');
+  if (error.code === 'email_not_confirmed') throw new Error('Open the confirmation link in your email, then sign in.');
   if (!error.status || error.status >= 500) throw new Error('The sign-in service is unavailable. Please try again.');
   throw new Error('Email or password is incorrect.');
 }
@@ -148,11 +152,11 @@ export async function claimWorkspace(): Promise<void> {
   if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
 }
 
-export async function requireFinanceOwner(): Promise<void> {
-  const { data, error } = await supabase.rpc('is_finance_workspace_owner');
-  if (error?.code === 'PGRST202') throw new Error('The single-owner workspace setup is pending in Supabase.');
+export async function requireFinanceWorkspaceAccess(): Promise<void> {
+  const { data, error } = await supabase.rpc('can_open_finance_workspace');
+  if (error?.code === 'PGRST202') throw new Error('The private workspace setup is pending in Supabase.');
   if (error) throw publicApiError(error, 'Could not complete the account request. Please try again.');
-  if (data !== true) throw new Error('Only the owner can open this finance workspace.');
+  if (data !== true) throw new Error('This account cannot open a private workspace.');
 }
 
 export async function deleteCurrentFinanceAccount(): Promise<void> {

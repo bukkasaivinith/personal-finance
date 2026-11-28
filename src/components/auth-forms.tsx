@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, Eye, EyeOff, IndianRupee, Loader2, ShieldCheck } from 'lucide-react';
-import { PASSWORD_MIN_LENGTH, PROFILE_NAME_MAX_LENGTH, isValidEmail, isValidProfileName, saveCurrentFinanceProfileName, sendPasswordReset, signIn, updatePassword } from '@/lib/auth-api';
+import { PASSWORD_MIN_LENGTH, PROFILE_NAME_MAX_LENGTH, createAccount, isValidEmail, isValidProfileName, saveCurrentFinanceProfileName, sendPasswordReset, signIn, updatePassword } from '@/lib/auth-api';
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return <main className="auth-page"><section className="auth-panel">{children}</section></main>;
@@ -17,10 +17,84 @@ function PasswordInput({ id, label, value, onChange, placeholder, autoComplete, 
 
 function Footer() { return <p className="auth-footer"><ShieldCheck size={16} /> Your personal finances, securely in one place.</p>; }
 
-export function SignInForm({ notice, onForgot }: { notice: string; onForgot: () => void }) {
+export function SignInForm({ notice, onForgot, onCreateAccount }: { notice: string; onForgot: () => void; onCreateAccount: () => void }) {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (loading) return; const value = email.trim(); if (!isValidEmail(value)) { setError('Enter a valid email address.'); return; } if (!password) { setError('Enter your password.'); return; } setLoading(true); setError(''); try { await signIn(value, password); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Sign in failed. Please try again.'); setPassword(''); } finally { setLoading(false); } };
-  return <AuthShell><Brand /><div className="auth-heading"><h1>Welcome back</h1><p>Sign in to access your personal financial workspace.</p></div>{notice && <p className="auth-notice" role="status">{notice}</p>}<form className="auth-form" onSubmit={submit} noValidate><div className="auth-field"><label htmlFor="email">Email address</label><div className="auth-input"><input id="email" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={loading} /></div></div><PasswordInput id="password" label="Password" value={password} onChange={setPassword} placeholder="Enter your password" autoComplete="current-password" disabled={loading} /><div className="auth-meta"><button type="button" className="auth-link" onClick={onForgot}>Forgot password?</button></div>{error && <p className="form-error" role="alert">{error}</p>}<button className="auth-button" type="submit" disabled={loading}>{loading ? <><Loader2 size={18} className="auth-spin" /> Signing in</> : <>Sign in <ArrowRight size={18} /></>}</button></form><Footer /></AuthShell>;
+  return <AuthShell>
+    <Brand />
+    <div className="auth-heading"><h1>Welcome back</h1><p>Sign in to access your personal financial workspace.</p></div>
+    {notice && <p className="auth-notice" role="status">{notice}</p>}
+    <form className="auth-form" onSubmit={submit} noValidate>
+      <div className="auth-field"><label htmlFor="email">Email address</label><div className="auth-input"><input id="email" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={loading} /></div></div>
+      <PasswordInput id="password" label="Password" value={password} onChange={setPassword} placeholder="Enter your password" autoComplete="current-password" disabled={loading} />
+      <div className="auth-meta"><button type="button" className="auth-link" onClick={onForgot} disabled={loading}>Forgot password?</button></div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button className="auth-button" type="submit" disabled={loading}>{loading ? <><Loader2 size={18} className="auth-spin" /> Signing in</> : <>Sign in <ArrowRight size={18} /></>}</button>
+    </form>
+    <div className="auth-center"><button type="button" className="auth-link" onClick={onCreateAccount} disabled={loading}>Create account</button></div>
+    <Footer />
+  </AuthShell>;
+}
+
+export function CreateAccountForm({ onBack }: { onBack: () => void }) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [checkEmail, setCheckEmail] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (loading) return;
+    const address = email.trim();
+    if (!isValidProfileName(firstName) || !isValidProfileName(lastName)) {
+      setError('Enter your first name and last name.');
+      return;
+    }
+    if (!isValidEmail(address)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Use at least ${PASSWORD_MIN_LENGTH} characters for your password.`);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const signedIn = await createAccount(address, password, firstName, lastName);
+      setPassword('');
+      if (!signedIn) setCheckEmail(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'We could not create your account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return <AuthShell>
+    <Brand />
+    <div className="auth-heading">
+      <h1>{checkEmail ? 'Check your email' : 'Create account'}</h1>
+      {!checkEmail && <p>Set up a private workspace with your email address.</p>}
+    </div>
+    {checkEmail
+      ? <p className="auth-notice" role="status">If this email can be registered, a confirmation link is on its way. Open it to finish setting up your account.</p>
+      : <form className="auth-form" onSubmit={submit} noValidate>
+        <div className="auth-name-grid">
+          <div className="auth-field"><label htmlFor="create-first-name">First name</label><div className="auth-input"><input id="create-first-name" autoComplete="given-name" maxLength={PROFILE_NAME_MAX_LENGTH} value={firstName} onChange={(event) => setFirstName(event.target.value)} disabled={loading} /></div></div>
+          <div className="auth-field"><label htmlFor="create-last-name">Last name</label><div className="auth-input"><input id="create-last-name" autoComplete="family-name" maxLength={PROFILE_NAME_MAX_LENGTH} value={lastName} onChange={(event) => setLastName(event.target.value)} disabled={loading} /></div></div>
+        </div>
+        <div className="auth-field"><label htmlFor="create-email">Email address</label><div className="auth-input"><input id="create-email" type="email" inputMode="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} disabled={loading} /></div></div>
+        <PasswordInput id="create-password" label="Password" value={password} onChange={setPassword} placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`} autoComplete="new-password" disabled={loading} />
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="auth-button" type="submit" disabled={loading}>{loading ? 'Creating account' : <>Create account <ArrowRight size={18} /></>}</button>
+      </form>}
+    <div className="auth-center"><button type="button" className="auth-link" onClick={onBack} disabled={loading}>Back to sign in</button></div>
+    <Footer />
+  </AuthShell>;
 }
 
 export function CompleteProfileForm({ email, onComplete }: { email: string; onComplete: (firstName: string, lastName: string) => void }) {

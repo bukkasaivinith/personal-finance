@@ -32,10 +32,11 @@ test('IPO accounting on the complete application migration history', async (t) =
  const financeReadsMigration = '20261124110000_scope_finance_reads.sql';
  const savingsEmojiMigration = '20261126120000_savings_account_emojis.sql';
  const standardTypesMigration = '20261127150000_standard_transaction_types.sql';
+ const privateWorkspacesMigration = '20261128120000_private_workspaces_per_user.sql';
  for (const name of (await readdir(directory)).filter(n => n.endsWith('.sql')).sort()) {
   if ([ownerMigration, disableIpoMigration, portfolioMigration, dematLotsMigration, editDematMigration, manageApplicationsMigration,
    allotmentDateMigration, savingsMigration, ipoResultsMigration, savingsHistoryMigration, ipoPresentValueMigration, ipoNotAllottedMigration,
-   financeReadsMigration, savingsEmojiMigration, standardTypesMigration].includes(name)) continue; // Test each upgrade with existing data.
+   financeReadsMigration, savingsEmojiMigration, standardTypesMigration, privateWorkspacesMigration].includes(name)) continue; // Test each upgrade with existing data.
   try { await db.exec(await readFile(new URL(name, directory), 'utf8')); }
   catch (error) { throw new Error(`Migration ${name}: ${error.message}`, { cause: error }); }
  }
@@ -851,17 +852,132 @@ test('IPO accounting on the complete application migration history', async (t) =
   const investment = await scalar('SELECT public.record_investment($1,$2,$3,$4,$5,CURRENT_DATE)', ['New investment', investmentType, '', bank, 50]);
   assert.equal(await scalar('SELECT transaction_kind FROM public.transactions WHERE investment_id=$1', [investment]), 'expense');
  });
- await t.test('self-deletion clears private records and a new signup cannot inherit the owner slot',async()=>{
+ const asUser = async (userId, sessionId) => {
+  await db.exec('RESET ROLE');
+  await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: userId, session_id: sessionId })]);
+  await db.exec('SET ROLE authenticated');
+ };
+ const openWorkspace = () => db.exec('SELECT public.activate_current_single_device_session(); SELECT public.open_finance_workspace()');
+ const transactionIds = async (userId) =>
+  (await db.query('SELECT id FROM public.get_finance_transaction_page($1)', [userId])).rows.map(({ id }) => id);
+ const readPortfolio = () => scalar('SELECT public.get_ipo_portfolio()');
+ const secondUser = randomUUID(), secondSession = randomUUID();
+ let secondTransaction;
+ await t.test('verified email accounts each open a private workspace after the single-owner upgrade', async () => {
+  const ownerTransactions = await transactionIds(owner);
+  assert.ok(ownerTransactions.length > 0);
+  const ownerPortfolio = await readPortfolio();
+  const ownerApplication = ownerPortfolio.applications[0].id;
+  const ownerSavings = await scalar("SELECT id FROM public.savings_accounts WHERE name='Emergency fund'");
+  const ownerRecurring = await scalar('SELECT id FROM public.recurring_entries ORDER BY id LIMIT 1');
+  const workout = { kind: 'run', activity_date: '2026-11-20', duration_seconds: 1200, distance_meters: 3000, source: 'manual' };
+  const image = [{ name: 'route.png', mime: 'image/png', data: 'iVBORw0KGgo=' }];
+  const ownerActivity = await scalar('SELECT public.athlete_save_activity_with_media(NULL,$1,NULL,$2,$3)',
+   [JSON.stringify(workout), randomUUID(), JSON.stringify(image)]);
+  const ownerAttachment = (await scalar('SELECT public.athlete_get_activity_page($1)', [ownerActivity])).media[0].id;
+
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(new URL(privateWorkspacesMigration, directory), 'utf8'));
+  const unownedAccount = await scalar("INSERT INTO public.accounts(user_id,name,opening_balance,opening_balance_date,is_liability) VALUES(NULL,'Unclaimed legacy account',0,CURRENT_DATE,false) RETURNING id");
+  await db.query('INSERT INTO auth.users(id,email,email_confirmed_at,raw_user_meta_data) VALUES($1,$2,NULL,$3)',
+   [secondUser, 'second-workspace@example.test', JSON.stringify({ first_name: 'Second', last_name: 'User' })]);
+  await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)', [secondSession, secondUser]);
+
+  await asUser(secondUser, secondSession);
+  assert.equal(await scalar('SELECT public.can_open_finance_workspace()'), false);
+  await assert.rejects(openWorkspace(), /verified email/);
+  await db.exec('RESET ROLE');
+  await db.query('UPDATE auth.users SET email_confirmed_at=now() WHERE id=$1', [secondUser]);
+
+  await asUser(secondUser, secondSession);
+  assert.equal(await scalar('SELECT public.can_open_finance_workspace()'), true);
+  assert.equal(await scalar('SELECT public.is_finance_workspace_owner()'), true);
+  await openWorkspace();
+  await openWorkspace();
+  assert.equal(await scalar('SELECT first_name FROM public.get_current_finance_profile()'), 'Second');
+  assert.equal(await scalar('SELECT owner_id FROM public.list_accessible_workspaces()'), secondUser);
+  assert.deepEqual(await transactionIds(secondUser), []);
+  await assert.rejects(transactionIds(owner), /unavailable/);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.accounts')), 0);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_accounts')), 0);
+  assert.deepEqual((await readPortfolio()).applications, []);
+  assert.deepEqual((await scalar('SELECT public.athlete_get_dashboard()')).activities, []);
+  await assert.rejects(scalar('SELECT public.athlete_get_activity_page($1)', [ownerActivity]), /unavailable/);
+  await assert.rejects(scalar('SELECT public.athlete_get_activity_media($1)', [ownerAttachment]), /unavailable/);
+  await assert.rejects(scalar('SELECT public.claim_unowned_finance_data()'), /permission denied/);
+
+  const standardTypes = (await db.query('SELECT id,kind FROM public.transaction_types WHERE is_standard ORDER BY kind')).rows;
+  assert.deepEqual(standardTypes.map(({ kind }) => kind), ['expense', 'income', 'transfer']);
+  const secondBank = await scalar("INSERT INTO public.accounts(user_id,name,opening_balance,opening_balance_date,is_liability) VALUES(auth.uid(),'Private bank',10000,'2026-01-01',false) RETURNING id");
+  const expenseType = standardTypes[0].id;
+  const secondCategory = await scalar("SELECT public.create_finance_category('Private purchases',NULL,NULL,ARRAY[$1]::uuid[])", [expenseType]);
+  const addExpense = (account) => scalar(
+   "INSERT INTO public.transactions(user_id,name,transaction_type_id,category_id,amount,transaction_date,account_id) VALUES(auth.uid(),'Private expense',$1,$2,25,CURRENT_DATE,$3) RETURNING id",
+   [expenseType, secondCategory, account]);
+  secondTransaction = await addExpense(secondBank);
+  assert.deepEqual(await transactionIds(secondUser), [secondTransaction]);
+  await assert.rejects(addExpense(bank), /account.*(available|workspace)/i);
+  await assert.rejects(db.query('UPDATE public.transactions SET recurring_entry_id=$1 WHERE id=$2', [ownerRecurring, secondTransaction]), /recurring entry is unavailable/);
+  await assert.rejects(db.query('UPDATE public.transactions SET investment_id=$1 WHERE id=$2', [investment, secondTransaction]), /investment is unavailable/);
+  await assert.rejects(scalar('SELECT public.delete_transaction($1)', [ownerTransactions[0]]), /unavailable/);
+  await assert.rejects(scalar("SELECT public.record_savings_movement($1,$2,'deposit',10,'')", [ownerSavings, randomUUID()]), /unavailable|no longer available/);
+  const secondSavings = await scalar("INSERT INTO public.savings_entries(name,amount,saved_on,storage_type) VALUES('Private savings',100,CURRENT_DATE,'cash') RETURNING id");
+  const demat = await scalar("SELECT public.save_ipo_demat_account('Private holder','','self','Kite')");
+  const draft = { company_name: 'Private IPO', classification: 'SME', application_date: '2026-01-20', issue_price: 100, lot_size: 10, account_id: secondBank };
+  const [secondApplication] = await scalar('SELECT public.save_ipo_portfolio_applications($1,$2,$3,1)',
+   [randomUUID(), JSON.stringify(draft), JSON.stringify([{ demat_id: demat, lots: 1 }])]);
+  assert.deepEqual((await readPortfolio()).applications.map(({ id }) => id), [secondApplication]);
+  await assert.rejects(scalar('SELECT public.set_ipo_application_result($1,50,NULL)', [ownerApplication]), /unavailable|no longer available/);
+
+  await db.exec('RESET ROLE');
+  const formerMemberSession = await scalar('SELECT id FROM auth.sessions WHERE user_id=$1', [other]);
+  await asUser(other, formerMemberSession);
+  await openWorkspace();
+  assert.equal(await scalar('SELECT public.is_platform_admin()'), false);
+  assert.deepEqual(await transactionIds(other), []);
+  await assert.rejects(transactionIds(owner), /unavailable/);
+  await assert.rejects(scalar('SELECT public.get_workspace_sharing($1)', [owner]), /permission denied/);
+  await assert.rejects(scalar('SELECT * FROM public.list_platform_users()'), /permission denied/);
+
+  await asUser(owner, session);
+  assert.equal(await scalar('SELECT public.validate_current_single_device_session()'), true);
+  assert.deepEqual(await transactionIds(owner), ownerTransactions);
+  assert.deepEqual(await readPortfolio(), ownerPortfolio);
+  assert.equal((await db.query('SELECT id FROM public.savings_accounts WHERE id=$1', [secondSavings])).rows.length, 0);
+  assert.equal((await db.query('UPDATE public.transactions SET amount=10 WHERE id=$1 RETURNING id', [secondTransaction])).rows.length, 0);
+
+  await asUser(secondUser, secondSession);
+  assert.equal(await scalar('SELECT public.validate_current_single_device_session()'), true);
+  assert.deepEqual(await transactionIds(secondUser), [secondTransaction]);
+  await db.exec('RESET ROLE');
+  assert.equal(await scalar('SELECT user_id FROM public.accounts WHERE id=$1', [unownedAccount]), null);
+  await db.query('UPDATE public.profiles SET is_suspended=true WHERE id=$1', [secondUser]);
+  await asUser(secondUser, secondSession);
+  assert.equal(await scalar('SELECT public.can_open_finance_workspace()'), false);
+  assert.equal(await scalar('SELECT public.validate_current_single_device_session()'), false);
+  await assert.rejects(transactionIds(secondUser), /session/);
+  await db.exec('RESET ROLE');
+  await db.query('UPDATE public.profiles SET is_suspended=false WHERE id=$1', [secondUser]);
+  await asUser(owner, session);
+ });
+ await t.test('self-deletion clears only the signed-in user and a new signup starts empty', async () => {
+  await asUser(owner, session);
   await db.query('SELECT public.delete_my_finance_account()');
   await db.exec('RESET ROLE');
   assert.equal(Number(await scalar('SELECT count(*) FROM public.ipo_events WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_entries WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM public.savings_movements WHERE user_id=$1',[owner])),0);
   assert.equal(Number(await scalar('SELECT count(*) FROM auth.users WHERE id=$1',[owner])),0);
+  assert.equal(await scalar('SELECT user_id FROM public.finance_workspace_owner'), owner);
+  assert.equal(await scalar('SELECT user_id FROM public.transactions WHERE id=$1', [secondTransaction]), secondUser);
   const replacement = randomUUID();
+  const replacementSession = randomUUID();
   await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[replacement,'bukkasaivinith@gmail.com']);
-  await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:replacement})]);
-  await db.exec('SET ROLE authenticated');
-  assert.equal(await scalar('SELECT public.is_finance_workspace_owner()'),false);
+  await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)', [replacementSession, replacement]);
+  await asUser(replacement, replacementSession);
+  await openWorkspace();
+  assert.deepEqual(await transactionIds(replacement), []);
+  assert.equal(Number(await scalar('SELECT count(*) FROM public.accounts')), 0);
+  assert.deepEqual((await readPortfolio()).applications, []);
  });
 });

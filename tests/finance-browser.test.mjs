@@ -12,10 +12,12 @@ const fixtureId = 'a0000000-0000-4000-8000-000000000001';
 const expires = Math.floor(Date.now() / 1000) + 3600;
 const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const user = { id: fixtureId, email: 'owner@example.test', aud: 'authenticated', user_metadata: {}, app_metadata: {}, created_at: '2026-11-01T00:00:00Z' };
-const token = b64({ alg: 'HS256', typ: 'JWT' }) + '.' + b64({ sub: fixtureId, session_id: fixtureId, exp: expires, role: 'authenticated' }) + '.fixture';
-const model = {
-  access_token: token, refresh_token: 'fixture-refresh-value', expires_in: 3600, expires_at: expires, token_type: 'bearer', user,
-};
+function sessionFor(user) {
+  const payload = { sub: user.id, session_id: user.id, exp: expires, role: 'authenticated' };
+  const token = b64({ alg: 'HS256', typ: 'JWT' }) + '.' + b64(payload) + '.fixture';
+  return { access_token: token, refresh_token: 'fixture-refresh-' + user.id, expires_in: 3600, expires_at: expires, token_type: 'bearer', user };
+}
+const model = sessionFor(user);
 const transaction = {
   id: fixtureId, user_id: fixtureId, name: 'Fixture <draft> & tea', transaction_type_id: fixtureId,
   transaction_type_name: 'Groceries', transaction_kind: 'expense', category_id: null, category_name: null,
@@ -74,7 +76,7 @@ async function startFixture(t, mapKey = '') {
   return { browser, origin: 'http://127.0.0.1:' + server.address().port };
 }
 
-async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }, athlete, finance) {
+async function newPage(browser, transactions = [transaction], savingsActivity = { openings: [], movements: [] }, athlete, finance, signupSession) {
   const page = await browser.newPage({ serviceWorkers: 'allow' });
   const rpcCalls = [];
   const rpcPaths = [];
@@ -94,6 +96,8 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin !== api) return route.abort();
+    const authorization = request.headers().authorization;
+    const session = signupSession && authorization === 'Bearer ' + signupSession.access_token ? signupSession : model;
     const json = (data, status = 200, extra = {}) => route.fulfill({
       status, json: data, headers: { 'access-control-allow-origin': '*', ...extra },
     });
@@ -106,10 +110,11 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
     if (url.pathname.endsWith('/token')) {
       const input = request.postDataJSON();
       if (input?.email === 'limited@example.test') return json({ msg: 'rate limit', code: 'over_request_rate_limit' }, 429);
-      return json(model);
+      return json(signupSession && input?.email === signupSession.user.email ? signupSession : model);
     }
+    if (url.pathname.endsWith('/signup') && signupSession) return json({ user: signupSession.user });
     if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } });
-    if (url.pathname.endsWith('/user')) return json(user);
+    if (url.pathname.endsWith('/user')) return json(session.user);
     const savingsPage = (rows) => json(rows, 200, {
       'content-range': rows.length ? `0-${rows.length - 1}/${rows.length}` : '*/0',
       'access-control-expose-headers': 'content-range',
@@ -156,13 +161,18 @@ async function newPage(browser, transactions = [transaction], savingsActivity = 
       const name = url.pathname.split('/').pop();
       rpcCalls.push(name);
       rpcPaths.push([name, new URL(request.frame().url()).pathname]);
-      if (name === 'is_finance_workspace_owner' || name === 'validate_current_single_device_session') return json(true);
-      if (name === 'get_current_finance_profile') return json([{ id: fixtureId, email: user.email, first_name: 'Fixture', last_name: 'Owner' }]);
+      if (name === 'can_open_finance_workspace' || name === 'validate_current_single_device_session') return json(true);
+      if (name === 'get_current_finance_profile') {
+        const { id, email, user_metadata: metadata } = session.user;
+        return json([{ id, email, first_name: metadata.first_name ?? 'Fixture', last_name: metadata.last_name ?? 'Owner' }]);
+      }
       if (name === 'get_finance_transaction_page') {
         if (ledgerError) return json({ code: 'XX000', message: 'PRIVATE_FIXTURE_DATABASE_DIAGNOSTIC' }, 500);
-        assert.equal(request.headers().authorization, 'Bearer ' + token);
+        assert.equal(authorization, 'Bearer ' + session.access_token);
         const input = request.postDataJSON();
-        return json(input?.p_after_id ? [] : ledger.filter((row) => !input?.p_scheduled_only || row.transaction_source === 'scheduled'));
+        assert.equal(input.p_owner_id, session.user.id);
+        return json(input.p_after_id ? [] : ledger.filter((row) => row.user_id === session.user.id
+          && (!input.p_scheduled_only || row.transaction_source === 'scheduled')));
       }
       if (name === 'get_finance_transaction_usage') return json({ types: { [fixtureId]: 1 }, categories: {} });
       if (name === 'get_ipo_portfolio') return json({ applications: [], demat_accounts: [], allotment_date_supported: true });
@@ -891,10 +901,56 @@ test('Athlete Hub opens a private activity page with a chart, a route, and expan
   assert.equal(page.url(), activityUrl);
 });
 
+test('a different email can create an account and open its own private workspace', { timeout: 120000 }, async (t) => {
+  const { browser, origin } = await startFixture(t);
+  const newUser = { ...user, id: 'a0000000-0000-4000-8000-000000000002', email: 'new@example.test',
+    user_metadata: { first_name: 'New', last_name: 'Member' } };
+  const newSession = sessionFor(newUser);
+  const { page, rpcCalls } = await newPage(browser, undefined, undefined, undefined, undefined, newSession);
+  const signOut = () => page.locator('.sidebar').getByRole('button', { name: 'Sign out' }).click();
+  await page.goto(origin + '/transactions');
+  await signIn(page);
+  await page.getByText(transaction.name, { exact: true }).first().waitFor();
+  await signOut();
+  await waitForHeading(page, 'Welcome back');
+  rpcCalls.length = 0;
+
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  await waitForHeading(page, 'Create account');
+  await page.getByLabel('First name', { exact: true }).fill('New');
+  await page.getByLabel('Last name', { exact: true }).fill('Member');
+  await page.getByLabel('Email address', { exact: true }).fill(newUser.email);
+  await page.getByLabel('Password', { exact: true }).fill('fixture-password-do-not-use');
+  const signupRequest = page.waitForRequest((request) => request.url().startsWith(api + '/auth/v1/signup') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  const signup = await signupRequest;
+  assert.equal(signup.postDataJSON().email, newUser.email);
+  assert.deepEqual(signup.postDataJSON().data, newUser.user_metadata);
+  assert.equal(new URL(signup.url()).searchParams.get('redirect_to'), origin);
+  await waitForHeading(page, 'Check your email');
+  assert.equal(await page.locator('.sidebar').count(), 0);
+  assert.ok(!rpcCalls.includes('open_finance_workspace'));
+
+  const fragment = new URLSearchParams({ type: 'signup', access_token: newSession.access_token,
+    refresh_token: newSession.refresh_token, expires_in: '3600', token_type: 'bearer' });
+  await page.goto(origin + '/#' + fragment);
+  await waitForHeading(page, 'No transactions yet');
+  assert.ok(rpcCalls.includes('can_open_finance_workspace'));
+  assert.equal(await page.getByText(transaction.name, { exact: true }).count(), 0);
+  await page.locator('.sidebar').getByRole('link', { name: 'Transactions', exact: true }).click();
+  await waitForHeading(page, 'No transactions yet');
+  await page.reload();
+  await waitForHeading(page, 'No transactions yet');
+  await signOut();
+  await waitForHeading(page, 'Welcome back');
+  await signIn(page);
+  await page.getByText(transaction.name, { exact: true }).first().waitFor();
+});
+
 test('a password recovery link opens the recovery form before the finance workspace', { timeout: 120000 }, async (t) => {
   const { browser, origin } = await startFixture(t);
   const { page, rpcCalls } = await newPage(browser);
-  const fragment = new URLSearchParams({ type: 'recovery', access_token: token, refresh_token: model.refresh_token, expires_in: '3600', token_type: 'bearer' });
+  const fragment = new URLSearchParams({ type: 'recovery', access_token: model.access_token, refresh_token: model.refresh_token, expires_in: '3600', token_type: 'bearer' });
   await page.goto(origin + '/#' + fragment);
   await waitForHeading(page, 'Choose a new password');
   assert.ok(!rpcCalls.includes('get_finance_transaction_page'));
